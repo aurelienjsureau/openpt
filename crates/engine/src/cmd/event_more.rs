@@ -73,7 +73,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "event.select_split_notes",
             "Select/Split Notes...",
             ["Event", "MIDI Operations"],
-            None,
+            Some("Alt+Y"),
             "{clips?, pitch_from?: 0, pitch_to?: 127, action?: select|split} — split moves the matching notes to a new MIDI track",
             has_selection,
             select_split

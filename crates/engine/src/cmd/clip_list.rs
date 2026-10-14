@@ -7,7 +7,19 @@ use std::collections::BTreeSet;
 const CLEAR: &str = "clip.clear";
 
 pub fn specs() -> Vec<CommandSpec> {
-    vec![cmd!(
+    vec![
+        cmd!(noundo "clip_list.select_all", "Select All Clips", ["Clip List"], Some("Cmd+Shift+A"), "{}", always, |e, _| {
+            let s = e.session_mut();
+            s.edit.selected_sources = s.sources.iter().map(|x| x.id).collect();
+            Ok(json!({"sources": s.edit.selected_sources.len()}))
+        }),
+        cmd!(noundo "clip_list.select_unused", "Select Unused Clips", ["Clip List"], Some("Cmd+Shift+U"), "{}", always, |e, _| {
+            let s = e.session_mut();
+            let used: Vec<_> = s.tracks.iter().flat_map(|t| t.playlists.iter()).flat_map(|pl| &pl.clips).filter_map(|c| c.source()).collect();
+            s.edit.selected_sources = s.sources.iter().map(|x| x.id).filter(|id| !used.contains(id)).collect();
+            Ok(json!({"sources": s.edit.selected_sources.len()}))
+        }),
+        cmd!(
         "clip.clear",
         "Clear Clips",
         [],

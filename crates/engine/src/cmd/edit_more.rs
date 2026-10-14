@@ -99,7 +99,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "edit.paste_merge_midi",
             "Merge MIDI",
             ["Edit", "Paste Special"],
-            None,
+            Some("Alt+M"),
             "{tracks?, at?} — merges copied MIDI notes into existing MIDI clips instead of replacing them",
             has_clipboard,
             paste_merge_midi
@@ -122,7 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_automation_clipboard,
             paste_to_current_automation
         ),
-        cmd!(noundo "edit.play_timeline", "Play Timeline", ["Edit", "Selection"], None, "{} — plays the timeline selection", always, |e, _| {
+        cmd!(noundo "edit.play_timeline", "Play Timeline", ["Edit", "Selection"], Some("Alt+]"), "{} — plays the timeline selection", always, |e, _| {
             let s = e.session();
             let r = if s.edit.timeline_selection.is_empty() { s.edit.selection } else { s.edit.timeline_selection };
             e.transport_requests.push(TransportRequest::Locate(r.start));

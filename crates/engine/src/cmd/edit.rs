@@ -56,18 +56,42 @@ pub fn specs() -> Vec<CommandSpec> {
             s.edit.selection.end = s.edit.selection.start;
             Ok(json!({}))
         }),
-        cmd!(noundo "edit.selection_to_timeline", "Change Timeline to Match Edit", ["Edit", "Selection"], Some("Alt+Shift+5"), "{}", always, |e, _| {
+        cmd!(noundo "edit.selection_to_timeline", "Change Timeline to Match Edit", ["Edit", "Selection"], Some("Alt+Shift+6"), "{}", always, |e, _| {
             let s = e.session_mut();
             s.edit.timeline_selection = s.edit.selection;
             Ok(json!({}))
         }),
-        cmd!(noundo "edit.timeline_to_selection", "Change Edit to Match Timeline", ["Edit", "Selection"], Some("Alt+Shift+6"), "{}", always, |e, _| {
+        cmd!(noundo "edit.timeline_to_selection", "Change Edit to Match Timeline", ["Edit", "Selection"], Some("Alt+Shift+5"), "{}", always, |e, _| {
             let s = e.session_mut();
             s.edit.selection = s.edit.timeline_selection;
             Ok(json!({}))
         }),
-        cmd!(noundo "edit.move_selection_left", "Move Edit Left", ["Edit", "Selection"], Some("Cmd+Alt+L"), "{}", always, |e, _| shift_selection(e, -1)),
-        cmd!(noundo "edit.move_selection_right", "Move Edit Right", ["Edit", "Selection"], Some("Cmd+Alt+'"), "{}", always, |e, _| shift_selection(e, 1)),
+        cmd!(noundo "edit.extend_to_start", "Extend Selection to Session Start", [], None, "{}", always, |e, _| {
+            let s = e.session_mut();
+            let end = s.edit.selection.end.max(s.edit.selection.start);
+            s.edit.selection = Range::new(0, end);
+            Ok(json!({"end": end}))
+        }),
+        cmd!(noundo "edit.extend_to_end", "Extend Selection to Session End", [], None, "{}", always, |e, _| {
+            let s = e.session_mut();
+            let end = s.content_end().max(s.edit.selection.end);
+            s.edit.selection = Range::new(s.edit.selection.start, end);
+            Ok(json!({"end": end}))
+        }),
+        cmd!(noundo "edit.insertion_to_selection_start", "Insertion to Selection Start", [], None, "{}", always, |e, _| {
+            let s = e.session_mut();
+            let at = s.edit.selection.start;
+            s.edit.selection = Range::new(at, at);
+            Ok(json!({"at": at}))
+        }),
+        cmd!(noundo "edit.insertion_to_selection_end", "Insertion to Selection End", [], None, "{}", always, |e, _| {
+            let s = e.session_mut();
+            let at = s.edit.selection.end;
+            s.edit.selection = Range::new(at, at);
+            Ok(json!({"at": at}))
+        }),
+        cmd!(noundo "edit.move_selection_left", "Move Edit Left", ["Edit", "Selection"], Some("Cmd+Alt+Ctrl+L"), "{}", always, |e, _| shift_selection(e, -1)),
+        cmd!(noundo "edit.move_selection_right", "Move Edit Right", ["Edit", "Selection"], Some("Cmd+Alt+Ctrl+'"), "{}", always, |e, _| shift_selection(e, 1)),
         cmd!(noundo "edit.halve_selection", "Halve Edit", ["Edit", "Selection"], None, "{}", always, |e, _| scale_selection(e, 0.5)),
         cmd!(noundo "edit.double_selection", "Double Edit", ["Edit", "Selection"], None, "{}", always, |e, _| scale_selection(e, 2.0)),
         cmd!(noundo "edit.extend_selection_up", "Extend Edit Up", ["Edit", "Selection"], Some("Ctrl+Shift+P"), "{}", has_tracks, |e, _| extend_tracks(e, -1)),

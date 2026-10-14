@@ -110,6 +110,51 @@ fn fixed(app: &mut SoundApp, key: Key, m: Modifiers, mac: bool) -> bool {
             let _ = app.run("markers.add", json!({}));
             true
         }
+        Key::Enter if !m.alt && (m.command || m.shift) => {
+            let id = match (m.command, m.shift) {
+                (true, false) => "transport.go_to_end",
+                (false, true) => "edit.extend_to_start",
+                _ => "edit.extend_to_end",
+            };
+            let _ = app.run(id, json!({}));
+            true
+        }
+        Key::Space if m.alt && !m.command && !m.shift => {
+            let _ = app.run("options.transport_online", json!({}));
+            true
+        }
+        Key::Escape if plain && app.ui.window == MainWindow::Edit => {
+            let tools = ["zoom", "trim", "selector", "grabber", "scrubber", "pencil"];
+            let now = app.engine.session().edit.tool.id();
+            let next = tools.iter().position(|t| *t == now).map_or(0, |i| (i + 1) % tools.len());
+            let _ = app.run("edit.tool", json!({"tool": tools[next]}));
+            true
+        }
+        Key::ArrowUp | Key::ArrowDown if plain && app.ui.window == MainWindow::Edit => {
+            let id = if key == Key::ArrowDown { "edit.insertion_to_selection_start" } else { "edit.insertion_to_selection_end" };
+            let _ = app.run(id, json!({}));
+            true
+        }
+        Key::ArrowUp | Key::ArrowDown if m.shift && !m.command && !m.alt && !m.ctrl => {
+            let _ = app.run("track.playlist_step", json!({"direction": if key == Key::ArrowUp { -1 } else { 1 }}));
+            true
+        }
+        Key::E if m.alt && m.shift && !m.command => {
+            let _ = app.run("view.zoom_toggle", json!({"keep": true}));
+            true
+        }
+        Key::Minus if m.alt && !m.shift && !m.command => {
+            let _ = app.run("track.view_toggle", json!({}));
+            true
+        }
+        Key::Backspace | Key::Delete if plain => {
+            let _ = app.run("edit.clear", json!({}));
+            true
+        }
+        Key::R if m.command && m.shift && !m.alt => {
+            crate::menus::invoke_shortcut_dialog(app, "clip.rename");
+            true
+        }
         Key::Plus | Key::Equals | Key::Minus if m.shift && !m.command && !m.ctrl && app.ui.window == MainWindow::Edit => {
             let step = if key == Key::Minus { -1 } else { 1 };
             let _ = app.run(if m.alt { "view.nudge" } else { "view.grid" }, json!({"step": step}));

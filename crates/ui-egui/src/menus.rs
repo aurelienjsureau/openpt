@@ -21,6 +21,8 @@ pub const UI_COMMANDS: &[(&str, &str, &str, Option<&str>)] = &[
     ("window.audio_health", "Session Audio Health", "", None),
     ("window.about", "About OpenPT", "", None),
     ("window.dashboard", "Dashboard", "File > Dashboard...", None),
+    ("transport.discard_take", "Stop and Discard Take", "", Some("Cmd+.")),
+    ("clip_list.find", "Find Clip", "", Some("Cmd+Shift+F")),
     ("window.preferences", "Preferences", "Setup > Preferences...", None),
     ("window.close", "Close Window", "Window > Close Window", Some("Cmd+W")),
     ("window.hide_floating", "Hide All Floating Windows", "Window > Hide All Floating Windows", Some("Cmd+Ctrl+W")),
@@ -454,6 +456,7 @@ pub fn invoke_menu(app: &mut SoundApp, id: &str, path: &str) {
 }
 
 pub fn invoke_shortcut_dialog(app: &mut SoundApp, id: &str) -> bool {
+    app.command_log.push_back(id.to_string());
     if id == "session.new" {
         app.ui.show_dashboard = true;
         return true;
@@ -516,6 +519,19 @@ pub fn run_ui_command(app: &mut SoundApp, id: &str, p: &Value) -> Option<Result<
         }
         "window.about" => toggle(&mut app.ui.show_about),
         "window.dashboard" => toggle(&mut app.ui.show_dashboard),
+        "transport.discard_take" => {
+            let recording = app.engine.transport.recording;
+            if recording {
+                app.discard_take = true;
+                app.stop_play();
+            }
+            json!({"discarded": recording})
+        }
+        "clip_list.find" => {
+            app.ui.show_clip_list = true;
+            app.focus_clip_find = true;
+            json!({})
+        }
         "window.preferences" => toggle(&mut app.ui.show_preferences),
         "window.midi_editor" => toggle(&mut app.ui.show_midi_editor),
         "window.midi_front" => {

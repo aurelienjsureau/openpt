@@ -17,7 +17,7 @@ const MIDI_FILTER_KINDS: [&str; 8] = ["notes", "pitch_bend", "mono_aftertouch", 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         option!("options.destructive_punch", "DestructivePunch", "options.destructive_punch"),
-        option!("options.transport_online", "Transport Online", "options.transport_online"),
+        cmd!(noundo "options.transport_online", "Transport Online", ["Options"], Some("Cmd+J"), "{value?: bool} (toggles when omitted)", always, |e, p| toggle_flag(e, p, "options.transport_online")),
         option!("options.dynamic_transport", "Dynamic Transport", "options.dynamic_transport"),
         option!(
             "options.marker_target_follows_selection",

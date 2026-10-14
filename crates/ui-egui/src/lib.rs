@@ -258,6 +258,9 @@ pub struct SoundApp {
     recent_changed: bool,
     pub(crate) pending_editor: Option<(TrackId, usize, u32)>,
     pub(crate) import_job: Option<import_jobs::ImportJob>,
+    pub command_log: std::collections::VecDeque<String>,
+    pub(crate) discard_take: bool,
+    pub(crate) focus_clip_find: bool,
     recent_checked: Option<(f64, Vec<String>, Vec<bool>)>,
     pub player: Option<Player>,
     pub recorder: Option<openpt_playback::record::Recorder>,
@@ -327,6 +330,9 @@ impl SoundApp {
             recent_changed: false,
             pending_editor: None,
             import_job: None,
+            command_log: std::collections::VecDeque::new(),
+            discard_take: false,
+            focus_clip_find: false,
             recent_checked: None,
             midi_manager: player.as_ref().map(|p| {
                 let mut mm = openpt_playback::midi::MidiManager::new(p.midi_input_ring());
@@ -399,6 +405,10 @@ impl SoundApp {
     }
 
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if self.command_log.len() >= 64 {
+            self.command_log.pop_front();
+        }
+        self.command_log.push_back(id.to_string());
         if matches!(id, "session.new" | "session.open" | "session.close" | "session.revert") && bounce::refuses_session_switch(self) {
             return Err(self.ui.status.clone());
         }
@@ -867,6 +877,11 @@ impl SoundApp {
         let plan = self.take_plan.take();
         let (audio_takes, problem) = self.recorder.as_mut().map(|r| r.finish()).unwrap_or_default();
         let midi_takes = self.midi_recorder.take().map(|mut r| r.finish(self.engine.session(), pos)).unwrap_or_default();
+        if std::mem::take(&mut self.discard_take) {
+            self.punch = None;
+            self.ui.status = "Take discarded".into();
+            return;
+        }
         let tracks = audio_takes.len().max(1);
         let plan = plan.unwrap_or_else(|| openpt_engine::io::Recording {
             start: self.record_start,
