@@ -257,6 +257,18 @@ impl Engine {
         self.transport.recording && matches!(id, "session.new" | "session.open" | "session.close" | "session.revert" | "app.quit")
     }
 
+    pub fn execute_each(&mut self, id: &str, params: &[Value]) -> Vec<Result<Value>> {
+        let before = Arc::clone(&self.doc);
+        let undo_len = self.undo.len();
+        let out: Vec<Result<Value>> = params.iter().map(|p| self.execute(id, p)).collect();
+        if self.undo.len() > undo_len {
+            let label = self.undo.get(undo_len).map(|h| h.label.clone()).unwrap_or_default();
+            self.undo.truncate(undo_len);
+            self.push_undo(&label, before);
+        }
+        out
+    }
+
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         if self.blocked_while_recording(id) {
@@ -394,6 +406,19 @@ fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
 #[cfg(test)]
 mod merge_tests {
     use super::*;
+
+    #[test]
+    fn execute_each_is_one_undo_step() {
+        let mut e = crate::demo::demo_engine();
+        let ids: Vec<u64> = e.session().tracks.iter().take(3).map(|t| t.id.0).collect();
+        let params: Vec<Value> = ids.iter().map(|t| json!({"track": t, "output": "Bus 9"})).collect();
+        let undo_before = e.undo.len();
+        assert!(e.execute_each("track.output", &params).iter().all(Result::is_ok));
+        assert_eq!(e.undo.len(), undo_before + 1);
+        e.execute("edit.undo", &json!({})).unwrap();
+        let bus9 = e.session().busses.iter().find(|b| b.name == "Bus 9").map(|b| b.id);
+        assert!(bus9.is_none() || e.session().tracks.iter().all(|t| t.mixer.output != openpt_model::Route::Bus(bus9.unwrap())));
+    }
 
     #[test]
     fn merged_gesture_is_one_undo_step() {

@@ -6,7 +6,7 @@ use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(noundo "session.new", "New...", ["File"], Some("Cmd+N"), "{name?: 'Untitled', sample_rate?: 48000, bit_depth?: 24, template?: blank|demo}", always, new_session),
+        cmd!(noundo "session.new", "New...", ["File"], Some("Cmd+N"), "{name?: 'Untitled', sample_rate?: 48000, bit_depth?: 24, template?: blank|demo, path?: session file to create it at, replace?: false}", always, new_session),
         cmd!(noundo "session.open", "Open Session...", ["File"], Some("Cmd+O"), "{path}", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("session.open", "`path` required"))?.to_string();
             let missing = crate::io::open_session(e, &path)?;
@@ -203,6 +203,10 @@ fn refuse_replacing(e: &Engine, id: &str, file: &std::path::Path, p: &Value) -> 
 }
 
 fn new_session(e: &mut Engine, p: &Value) -> Result<Value> {
+    let path = str_param(p, "path").map(str::to_string);
+    if let Some(path) = &path {
+        refuse_replacing(e, "session.new", &crate::io::session_file(path), p)?;
+    }
     let name = str_param(p, "name").unwrap_or("Untitled").to_string();
     let sr =
         SampleRate::new(i64_or(p, "sample_rate", 48_000).clamp(0, i64::from(u32::MAX)) as u32).map_err(|err| bad("session.new", err.to_string()))?;
@@ -217,7 +221,10 @@ fn new_session(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     e.replace_session(s);
     e.path = None;
-    Ok(json!({"name": e.session().name, "sample_rate": e.session().sample_rate.hz()}))
+    if let Some(path) = &path {
+        crate::io::save_session(e, path)?;
+    }
+    Ok(json!({"name": e.session().name, "sample_rate": e.session().sample_rate.hz(), "path": e.path}))
 }
 
 fn import_audio(e: &mut Engine, p: &Value) -> Result<Value> {

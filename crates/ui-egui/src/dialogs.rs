@@ -9,7 +9,6 @@ use serde_json::{Value, json};
 #[derive(Debug, Clone)]
 pub enum Dialog {
     NewTracks { count: u32, format: String, kind: String, timebase: String, name: String },
-    NewSession { name: String, sample_rate: u32, demo: bool },
     Bounce { path: String, format: String, bit_depth: String, normalize: bool },
     RenameTrack { id: TrackId, name: String },
     RenameClip { id: ClipId, name: String },
@@ -38,7 +37,6 @@ impl Dialogs {
     pub fn open_name(&self) -> Option<&'static str> {
         self.open.as_ref().map(|d| match d {
             Dialog::NewTracks { .. } => "new_tracks",
-            Dialog::NewSession { .. } => "new_session",
             Dialog::Bounce { .. } => "bounce",
             Dialog::RenameTrack { .. } => "rename_track",
             Dialog::RenameClip { .. } => "rename_clip",
@@ -88,7 +86,6 @@ impl Dialogs {
             "track.new" => {
                 Dialog::NewTracks { count: 1, format: "Mono".into(), kind: "audio".into(), timebase: "samples".into(), name: "Audio".into() }
             }
-            "session.new" => Dialog::NewSession { name: "Untitled".into(), sample_rate: 48_000, demo: false },
             "file.bounce_mix" => {
                 let dir = e
                     .path
@@ -254,7 +251,7 @@ fn clear_message(s: &Session, clips: &[ClipId], sources: &[SourceId]) -> Option<
     Some(text)
 }
 
-fn default_dir() -> String {
+pub(crate) fn default_dir() -> String {
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into())
@@ -275,7 +272,6 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     let confirmed = matches!(d, Dialog::SaveChanges { .. });
     let title = match &d {
         Dialog::NewTracks { .. } => "New Tracks",
-        Dialog::NewSession { .. } => "New Session",
         Dialog::Bounce { .. } => "Bounce Mix",
         Dialog::RenameTrack { .. } => "Rename Track",
         Dialog::RenameClip { .. } => "Rename Clip",
@@ -337,24 +333,6 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     if buttons(ui, "Create", enter) {
                         action =
                             Some(("track.new".into(), json!({"count": count, "format": format, "kind": kind, "timebase": timebase, "name": name})));
-                    }
-                }
-                Dialog::NewSession { name, sample_rate, demo } => {
-                    ui.horizontal(|ui| {
-                        ui.label("Name");
-                        ui.text_edit_singleline(name);
-                    });
-                    egui::ComboBox::from_label("Sample Rate").selected_text(format!("{sample_rate} Hz")).show_ui(ui, |ui| {
-                        for r in openpt_time::SampleRate::COMMON {
-                            ui.selectable_value(sample_rate, r, format!("{r} Hz"));
-                        }
-                    });
-                    crate::widgets::checkbox(ui, demo, "Start from the demo session");
-                    if buttons(ui, "Create", enter) {
-                        action = Some((
-                            "session.new".into(),
-                            json!({"name": name, "sample_rate": sample_rate, "template": if *demo { "demo" } else { "blank" }}),
-                        ));
                     }
                 }
                 Dialog::Bounce { path, format, bit_depth, normalize } => {
@@ -631,6 +609,13 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     let saving = action.as_ref().is_some_and(|(cmd, _)| cmd.starts_with("session.save"));
     if let Some((cmd, params)) = action {
         keep = false;
+        if cmd == "file.import_audio"
+            && let Some(path) = params["path"].as_str()
+        {
+            let at = app.engine.session().edit.selection.start;
+            crate::import_jobs::start(app, vec![path.to_string()], at);
+            return;
+        }
         match app.run(&cmd, params) {
             Ok(v) if cmd == "file.export_clips" => {
                 app.ui.status = format!("Exported {} clip(s) to {}", v["written"], v["dir"].as_str().unwrap_or_default());

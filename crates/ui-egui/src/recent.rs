@@ -50,7 +50,7 @@ impl SoundApp {
         std::mem::take(&mut self.recent_changed)
     }
 
-    fn recent_exists(&mut self, now: f64) -> Vec<bool> {
+    pub(crate) fn recent_exists(&mut self, now: f64) -> Vec<bool> {
         let stale = self.recent_checked.as_ref().is_none_or(|(at, list, _)| now - at > EXISTS_TTL || *list != self.ui.recent_sessions);
         if stale {
             let exists = self.ui.recent_sessions.iter().map(|p| Path::new(p).is_file()).collect();

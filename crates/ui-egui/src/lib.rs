@@ -2,9 +2,11 @@
 
 pub mod bounce;
 pub mod control;
+pub mod dashboard;
 pub mod dialogs;
 pub mod docking;
 pub mod edit_window;
+pub mod import_jobs;
 pub mod extra_windows;
 pub mod fonts;
 pub mod icons;
@@ -14,6 +16,7 @@ pub mod mix_window;
 pub mod ops_windows;
 pub mod palette;
 pub mod panels;
+pub mod preferences;
 mod recent;
 pub mod recovery;
 pub mod sampler_window;
@@ -105,6 +108,13 @@ pub struct UiState {
     pub window_size: [f32; 2],
     pub window_maximized: bool,
     pub ui_scale: f32,
+    #[serde(skip)]
+    pub show_dashboard: bool,
+    pub dashboard_at_startup: bool,
+    pub dashboard_tab_recent: bool,
+    pub session_dir: String,
+    pub show_preferences: bool,
+    pub plugin_native_editor: bool,
 }
 
 impl Default for UiState {
@@ -165,6 +175,12 @@ impl Default for UiState {
             window_size: [1600.0, 1000.0],
             window_maximized: false,
             ui_scale: 1.0,
+            show_dashboard: false,
+            dashboard_at_startup: true,
+            dashboard_tab_recent: false,
+            session_dir: String::new(),
+            show_preferences: false,
+            plugin_native_editor: true,
         }
     }
 }
@@ -220,6 +236,8 @@ pub struct SoundApp {
     pub engine: Engine,
     recent_seen: Option<String>,
     recent_changed: bool,
+    pub(crate) pending_editor: Option<(TrackId, usize, u32)>,
+    pub(crate) import_job: Option<import_jobs::ImportJob>,
     recent_checked: Option<(f64, Vec<String>, Vec<bool>)>,
     pub player: Option<Player>,
     pub recorder: Option<openpt_playback::record::Recorder>,
@@ -287,6 +305,8 @@ impl SoundApp {
         SoundApp {
             recent_seen: engine.path.clone(),
             recent_changed: false,
+            pending_editor: None,
+            import_job: None,
             recent_checked: None,
             midi_manager: player.as_ref().map(|p| {
                 let mut mm = openpt_playback::midi::MidiManager::new(p.midi_input_ring());
@@ -1157,6 +1177,10 @@ impl SoundApp {
         recovery::show(self, &ctx);
         score_editor::show(self, &ctx);
         palette::show(self, &ctx);
+        mix_window::pending_editor(self, &ctx);
+        import_jobs::show(self, &ctx);
+        dashboard::show(self, &ctx);
+        preferences::show(self, &ctx);
         dialogs::show(self, &ctx);
         if self.meters_live() {
             let hz = if self.ui.window == MainWindow::Mix { 60 } else { 30 };

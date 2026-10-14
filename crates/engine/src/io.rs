@@ -79,6 +79,11 @@ pub fn add_source(s: &mut Session, name: &str, mut buf: AudioBuffer, path: Optio
         buf.channels = openpt_dsp::offline::resample(&buf.channels, buf.sample_rate, sr);
         buf.sample_rate = sr;
     }
+    add_source_audio(s, name, Arc::new(SourceAudio::new(buf)), path, format)
+}
+
+fn add_source_audio(s: &mut Session, name: &str, audio: Arc<SourceAudio>, path: Option<&str>, format: FileFormat) -> SourceId {
+    let sr = s.sample_rate.hz();
     let id = SourceId(s.alloc());
     let stem = Path::new(name).file_stem().and_then(|x| x.to_str()).unwrap_or(name).to_string();
     let stored = match path {
@@ -89,14 +94,14 @@ pub fn add_source(s: &mut Session, name: &str, mut buf: AudioBuffer, path: Optio
         id,
         name: stem.clone(),
         path: stored,
-        channels: u16::try_from(buf.num_channels()).unwrap_or(u16::MAX),
-        frames: buf.frames() as u64,
+        channels: u16::try_from(audio.buffer.num_channels()).unwrap_or(u16::MAX),
+        frames: audio.frames() as u64,
         sample_rate: sr,
         format,
         time_reference: 0,
         unsaved: true,
     });
-    s.pool.insert(id, Arc::new(SourceAudio::new(buf)));
+    s.pool.insert(id, audio);
     id
 }
 
@@ -109,20 +114,53 @@ fn stamp_at_rate(stamp: u64, file_rate: u32, session_rate: u32) -> u64 {
 }
 
 pub fn import_audio_bytes(e: &mut Engine, name: &str, bytes: &[u8], path: Option<&str>, target: Option<TrackId>, at: Samples) -> Result<Value> {
+    let prepared = prepare_audio(name, bytes, path, e.session().sample_rate.hz())?;
+    place_prepared(e, prepared, target, at)
+}
+
+pub struct PreparedAudio {
+    pub name: String,
+    path: Option<String>,
+    format: FileFormat,
+    file_rate: u32,
+    time_reference: Option<u64>,
+    audio: Arc<SourceAudio>,
+}
+
+pub fn prepare_import(path: &str, session_rate: u32) -> Result<PreparedAudio> {
+    let bytes = read_file(path)?;
+    let name = Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("Audio").to_string();
+    prepare_audio(&name, &bytes, Some(path), session_rate)
+}
+
+fn prepare_audio(name: &str, bytes: &[u8], path: Option<&str>, session_rate: u32) -> Result<PreparedAudio> {
     let ext = Path::new(name).extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
     let (info, buf) = openpt_audio_io::decode(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
-    let buf = at_rate(buf, e.session().sample_rate.hz(), MAX_IMPORT_SAMPLES)
-        .ok_or_else(|| EngineError::Io(format!("{name}: file is too large to import")))?;
+    let buf = at_rate(buf, session_rate, MAX_IMPORT_SAMPLES).ok_or_else(|| EngineError::Io(format!("{name}: file is too large to import")))?;
     if buf.frames() == 0 {
         return Err(EngineError::Io(format!("{name}: no audio")));
     }
-    let channels = buf.num_channels();
-    let file_rate = info.sample_rate;
+    Ok(PreparedAudio {
+        name: name.to_string(),
+        path: path.map(str::to_string),
+        format: info.format,
+        file_rate: info.sample_rate,
+        time_reference: info.bwf.map(|b| b.time_reference),
+        audio: Arc::new(SourceAudio::new(buf)),
+    })
+}
+
+pub fn place_prepared(e: &mut Engine, p: PreparedAudio, target: Option<TrackId>, at: Samples) -> Result<Value> {
+    let name = p.name.as_str();
+    let session_rate = e.session().sample_rate.hz();
+    if p.audio.buffer.sample_rate != session_rate {
+        return Err(EngineError::Io(format!("{name}: the session sample rate changed during the import")));
+    }
+    let channels = p.audio.buffer.num_channels();
     let s = e.session_mut();
-    let session_rate = s.sample_rate.hz();
-    let src = add_source(s, name, buf, path, info.format);
-    if let (Some(bwf), Some(sx)) = (info.bwf.as_ref(), s.sources.last_mut()) {
-        sx.time_reference = stamp_at_rate(bwf.time_reference, file_rate, session_rate);
+    let src = add_source_audio(s, name, p.audio, p.path.as_deref(), p.format);
+    if let (Some(stamp), Some(sx)) = (p.time_reference, s.sources.last_mut()) {
+        sx.time_reference = stamp_at_rate(stamp, p.file_rate, session_rate);
     }
     let frames = s.source(src).map_or(0, |x| i64::try_from(x.frames).unwrap_or(0));
     let track = match target {
@@ -943,7 +981,7 @@ pub fn replaces(e: &Engine, command: &str, file: &Path) -> bool {
         "session.save" | "session.save_as" | "session.save_copy" => {
             file.exists() && !e.path.as_deref().is_some_and(|own| same_path(Path::new(own), file))
         }
-        "session.save_template" | "file.export_selected_tracks_as_session" => file.exists(),
+        "session.new" | "session.save_template" | "file.export_selected_tracks_as_session" => file.exists(),
         _ => false,
     }
 }

@@ -73,6 +73,12 @@ mod api {
     pub fn cached() -> Option<Vec<Vst3Descriptor>> {
         registry::cached()
     }
+    pub fn scan_in_background() -> bool {
+        registry::scan_in_background()
+    }
+    pub fn scan_progress() -> (usize, usize) {
+        crate::isolated::progress()
+    }
     pub fn scan() -> Vec<Vst3Descriptor> {
         registry::scan()
     }
@@ -105,6 +111,12 @@ mod api {
 
     pub fn cached() -> Option<Vec<Vst3Descriptor>> {
         Some(Vec::new())
+    }
+    pub fn scan_in_background() -> bool {
+        false
+    }
+    pub fn scan_progress() -> (usize, usize) {
+        (0, 0)
     }
     pub fn scan() -> Vec<Vst3Descriptor> {
         Vec::new()
@@ -148,6 +160,14 @@ pub fn scan_paths(dirs: &[PathBuf]) -> Vec<Vst3Descriptor> {
 
 pub fn cached() -> Option<Vec<Vst3Descriptor>> {
     api::cached()
+}
+
+pub fn scan_in_background() -> bool {
+    api::scan_in_background()
+}
+
+pub fn scan_progress() -> (usize, usize) {
+    api::scan_progress()
 }
 
 pub fn shutdown() {

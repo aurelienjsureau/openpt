@@ -785,9 +785,6 @@ fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect, tl: Rect, 
     let painter = ui.painter().with_clip_rect(lane.intersect(ui.clip_rect()));
     painter.rect_filled(lane, 0.0, lane_bg);
     let s = app.engine.session_arc();
-    if !s.edit.grid_lines {
-        grid_lines(&painter, &s, tl, lane);
-    }
     let view = Range::new(sample_at(&s, tl, tl.min.x), sample_at(&s, tl, tl.max.x));
     let auto_view = AutoParam::parse(&track.view);
     for clip in track.clips() {
@@ -1432,24 +1429,18 @@ fn grid_lines(painter: &egui::Painter, s: &Session, tl: Rect, lane: Rect) {
     let t = Tokens::current();
     let view = Range::new(sample_at(s, tl, tl.min.x).max(0), sample_at(s, tl, tl.max.x));
     let sr = s.sample_rate;
+    let px = |g: &GridValue| g.step_samples(view.start, sr, &s.tempo, s.frame_rate) as f64 / s.edit.zoom.samples_per_px;
     let bar = GridValue::Note { value: NoteValue::Bar, dotted: false, triplet: false };
-    let bar_px = bar.step_samples(view.start, sr, &s.tempo, s.frame_rate) as f64 / s.edit.zoom.samples_per_px;
-    if bar_px > 6.0 {
-        let col = grid_veil(t.bar_line, t.playlist_bg);
-        for at in bar.lines(view.start, view.end, sr, &s.tempo, s.frame_rate, 600) {
-            let x = x_of(s, tl, at);
-            painter.line_segment([pos2(x, lane.min.y), pos2(x, lane.max.y)], Stroke::new(1.0, col));
-        }
-    }
-    if s.edit.grid_lines {
-        let step_px = s.edit.grid.step_samples(view.start, sr, &s.tempo, s.frame_rate) as f64 / s.edit.zoom.samples_per_px;
-        if step_px > 7.0 {
-            let col = grid_veil(t.grid_line, t.playlist_bg);
-            for at in s.edit.grid.lines(view.start, view.end, sr, &s.tempo, s.frame_rate, 2000) {
-                let x = x_of(s, tl, at);
-                painter.line_segment([pos2(x, lane.min.y), pos2(x, lane.max.y)], Stroke::new(1.0, col));
-            }
-        }
+    let (grid, col) = if px(&s.edit.grid) > 7.0 {
+        (s.edit.grid, grid_veil(t.grid_line, t.playlist_bg))
+    } else if px(&bar) > 6.0 {
+        (bar, grid_veil(t.bar_line, t.playlist_bg))
+    } else {
+        return;
+    };
+    for at in grid.lines(view.start, view.end, sr, &s.tempo, s.frame_rate, 2000) {
+        let x = x_of(s, tl, at);
+        painter.line_segment([pos2(x, lane.min.y), pos2(x, lane.max.y)], Stroke::new(1.0, col));
     }
 }
 

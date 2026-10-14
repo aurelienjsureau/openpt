@@ -39,9 +39,7 @@ impl eframe::App for App {
         }
         let dropped: Vec<String> =
             self.0.take_dropped_files(ctx).iter().map(|f| f.path().to_string_lossy().into_owned()).filter(|s| !s.is_empty()).collect();
-        for p in dropped {
-            open_path(&mut self.0, &p);
-        }
+        open_paths(&mut self.0, &dropped);
         if self.0.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else if ctx.input(|i| i.viewport().close_requested()) && dialogs::ask_to_save(&mut self.0, "app.quit", &serde_json::json!({})) {
@@ -86,19 +84,24 @@ impl eframe::App for App {
     }
 }
 
-fn open_path(app: &mut SoundApp, p: &str) {
-    let lower = p.to_ascii_lowercase();
-    let r = if lower.ends_with(".openpt") {
-        dialogs::run_or_ask(app, "session.open", serde_json::json!({"path": p}))
-    } else if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
-        app.run("file.import_midi", serde_json::json!({"path": p}))
-    } else {
-        let at = app.engine.session().edit.selection.start;
-        app.run("file.import_audio", serde_json::json!({"path": p, "at": at}))
-    };
-    if let Err(e) = r {
-        log::warn!("{p}: {e}");
+fn open_paths(app: &mut SoundApp, paths: &[String]) {
+    let mut audio = Vec::new();
+    for p in paths {
+        let lower = p.to_ascii_lowercase();
+        let r = if lower.ends_with(".openpt") {
+            dialogs::run_or_ask(app, "session.open", serde_json::json!({"path": p}))
+        } else if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
+            app.run("file.import_midi", serde_json::json!({"path": p}))
+        } else {
+            audio.push(p.clone());
+            continue;
+        };
+        if let Err(e) = r {
+            log::warn!("{p}: {e}");
+        }
     }
+    let at = app.engine.session().edit.selection.start;
+    openpt_ui_egui::import_jobs::start(app, audio, at);
 }
 
 fn config_dir() -> Option<std::path::PathBuf> {
@@ -241,6 +244,8 @@ fn main() -> eframe::Result {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    openpt_vst3_host::scan_in_background();
     let engine = if demo { openpt_engine::demo::demo_engine() } else { Engine::default() };
     let prefs = load_prefs().unwrap_or_default();
     let mut options = eframe::NativeOptions {
@@ -273,9 +278,8 @@ fn main() -> eframe::Result {
                 let rx = control_server::start(port, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
-            for f in &files {
-                open_path(&mut app, f);
-            }
+            open_paths(&mut app, &files);
+            app.ui.show_dashboard = files.is_empty() && !demo && app.ui.dashboard_at_startup;
             #[cfg(target_os = "macos")]
             let menu = match native_menu::NativeMenu::new(&app, &cc.egui_ctx) {
                 Ok(m) => {

@@ -19,6 +19,12 @@ pub struct Scanner {
 }
 
 static SCANNER: OnceLock<Scanner> = OnceLock::new();
+static DONE: AtomicUsize = AtomicUsize::new(0);
+static TOTAL: AtomicUsize = AtomicUsize::new(0);
+
+pub fn progress() -> (usize, usize) {
+    (DONE.load(Ordering::Relaxed), TOTAL.load(Ordering::Relaxed))
+}
 
 pub fn set_scanner(s: Scanner) -> bool {
     SCANNER.set(s).is_ok()
@@ -231,6 +237,8 @@ pub(crate) fn scan(sc: &Scanner, bundles: &[PathBuf]) -> Vec<(PathBuf, Outcome)>
     if !todo.is_empty() {
         log::info!("VST3 scan: opening {} of {} bundles in scanner processes", todo.len(), bundles.len());
     }
+    DONE.store(0, Ordering::Relaxed);
+    TOTAL.store(todo.len(), Ordering::Relaxed);
     let next = AtomicUsize::new(0);
     std::thread::scope(|s| {
         for _ in 0..sc.jobs.clamp(1, 32).min(todo.len().max(1)) {
@@ -242,6 +250,7 @@ pub(crate) fn scan(sc: &Scanner, bundles: &[PathBuf]) -> Vec<(PathBuf, Outcome)>
                             log::warn!("VST3 {}: {why}; skipped until it changes or you rescan", b.display());
                         }
                         *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(o);
+                        DONE.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             });

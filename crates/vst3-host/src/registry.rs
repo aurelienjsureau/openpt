@@ -5,7 +5,8 @@ use crate::{AUDIO_MODULE_CLASS, Vst3Descriptor, Vst3Error, parse_id};
 use openpt_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock, PoisonError, TryLockError};
 
 const MAX_CHOICES: i32 = 128;
 
@@ -103,7 +104,30 @@ pub fn scan() -> Vec<Vst3Descriptor> {
 }
 
 pub fn cached() -> Option<Vec<Vst3Descriptor>> {
-    registry().lock().unwrap_or_else(PoisonError::into_inner).scanned.clone()
+    match registry().try_lock() {
+        Ok(r) => r.scanned.clone(),
+        Err(TryLockError::Poisoned(p)) => p.into_inner().scanned.clone(),
+        Err(TryLockError::WouldBlock) => None,
+    }
+}
+
+pub fn scan_in_background() -> bool {
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if crate::isolated::scanner().is_none() {
+        return false;
+    }
+    if STARTED.swap(true, Ordering::AcqRel) {
+        return true;
+    }
+    let spawned = std::thread::Builder::new().name("vst3-scan".into()).spawn(|| {
+        scan();
+    });
+    if let Err(e) = spawned {
+        log::warn!("VST3 scan thread: {e}");
+        STARTED.store(false, Ordering::Release);
+        return false;
+    }
+    true
 }
 
 pub fn rescan() -> Vec<Vst3Descriptor> {

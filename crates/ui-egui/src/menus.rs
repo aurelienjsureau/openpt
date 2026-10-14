@@ -20,6 +20,8 @@ pub const UI_COMMANDS: &[(&str, &str, &str, Option<&str>)] = &[
     ("window.session_info", "Session Info", "", None),
     ("window.audio_health", "Session Audio Health", "", None),
     ("window.about", "About OpenPT", "", None),
+    ("window.dashboard", "Dashboard", "File > Dashboard...", None),
+    ("window.preferences", "Preferences", "Setup > Preferences...", None),
     ("window.close", "Close Window", "Window > Close Window", Some("Cmd+W")),
     ("window.hide_floating", "Hide All Floating Windows", "Window > Hide All Floating Windows", Some("Cmd+Ctrl+W")),
     ("window.midi_editor", "MIDI Editor", "Window > MIDI Editor", None),
@@ -142,7 +144,6 @@ const DIALOG_COMMANDS: &[&str] = &[
     "clip.clear",
     "track.new",
     "file.bounce_mix",
-    "session.new",
     "file.import_audio",
     "file.import_midi",
     "session.open",
@@ -420,6 +421,10 @@ pub fn live_label(app: &SoundApp, id: Option<&str>) -> Option<String> {
 }
 
 pub fn invoke_menu(app: &mut SoundApp, id: &str, path: &str) {
+    if id == "session.new" {
+        app.ui.show_dashboard = true;
+        return;
+    }
     if let Some((_, w)) = MENU_WINDOWS.iter().find(|(p, _)| *p == path)
         && w.starts_with("window.")
     {
@@ -447,6 +452,10 @@ pub fn invoke_menu(app: &mut SoundApp, id: &str, path: &str) {
 }
 
 pub fn invoke_shortcut_dialog(app: &mut SoundApp, id: &str) -> bool {
+    if id == "session.new" {
+        app.ui.show_dashboard = true;
+        return true;
+    }
     (wants_dialog(id) && app.dialogs.open_for_command(&app.engine, id)) || crate::dialogs::ask_to_save(app, id, &json!({}))
 }
 
@@ -504,6 +513,8 @@ pub fn run_ui_command(app: &mut SoundApp, id: &str, p: &Value) -> Option<Result<
             toggle(&mut app.ui.show_audio_health)
         }
         "window.about" => toggle(&mut app.ui.show_about),
+        "window.dashboard" => toggle(&mut app.ui.show_dashboard),
+        "window.preferences" => toggle(&mut app.ui.show_preferences),
         "window.midi_editor" => toggle(&mut app.ui.show_midi_editor),
         "window.midi_front" => {
             app.ui.show_midi_editor = true;
