@@ -1,0 +1,33 @@
+[package]
+name = "openpt-ui-egui"
+description = "OpenPT's egui user interface: Edit and Mix windows, transport, dialogs, control channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.95"
+
+[dependencies]
+openpt-ui-kit.workspace = true
+openpt-time.workspace = true
+openpt-audio-io.workspace = true
+openpt-midi.workspace = true
+openpt-dsp.workspace = true
+openpt-vst3-host.workspace = true
+openpt-au-host.workspace = true
+openpt-model.workspace = true
+openpt-mix.workspace = true
+openpt-engine.workspace = true
+openpt-playback.workspace = true
+openpt-video.workspace = true
+egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
+
+[lints]
+workspace = true
+

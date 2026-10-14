@@ -1,0 +1,29 @@
+[package]
+name = "openpt-engine"
+description = "OpenPT command engine: commands, undo, editing operations, import/export, bounce, parity catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openpt-time.workspace = true
+openpt-audio-io.workspace = true
+openpt-midi.workspace = true
+openpt-dsp.workspace = true
+openpt-vst3-host.workspace = true
+openpt-au-host.workspace = true
+openpt-model.workspace = true
+openpt-mix.workspace = true
+openpt-video.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

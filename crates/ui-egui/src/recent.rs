@@ -1,0 +1,134 @@
+use crate::SoundApp;
+use serde_json::json;
+use std::path::Path;
+
+pub const MAX_RECENT: usize = 10;
+const EXISTS_TTL: f64 = 3.0;
+
+fn same(a: &str, b: &str) -> bool {
+    if cfg!(windows) {
+        let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+        norm(a) == norm(b)
+    } else {
+        a == b
+    }
+}
+
+pub fn note(list: &mut Vec<String>, path: &str) -> bool {
+    if path.is_empty() || list.first().is_some_and(|p| p == path) {
+        return false;
+    }
+    list.retain(|p| !same(p, path));
+    list.insert(0, path.to_string());
+    list.truncate(MAX_RECENT);
+    true
+}
+
+fn label(path: &str) -> String {
+    let p = Path::new(path);
+    let name = p.file_stem().and_then(|n| n.to_str()).unwrap_or(path);
+    match p.parent().and_then(|d| d.file_name()).and_then(|n| n.to_str()) {
+        Some(folder) => format!("{name}  —  {folder}"),
+        None => name.to_string(),
+    }
+}
+
+impl SoundApp {
+    pub(crate) fn note_recent_session(&mut self) {
+        if self.engine.path == self.recent_seen {
+            return;
+        }
+        self.recent_seen.clone_from(&self.engine.path);
+        if let Some(p) = self.recent_seen.clone()
+            && note(&mut self.ui.recent_sessions, &p)
+        {
+            self.recent_changed = true;
+        }
+    }
+
+    pub fn take_recent_changed(&mut self) -> bool {
+        std::mem::take(&mut self.recent_changed)
+    }
+
+    fn recent_exists(&mut self, now: f64) -> Vec<bool> {
+        let stale = self.recent_checked.as_ref().is_none_or(|(at, list, _)| now - at > EXISTS_TTL || *list != self.ui.recent_sessions);
+        if stale {
+            let exists = self.ui.recent_sessions.iter().map(|p| Path::new(p).is_file()).collect();
+            self.recent_checked = Some((now, self.ui.recent_sessions.clone(), exists));
+        }
+        self.recent_checked.as_ref().map(|(_, _, e)| e.clone()).unwrap_or_default()
+    }
+}
+
+pub fn menu(app: &mut SoundApp, ui: &mut egui::Ui) {
+    ui.menu_button("Open Recent", |ui| {
+        if app.ui.recent_sessions.is_empty() {
+            ui.add_enabled(false, egui::Button::new("No Recent Sessions"));
+            return;
+        }
+        let now = ui.ctx().input(|i| i.time);
+        let exists = app.recent_exists(now);
+        let mut open = None;
+        for (i, path) in app.ui.recent_sessions.iter().enumerate() {
+            let here = exists.get(i).copied().unwrap_or(true);
+            let text = if here { label(path) } else { format!("{}  (missing)", label(path)) };
+            let r = ui.add_enabled(here, egui::Button::new(text)).on_hover_text(path.as_str()).on_disabled_hover_text(format!("{path}\nnot found"));
+            if r.clicked() {
+                open = Some(path.clone());
+            }
+        }
+        ui.separator();
+        if ui.button("Clear Recent").clicked() {
+            app.ui.recent_sessions.clear();
+            app.recent_changed = true;
+            ui.close();
+        }
+        if let Some(path) = open {
+            ui.close();
+            if let Err(e) = crate::dialogs::run_or_ask(app, "session.open", json!({"path": path})) {
+                log::warn!("{path}: {e}");
+                app.ui.status = format!("Could not open {path}: {e}");
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newest_first_without_duplicates_and_capped() {
+        let mut l = Vec::new();
+        assert!(note(&mut l, "a.openpt"));
+        assert!(note(&mut l, "b.openpt"));
+        assert!(!note(&mut l, "b.openpt"), "already at the front");
+        assert!(note(&mut l, "a.openpt"));
+        assert_eq!(l, ["a.openpt", "b.openpt"]);
+        for i in 0..20 {
+            note(&mut l, &format!("{i}.openpt"));
+        }
+        assert_eq!(l.len(), MAX_RECENT);
+        assert_eq!(l.first().map(String::as_str), Some("19.openpt"));
+        assert!(!note(&mut l, ""), "an empty path is never recorded");
+    }
+
+    #[test]
+    fn windows_paths_match_regardless_of_case_and_separator() {
+        let mut l = vec![r"C:\Songs\Mix.openpt".to_string()];
+        note(&mut l, "c:/songs/mix.openpt");
+        assert_eq!(l.len(), if cfg!(windows) { 1 } else { 2 });
+    }
+
+    #[test]
+    fn label_names_the_session_and_its_folder() {
+        assert_eq!(label("/x/on the mob/on the mob.openpt"), "on the mob  —  on the mob");
+        assert_eq!(label("solo.openpt"), "solo");
+    }
+
+    #[test]
+    fn older_ui_json_without_the_list_still_loads() {
+        let ui: crate::UiState = serde_json::from_str("{}").unwrap();
+        assert!(ui.recent_sessions.is_empty());
+    }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "openpt-au-host"
+description = "OpenPT Audio Unit (AUv2, macOS) plugin host: lists, loads and runs system-registered Audio Units behind the safe openpt-dsp Plugin trait (an isolated unsafe FFI crate)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openpt-dsp.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"

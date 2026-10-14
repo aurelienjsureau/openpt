@@ -1,0 +1,23 @@
+[package]
+name = "openpt-video"
+description = "OpenPT video: MP4/MOV demux, H.264 / ProRes / Motion JPEG decoding to RGBA, timeline thumbnails"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+threads = ["dep:rayon"]
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+image = { workspace = true, features = ["jpeg"] }
+rayon = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

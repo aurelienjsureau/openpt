@@ -1,0 +1,22 @@
+[package]
+name = "openpt-cli"
+description = "OpenPT command line: headless editing, conversion, bounce, MCP server, app control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "openpt-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+openpt-engine.workspace = true
+openpt-automation.workspace = true
+openpt-audio-io.workspace = true
+openpt-dsp.workspace = true
+openpt-vst3-host.workspace = true
+serde_json.workspace = true

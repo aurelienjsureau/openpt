@@ -1,0 +1,16 @@
+[package]
+name = "openpt-automation"
+description = "OpenPT remote control: MCP server (stdio JSON-RPC), headless engine backend and control-channel client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openpt-engine.workspace = true
+openpt-time.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

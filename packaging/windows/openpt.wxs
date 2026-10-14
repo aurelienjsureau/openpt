@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="OpenPT"
+      Manufacturer="Learning Machines LLC"
+      Version="$(var.Version)"
+      UpgradeCode="EE53D3E5-D0AE-40F9-808D-9417FDEBF61A"
+      Scope="perMachine"
+      Compressed="yes"
+      Language="1033">
+    <SummaryInformation Description="OpenPT digital audio workstation" Manufacturer="Learning Machines LLC" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of OpenPT is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="OpenPTIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="OpenPTIcon.ico" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="OpenPT" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="OpenPT" Level="1">
+      <ComponentGroupRef Id="OpenPTFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="OpenPTFiles" Directory="INSTALLFOLDER">
+      <Component Id="OpenPTApp" Guid="091136D7-205E-41A8-9D27-5E231F7CBBD4">
+        <File Id="OpenPTExe" Source="$(var.BinDir)\openpt.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="OpenPT"
+              Description="OpenPT digital audio workstation" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+              Icon="OpenPTIcon.ico" IconIndex="0" />
+        </File>
+
+        <ProgId Id="OpenPT.Session" Description="OpenPT Session" Icon="OpenPTExe" IconIndex="0">
+          <Extension Id="openpt" ContentType="application/x-openpt-session">
+            <Verb Id="open" Command="Open" TargetFile="OpenPTExe" Argument="&quot;%1&quot;" />
+          </Extension>
+        </ProgId>
+        <ProgId Id="OpenPT.Audio" Description="Audio File" Icon="OpenPTExe" IconIndex="0" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\OpenPT.Audio\shell\open\command" Value="&quot;[#OpenPTExe]&quot; &quot;%1&quot;" Type="string" />
+        <ProgId Id="OpenPT.Midi" Description="MIDI File" Icon="OpenPTExe" IconIndex="0" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\OpenPT.Midi\shell\open\command" Value="&quot;[#OpenPTExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.wav\OpenWithProgids" Name="OpenPT.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.aif\OpenWithProgids" Name="OpenPT.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.aiff\OpenWithProgids" Name="OpenPT.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.flac\OpenWithProgids" Name="OpenPT.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.mp3\OpenWithProgids" Name="OpenPT.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.mid\OpenWithProgids" Name="OpenPT.Midi" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.midi\OpenWithProgids" Name="OpenPT.Midi" Value="" Type="string" />
+
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe" Name="FriendlyAppName" Value="OpenPT" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\shell\open\command" Value="&quot;[#OpenPTExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".openpt" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".wav" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".aif" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".aiff" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".flac" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".mp3" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".mid" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\openpt.exe\SupportedTypes" Name=".midi" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\openpt.exe" Value="[#OpenPTExe]" Type="string" />
+      </Component>
+
+      <Component Id="OpenPTCli" Guid="4552049A-C2F0-4AB0-BAE6-A62C3348F4B4">
+        <File Id="OpenPTCliExe" Source="$(var.BinDir)\openpt-cli.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

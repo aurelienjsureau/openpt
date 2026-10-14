@@ -1,0 +1,72 @@
+use crate::SoundApp;
+use crate::theme::{Tokens, bold};
+use serde_json::Value;
+
+pub fn start(app: &mut SoundApp, params: &Value) {
+    if app.bounce.is_some() {
+        app.ui.status = "A bounce is already running".into();
+        return;
+    }
+    app.capture_plugin_states();
+    match openpt_engine::cmd::bounce_job(&app.engine, params) {
+        Ok(job) => app.bounce = Some(job),
+        Err(e) => app.ui.status = e.to_string(),
+    }
+}
+
+pub fn step(app: &mut SoundApp, ctx: &egui::Context) {
+    let Some(job) = &mut app.bounce else { return };
+    app.ui.status = match job.step(slice()) {
+        Ok(None) => {
+            ctx.request_repaint();
+            return;
+        }
+        Ok(Some(done)) => {
+            format!("Bounced {} (peak {:.1} dBFS, {:.1} LUFS)", job.path().file_name().unwrap_or_default().to_string_lossy(), done.peak_db, done.lufs)
+        }
+        Err(e) => e.to_string(),
+    };
+    app.bounce = None;
+}
+
+pub fn refuses_session_switch(app: &mut SoundApp) -> bool {
+    if app.bounce.is_some() {
+        app.ui.status = "Finish or cancel the bounce first".into();
+    }
+    app.bounce.is_some()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn slice() -> impl FnMut() -> bool {
+    let until = std::time::Instant::now() + std::time::Duration::from_millis(30);
+    move || std::time::Instant::now() < until
+}
+
+#[cfg(target_arch = "wasm32")]
+fn slice() -> impl FnMut() -> bool {
+    let mut blocks = 32;
+    move || {
+        blocks -= 1;
+        blocks > 0
+    }
+}
+
+pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
+    let Some(job) = &app.bounce else { return };
+    let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    egui::Modal::new(egui::Id::new("bounce_progress")).show(ctx, |ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        ui.set_width(320.0);
+        let name = job.path().file_name().unwrap_or_default().to_string_lossy();
+        ui.label(egui::RichText::new(format!("Bouncing {name}")).font(bold(13.0)));
+        ui.add(egui::ProgressBar::new(job.progress()));
+        ui.horizontal(|ui| {
+            cancel |= ui.button("Cancel").clicked();
+            ui.label(egui::RichText::new(format!("{:.0}%", job.progress() * 100.0)).color(Tokens::current().text_dim));
+        });
+    });
+    if cancel {
+        app.bounce = None;
+        app.ui.status = "Bounce cancelled".into();
+    }
+}
