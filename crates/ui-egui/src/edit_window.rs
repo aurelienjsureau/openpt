@@ -981,6 +981,20 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
         && let Some(p) = ui.ctx().pointer_latest_pos()
     {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        let [_, top, _, bottom] = app.edit_layout.timeline;
+        let edge = 10.0;
+        let origin = ui.input(|i| i.pointer.press_origin()).map_or(p.y, |o| o.y);
+        let push = if p.y < top + edge && origin >= top + edge {
+            p.y - (top + edge)
+        } else if p.y > bottom - edge && origin <= bottom - edge {
+            p.y - (bottom - edge)
+        } else {
+            0.0
+        };
+        if push != 0.0 {
+            app.edit_layout.scroll_by((push * 0.5).clamp(-40.0, 40.0), bottom - top);
+            ui.ctx().request_repaint();
+        }
         let line_y = app
             .edit_layout
             .rows
@@ -1346,7 +1360,7 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
                 let pass = ui.ctx().cumulative_pass_nr();
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("io_mini_fader_opened"), pass));
             }
-            let dx = resp.drag_delta().x;
+            let dx = if i == 0 { -resp.drag_delta().y } else { resp.drag_delta().x };
             if resp.dragged() && dx != 0.0 {
                 let k = dx / MINI_FADER_TRAVEL * if ui.input(|x| x.modifiers.command || x.modifiers.ctrl) { 0.1 } else { 1.0 };
                 if i == 0 {
@@ -1379,7 +1393,11 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
     let pos0 = if which == 0 { openpt_model::fader_db_to_pos(track.mixer.volume_db) } else { track.mixer.pan.first().map_or(0.5, |p| (p + 1.0) * 0.5) };
     let at_key = key.with(("at", tid, which, press.x.to_bits(), press.y.to_bits()));
     let at = ctx.data(|d| d.get_temp::<Pos2>(at_key)).unwrap_or_else(|| {
-        let at = press - vec2(6.0 + 5.0 + MINI_FADER_TRAVEL * pos0, 6.0 + 9.0);
+        let at = if which == 0 {
+            press - vec2(6.0 + 29.0, 6.0 + 5.0 + MINI_FADER_TRAVEL * (1.0 - pos0))
+        } else {
+            press - vec2(6.0 + 5.0 + MINI_FADER_TRAVEL * pos0, 6.0 + 9.0)
+        };
         ctx.data_mut(|d| d.insert_temp(at_key, at));
         at
     });
@@ -1388,26 +1406,37 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
             let pans: Vec<f32> = if which == 1 { track.mixer.pan.iter().copied().take(2).collect() } else { vec![] };
             let rows = if which == 0 { 1 } else { pans.len().max(1) };
             for k in 0..rows {
-                ui.horizontal(|ui| {
+                let layout = if which == 0 { egui::Layout::top_down(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
+                ui.with_layout(layout, |ui| {
                     let (pos, label) = if which == 0 {
                         (openpt_model::fader_db_to_pos(track.mixer.volume_db), format!("{} dB", crate::widgets::db_text(track.mixer.volume_db)))
                     } else {
                         let p = pans.get(k).copied().unwrap_or(0.0);
                         ((p + 1.0) * 0.5, crate::widgets::pan_text(p))
                     };
-                    let (r, resp) = ui.allocate_exact_size(vec2(170.0, 18.0), Sense::click_and_drag());
-                    ui.painter().rect_filled(Rect::from_center_size(r.center(), vec2(r.width() - 10.0, 4.0)), 2.0, t.fader_track);
-                    let x = r.min.x + 5.0 + (r.width() - 10.0) * pos;
-                    ui.painter().rect(Rect::from_center_size(pos2(x, r.center().y), vec2(9.0, 16.0)), 2.0, Color32::from_gray(200), Stroke::new(1.0, Color32::from_gray(40)), StrokeKind::Inside);
-                    ui.painter().vline(x, r.center().y - 5.0..=r.center().y + 5.0, Stroke::new(1.0, Color32::from_gray(40)));
+                    let vertical = which == 0;
+                    let size = if vertical { vec2(22.0, MINI_FADER_TRAVEL + 10.0) } else { vec2(MINI_FADER_TRAVEL + 10.0, 18.0) };
+                    let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+                    let along = |r: Rect, k: f32| if vertical { pos2(r.center().x, r.max.y - 5.0 - MINI_FADER_TRAVEL * k) } else { pos2(r.min.x + 5.0 + MINI_FADER_TRAVEL * k, r.center().y) };
+                    let slot = if vertical { vec2(4.0, MINI_FADER_TRAVEL) } else { vec2(MINI_FADER_TRAVEL, 4.0) };
+                    ui.painter().rect_filled(Rect::from_center_size(r.center(), slot), 2.0, t.fader_track);
+                    let c = along(r, pos);
+                    let cap = if vertical { vec2(16.0, 9.0) } else { vec2(9.0, 16.0) };
+                    ui.painter().rect(Rect::from_center_size(c, cap), 2.0, Color32::from_gray(200), Stroke::new(1.0, Color32::from_gray(40)), StrokeKind::Inside);
+                    if vertical {
+                        ui.painter().hline(c.x - 5.0..=c.x + 5.0, c.y, Stroke::new(1.0, Color32::from_gray(40)));
+                    } else {
+                        ui.painter().vline(c.x, c.y - 5.0..=c.y + 5.0, Stroke::new(1.0, Color32::from_gray(40)));
+                    }
                     let alt = resp.clicked() && crate::mix_window::click_mods(ui).alt;
                     let fine = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                     let new_pos = if alt {
                         Some(if which == 0 { openpt_model::fader_db_to_pos(0.0) } else if rows == 2 { k as f32 } else { 0.5 })
                     } else if resp.dragged() {
-                        Some((pos + resp.drag_delta().x / (r.width() - 10.0) * if fine { 0.1 } else { 1.0 }).clamp(0.0, 1.0))
+                        let d = if vertical { -resp.drag_delta().y } else { resp.drag_delta().x };
+                        Some((pos + d / MINI_FADER_TRAVEL * if fine { 0.1 } else { 1.0 }).clamp(0.0, 1.0))
                     } else if resp.clicked() {
-                        resp.interact_pointer_pos().map(|p| ((p.x - r.min.x - 5.0) / (r.width() - 10.0)).clamp(0.0, 1.0))
+                        resp.interact_pointer_pos().map(|p| if vertical { (r.max.y - 5.0 - p.y) / MINI_FADER_TRAVEL } else { (p.x - r.min.x - 5.0) / MINI_FADER_TRAVEL }.clamp(0.0, 1.0))
                     } else {
                         None
                     };

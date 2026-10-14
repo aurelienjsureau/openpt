@@ -124,6 +124,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             insert_params
         ),
+        cmd!(
+            "mix.route_to_new_aux",
+            "New Aux Track for Bus",
+            [],
+            None,
+            "{tracks?, name?: 'Aux N', format?: stereo, send_slot?: n} — a bus and an Aux track listening to it; the tracks' output (or that send) goes to the bus",
+            has_selection,
+            route_to_new_aux
+        ),
         cmd!("mix.insert_move", "Move Insert", [], None, "{track?, from, to}", has_selection, insert_move),
         cmd!(
             "mix.insert_transfer",
@@ -468,6 +477,45 @@ fn insert_move(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({}))
 }
 
+fn route_to_new_aux(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "mix.route_to_new_aux";
+    let tracks = tracks_required(e, id, p)?;
+    let format = match str_param(p, "format") {
+        Some(f) => openpt_model::ChannelFormat::from_id(f).ok_or_else(|| bad(id, format!("unknown format `{f}`")))?,
+        None => openpt_model::ChannelFormat::Stereo,
+    };
+    let send_slot = slot_of(p, "send_slot", SEND_SLOTS);
+    let s = e.session_mut();
+    let taken = |s: &openpt_model::Session, n: &str| s.bus_by_name(n).is_some() || s.track_by_name(n).is_some();
+    let name = match str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) if !taken(s, n) => n.to_string(),
+        _ => (1..10_000).map(|k| format!("Aux {k}")).find(|n| !taken(s, n)).unwrap_or_else(|| "Aux".into()),
+    };
+    let bus = s.add_bus(&name, format);
+    let aux = s.add_track(openpt_model::TrackKind::Aux, format, Some(&name));
+    let after = tracks.iter().filter_map(|t| s.track_index(*t)).max();
+    super::track::place_after(s, &[aux], after);
+    if let Some(a) = s.track_mut(aux) {
+        a.mixer.input = openpt_model::Route::Bus(bus);
+        a.mixer.output = openpt_model::Route::Main;
+    }
+    for t in &tracks {
+        let Some(tr) = s.track_mut(*t) else { continue };
+        match send_slot {
+            Some(k) => {
+                if let Some(x) = tr.mixer.sends.get_mut(k) {
+                    *x = Some(match x.take() {
+                        Some(old) => SendSlot { target: openpt_model::Route::Bus(bus), ..old },
+                        None => SendSlot::new(openpt_model::Route::Bus(bus)),
+                    });
+                }
+            }
+            None => tr.mixer.output = openpt_model::Route::Bus(bus),
+        }
+    }
+    Ok(json!({"bus": bus, "aux": aux, "name": name}))
+}
+
 fn send(e: &mut Engine, p: &Value) -> Result<Value> {
     let bus = str_param(p, "bus").ok_or_else(|| bad("mix.send", "`bus` required"))?.to_string();
     let t = tracks_required(e, "mix.send", p)?.first().copied().ok_or_else(|| bad("mix.send", "no track"))?;
@@ -764,6 +812,27 @@ mod tests {
     use openpt_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
     use openpt_time::Range;
     use std::sync::Arc;
+
+    #[test]
+    fn new_aux_track_listens_to_the_bus_the_tracks_feed() {
+        let mut e = crate::demo::demo_engine();
+        let (kick, snare) = (e.session().track_by_name("Kick").unwrap().id, e.session().track_by_name("Snare").unwrap().id);
+        let r = e.execute("mix.route_to_new_aux", &json!({"tracks": [kick.0, snare.0]})).unwrap();
+        let name = r["name"].as_str().unwrap().to_string();
+        let s = e.session();
+        let bus = s.bus_by_name(&name).unwrap().id;
+        let aux = s.track_by_name(&name).unwrap();
+        assert_eq!(aux.kind, TrackKind::Aux);
+        assert_eq!(aux.mixer.input, openpt_model::Route::Bus(bus));
+        assert_eq!(s.track(kick).unwrap().mixer.output, openpt_model::Route::Bus(bus));
+        assert_eq!(s.track(snare).unwrap().mixer.output, openpt_model::Route::Bus(bus));
+        e.execute("mix.route_to_new_aux", &json!({"tracks": [kick.0], "send_slot": 2, "name": "Verb 2"})).unwrap();
+        let s = e.session();
+        assert!(s.track_by_name("Verb 2").is_some());
+        assert!(matches!(&s.track(kick).unwrap().mixer.sends[2], Some(x) if x.target == openpt_model::Route::Bus(s.bus_by_name("Verb 2").unwrap().id)));
+        e.execute("edit.undo", &json!({})).unwrap();
+        assert!(e.session().track_by_name("Verb 2").is_none(), "one undo step");
+    }
 
     #[test]
     fn inserts_move_and_copy_across_tracks() {

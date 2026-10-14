@@ -19,6 +19,12 @@ fn drag_track(app: &mut SoundApp, ui: &Ui, row: Rect, id: u64, dropped: bool) {
     } else {
         let y = row.min.y + (gap - from as f32) * pitch - spacing / 2.0;
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        let clip = ui.clip_rect();
+        let push = if p.y < clip.min.y + 20.0 { clip.min.y + 20.0 - p.y } else if p.y > clip.max.y - 20.0 { clip.max.y - 20.0 - p.y } else { 0.0 };
+        if push != 0.0 {
+            ui.scroll_with_delta(vec2(0.0, (push * 0.5).clamp(-30.0, 30.0)));
+            ui.ctx().request_repaint();
+        }
         ui.ctx()
             .layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("track_list_reorder")))
             .line_segment([pos2(row.min.x, y), pos2(row.max.x, y)], Stroke::new(2.0, Tokens::current().accent));

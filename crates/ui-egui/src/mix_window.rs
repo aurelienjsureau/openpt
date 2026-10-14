@@ -1433,6 +1433,25 @@ fn send_route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, cu
         let _ = run_scoped(app, ui, "mix.send", json!({"track": id.0, "slot": slot, "bus": format!("Bus {n}")}));
         ui.close();
     }
+    if ui.button("new track...").clicked() {
+        new_aux(app, ui, id, Some(slot));
+    }
+}
+
+fn new_aux(app: &mut SoundApp, ui: &Ui, id: TrackId, send_slot: Option<usize>) {
+    let s = app.engine.session();
+    let mut tracks = scoped_tracks(app, ui, id);
+    if tracks.len() == 1 && s.edit.selected_tracks.contains(&id) {
+        tracks = s.edit.selected_tracks.clone();
+    }
+    let mut p = json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>()});
+    if let Some(k) = send_slot {
+        p["send_slot"] = json!(k);
+    }
+    if let Err(e) = app.run("mix.route_to_new_aux", p) {
+        app.ui.status = e;
+    }
+    ui.close();
 }
 
 fn route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, input: bool) {
@@ -1480,6 +1499,9 @@ fn route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, input: bool) {
         }
         let _ = run_scoped(app, ui, cmd, json!({"track": id.0, key: format!("Bus {n}")}));
         ui.close();
+    }
+    if !input && ui.button("new track...").clicked() {
+        new_aux(app, ui, id, None);
     }
 }
 

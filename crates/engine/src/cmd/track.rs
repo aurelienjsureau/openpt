@@ -310,6 +310,7 @@ fn new_track(e: &mut Engine, p: &Value) -> Result<Value> {
     let instrument = str_param(p, "instrument").map(str::to_string);
     let s = e.session_mut();
     let mut ids = Vec::new();
+    let after = last_selected_index(s);
     for _ in 0..count {
         let id = s.add_track(kind, format, name.as_deref());
         if let Some(t) = s.track_mut(id) {
@@ -330,8 +331,22 @@ fn new_track(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         ids.push(id);
     }
+    place_after(s, &ids, after);
     s.edit.selected_tracks = ids.clone();
     Ok(json!({"tracks": ids}))
+}
+
+pub(crate) fn last_selected_index(s: &openpt_model::Session) -> Option<usize> {
+    s.edit.selected_tracks.iter().filter_map(|t| s.track_index(*t)).max()
+}
+
+pub(crate) fn place_after(s: &mut openpt_model::Session, ids: &[TrackId], after: Option<usize>) {
+    let Some(after) = after else { return };
+    let moved: Vec<_> = ids.iter().filter_map(|id| s.track_index(*id).map(|i| s.tracks.remove(i))).collect();
+    let at = (after + 1).min(s.tracks.len());
+    for (k, t) in moved.into_iter().enumerate() {
+        s.tracks.insert(at + k, t);
+    }
 }
 
 fn group(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -905,6 +920,20 @@ fn route(e: &mut Engine, p: &Value, input: bool) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_tracks_go_after_the_last_selected_track() {
+        let mut e = crate::demo::demo_engine();
+        let snare = e.session().track_by_name("Snare").unwrap().id;
+        let kick = e.session().track_by_name("Kick").unwrap().id;
+        e.execute("edit.select", &serde_json::json!({"tracks": [kick.0, snare.0]})).unwrap();
+        let at = e.session().track_index(snare).unwrap();
+        let r = e.execute("track.new", &serde_json::json!({"count": 2})).unwrap();
+        let ids: Vec<u64> = r["tracks"].as_array().unwrap().iter().filter_map(|v| v.as_u64()).collect();
+        let s = e.session();
+        assert_eq!(s.track_index(TrackId(ids[0])), Some(at + 1));
+        assert_eq!(s.track_index(TrackId(ids[1])), Some(at + 2));
+    }
 
     #[test]
     fn comp_from_alternate_playlist() {
