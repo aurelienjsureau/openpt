@@ -449,24 +449,29 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                 Some("wav") => *format = "wav".into(),
                                 Some("aif" | "aiff") => *format = "aiff".into(),
                                 Some("flac") => *format = "flac".into(),
+                                Some("mp3") => *format = "mp3".into(),
                                 _ => {}
                             }
                         }
                     });
                     ui.horizontal(|ui| {
                         egui::ComboBox::from_label("Format").selected_text(format.to_uppercase()).show_ui(ui, |ui| {
-                            for f in ["wav", "aiff", "flac"] {
+                            for f in ["wav", "aiff", "flac", "mp3"] {
                                 ui.selectable_value(format, f.to_string(), f.to_uppercase());
                             }
                         });
+                        if format != "mp3" {
                         egui::ComboBox::from_label("Bit Depth").selected_text(format!("{bit_depth}-bit")).show_ui(ui, |ui| {
                             for b in ["16", "24", "32f"] {
                                 ui.selectable_value(bit_depth, b.to_string(), format!("{b}-bit"));
                             }
                         });
+                        } else {
+                            ui.label("320 kb/s");
+                        }
                     });
                     crate::widgets::checkbox(ui, normalize, "Normalize to -0.1 dBFS");
-                    if bit_depth != "32f" {
+                    if bit_depth != "32f" && format != "mp3" {
                         crate::widgets::checkbox(ui, dither, "Dither (TPDF)");
                     }
                     ui.label(

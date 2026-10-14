@@ -11,6 +11,7 @@ serde.workspace = true
 thiserror.workspace = true
 log.workspace = true
 symphonia.workspace = true
+mp3lame-encoder = "0.2.5"
 
 [dev-dependencies]
 proptest.workspace = true

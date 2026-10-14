@@ -4,6 +4,7 @@ mod aiff;
 mod buffer;
 mod caf;
 mod flac;
+mod mp3;
 mod mp4;
 mod pcm;
 pub mod peaks;
@@ -221,17 +222,19 @@ pub fn encode(buf: &AudioBuffer, opts: &EncodeOptions) -> Result<Vec<u8>> {
         FileFormat::Wav => wav::encode(buf, opts.bit_depth, opts.dither, opts.bwf.as_ref(), false, None),
         FileFormat::Aiff => aiff::encode(buf, opts.bit_depth, opts.dither),
         FileFormat::Flac => flac::encode(buf, opts.bit_depth, opts.dither),
+        FileFormat::Mp3 => mp3::encode(buf),
         other => Err(AudioError::Unsupported(format!("encoding {other:?} is not supported"))),
     }
 }
 
-pub const ENCODE_EXTENSIONS: &str = "wav, aif, aiff, flac";
+pub const ENCODE_EXTENSIONS: &str = "wav, aif, aiff, flac, mp3";
 
 pub fn encode_format_for(name: &str) -> Option<FileFormat> {
     match name.trim_start_matches('.').to_ascii_lowercase().as_str() {
         "wav" | "wave" | "bwf" => Some(FileFormat::Wav),
         "aif" | "aiff" => Some(FileFormat::Aiff),
         "flac" => Some(FileFormat::Flac),
+        "mp3" => Some(FileFormat::Mp3),
         _ => None,
     }
 }
@@ -253,6 +256,7 @@ enum Writer<W> {
     Wav(wav::Writer<W>),
     Aiff(aiff::Writer<W>),
     Flac(flac::Writer<W>),
+    Mp3(W, AudioBuffer),
 }
 
 impl<W: Write + Seek> FileEncoder<W> {
@@ -262,6 +266,7 @@ impl<W: Write + Seek> FileEncoder<W> {
             FileFormat::Wav => Writer::Wav(wav::Writer::new(out, channels, sample_rate, depth, dither, opts.bwf.as_ref(), mask, false)?),
             FileFormat::Aiff => Writer::Aiff(aiff::Writer::new(out, channels, sample_rate, depth, dither)?),
             FileFormat::Flac => Writer::Flac(flac::Writer::new(out, channels, sample_rate, depth, dither)?),
+            FileFormat::Mp3 => Writer::Mp3(out, AudioBuffer { sample_rate, channels: vec![Vec::new(); channels.clamp(1, 2)] }),
             other => return Err(AudioError::Unsupported(format!("encoding {other:?} is not supported"))),
         }))
     }
@@ -271,6 +276,7 @@ impl<W: Write + Seek> FileEncoder<W> {
             Writer::Wav(w) => w.check_room(frames),
             Writer::Aiff(w) => w.check_room(frames),
             Writer::Flac(w) => w.check_room(frames),
+            Writer::Mp3(..) => Ok(frames),
         }
         .map(drop)
     }
@@ -280,6 +286,13 @@ impl<W: Write + Seek> FileEncoder<W> {
             Writer::Wav(w) => w.write(block, frames),
             Writer::Aiff(w) => w.write(block, frames),
             Writer::Flac(w) => w.write(block, frames),
+            Writer::Mp3(_, b) => {
+                for (c, dst) in b.channels.iter_mut().enumerate() {
+                    let src = block.get(c).map_or(&[][..], Vec::as_slice);
+                    dst.extend((0..frames).map(|i| src.get(i).copied().unwrap_or(0.0)));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -288,6 +301,10 @@ impl<W: Write + Seek> FileEncoder<W> {
             Writer::Wav(w) => w.finish(),
             Writer::Aiff(w) => w.finish(),
             Writer::Flac(w) => w.finish(),
+            Writer::Mp3(mut out, b) => {
+                out.write_all(&mp3::encode(&b)?).map_err(|e| AudioError::Encode(e.to_string()))?;
+                Ok(out)
+            }
         }
     }
 }

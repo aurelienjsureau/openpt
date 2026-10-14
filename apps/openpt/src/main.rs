@@ -161,7 +161,7 @@ fn services() -> Services {
         pick_save: Some(Box::new(|purpose: &str, default: &str| {
             let path = std::path::Path::new(default);
             let mut d = match purpose {
-                "file.bounce_mix" => rfd::FileDialog::new().add_filter("Audio", &["wav", "aif", "aiff", "flac"]),
+                "file.bounce_mix" => rfd::FileDialog::new().add_filter("Audio", &["wav", "aif", "aiff", "flac", "mp3"]),
                 _ => rfd::FileDialog::new().add_filter("OpenPT Session", &["openpt"]),
             };
             if let Some(dir) = path.parent().filter(|dir| dir.is_dir()) {

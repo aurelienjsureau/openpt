@@ -82,7 +82,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 crate::io::import_video_bytes(e, &path, bytes, at)
             }
         ),
-        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: false, fold_down?: stereo}", always, bounce),
+        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac|mp3, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: false, fold_down?: stereo}", always, bounce),
         cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo}", has_tracks, |e, p| {
             let dir = str_param(p, "dir").ok_or_else(|| bad("file.bounce_stems", "`dir` required"))?.to_string();
             let r = range_param(e, "file.bounce_stems", p)?;
@@ -460,6 +460,18 @@ mod tests {
                 let _ = std::fs::remove_file(&p);
             }
         }
+    }
+
+    #[test]
+    fn bounce_writes_an_mp3() {
+        let mut e = crate::demo::demo_engine();
+        let path = std::env::temp_dir().join(format!("openpt-bounce-{}.mp3", std::process::id()));
+        e.execute("file.bounce_mix", &json!({"path": path.to_string_lossy(), "start": 0, "end": 96_000})).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(bytes.len() > 10_000, "{} bytes", bytes.len());
+        let (_, back) = openpt_audio_io::decode(&bytes, Some("mp3")).unwrap();
+        assert!(back.frames() > 80_000);
     }
 
     #[test]
