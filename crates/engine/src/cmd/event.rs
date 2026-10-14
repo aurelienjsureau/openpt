@@ -7,7 +7,15 @@ use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!("event.tempo", "Tempo Change", [], None, "{bpm, at?: position (default session start)}", always, tempo),
+        cmd!(
+            "event.tempo",
+            "Tempo Change",
+            [],
+            None,
+            "{bpm, at?: position (default session start) | tick?, from_tick?: the change being moved}",
+            always,
+            tempo
+        ),
         cmd!("event.tempo_remove", "Remove Tempo Change", [], None, "{at}", always, |e, p| {
             let at = position_param(e, "event.tempo_remove", p, "at")?.unwrap_or(0);
             let s = e.session_mut();
@@ -103,8 +111,15 @@ fn tempo(e: &mut Engine, p: &Value) -> Result<Value> {
     let bpm = f64_or(p, "bpm", f64::NAN);
     let at = position_param(e, "event.tempo", p, "at")?.or(position_param(e, "event.tempo", p, "start")?).unwrap_or(0);
     let s = e.session_mut();
-    let tick = s.tempo.samples_to_ticks(at, s.sample_rate);
-    s.tempo.set_tempo(tick, bpm).map_err(|err| bad("event.tempo", err.to_string()))?;
+    let tick = p.get("tick").and_then(Value::as_i64).filter(|t| *t >= 0).unwrap_or_else(|| s.tempo.samples_to_ticks(at, s.sample_rate));
+    let old = s.tempo.clone();
+    if let Some(from) = p.get("from_tick").and_then(Value::as_i64).filter(|f| *f > 0 && *f != tick) {
+        s.tempo.remove_tempo(from);
+    }
+    if let Err(err) = s.tempo.set_tempo(tick, bpm) {
+        s.tempo = old;
+        return Err(bad("event.tempo", err.to_string()));
+    }
     Ok(json!({"tick": tick, "bpm": bpm}))
 }
 

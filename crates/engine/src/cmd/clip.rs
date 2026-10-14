@@ -1,3 +1,4 @@
+use super::more_util::{clip_db, set_clip_env};
 use super::*;
 use crate::cmd;
 use serde_json::json;
@@ -66,6 +67,25 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("clip.loop", "Loop...", ["Clip"], Some("Cmd+Alt+L"), "{clips?, count?: n, length?: samples}", has_selection, loop_clips),
         cmd!("clip.rename", "Rename...", ["Clip"], Some("Cmd+Alt+Shift+R"), "{clip?, name}", has_selection, rename),
         cmd!("clip.gain", "Clip Gain", [], None, "{clips?, db | delta_db}", has_selection, gain),
+        cmd!(
+            "clip.gain_point",
+            "Clip Gain Point",
+            [],
+            None,
+            "{clip, at: samples from the clip start, db, from?: the point being moved}",
+            always,
+            gain_point
+        ),
+        cmd!(
+            "clip.gain_trim_range",
+            "Trim Clip Gain",
+            [],
+            None,
+            "{clip, start, end: samples from the clip start, delta: dB}",
+            always,
+            gain_trim_range
+        ),
+        cmd!("clip.gain_point_remove", "Remove Clip Gain Point", [], None, "{clip, at: samples from the clip start}", always, gain_point_remove),
         cmd!("clip.gain_nudge_up", "Nudge Clip Gain Up", [], Some("Ctrl+Shift+Up"), "{clips?}", has_selection, |e, p| nudge_gain(e, p, 1.0)),
         cmd!("clip.gain_nudge_down", "Nudge Clip Gain Down", [], Some("Ctrl+Shift+Down"), "{clips?}", has_selection, |e, p| nudge_gain(e, p, -1.0)),
         cmd!("clip.gain_render", "Render", ["Clip", "Clip Gain"], None, "{clips?}", has_selection, |e, p| {
@@ -241,7 +261,14 @@ fn common_stem(names: &[String]) -> String {
     if stem.is_empty() { first.to_string() } else { stem.to_string() }
 }
 
-fn place_on(s: &mut openpt_model::Session, t: TrackId, src: openpt_model::SourceId, name: String, frames: Samples, at: Samples) -> Result<openpt_model::ClipId> {
+fn place_on(
+    s: &mut openpt_model::Session,
+    t: TrackId,
+    src: openpt_model::SourceId,
+    name: String,
+    frames: Samples,
+    at: Samples,
+) -> Result<openpt_model::ClipId> {
     let (sh, len) = (s.edit.edit_mode == openpt_model::EditMode::Shuffle, frames.max(1));
     let at = if sh { crate::edit::shuffle_slot(s, t, at, &[]) } else { at };
     if sh {
@@ -254,8 +281,11 @@ fn place_on(s: &mut openpt_model::Session, t: TrackId, src: openpt_model::Source
 
 fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "clip.place_sources";
-    let ids: Vec<openpt_model::SourceId> =
-        p.get("sources").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(openpt_model::SourceId).collect()).unwrap_or_default();
+    let ids: Vec<openpt_model::SourceId> = p
+        .get("sources")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_u64).map(openpt_model::SourceId).collect())
+        .unwrap_or_default();
     if ids.is_empty() {
         return Err(bad(id, "`sources` required"));
     }
@@ -276,7 +306,20 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
     let all_mono = files.iter().all(|f| f.2.buffer.num_channels() == 1);
     if files.len() > 1 && all_mono && width(from) == files.len() {
         let frames = files.iter().map(|f| f.2.frames()).max().unwrap_or(0);
-        let channels = files.iter().map(|f| f.2.buffer.channels.first().map(|c| { let mut c = c.clone(); c.resize(frames, 0.0); c }).unwrap_or_else(|| vec![0.0; frames])).collect();
+        let channels = files
+            .iter()
+            .map(|f| {
+                f.2.buffer
+                    .channels
+                    .first()
+                    .map(|c| {
+                        let mut c = c.clone();
+                        c.resize(frames, 0.0);
+                        c
+                    })
+                    .unwrap_or_else(|| vec![0.0; frames])
+            })
+            .collect();
         let name = common_stem(&files.iter().map(|f| f.0.clone()).collect::<Vec<_>>());
         let buf = openpt_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels };
         let src = crate::io::add_source(s, &name, buf, None, files[0].1);
@@ -284,14 +327,18 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
     } else if files.len() == 1 && files[0].2.buffer.num_channels() > 1 && width(from) == 1 {
         let (name, format, audio) = &files[0];
         let n = audio.buffer.num_channels();
-        let targets: Vec<TrackId> = (from..audio_tracks.len()).take_while(|i| width(*i) == 1).take(n).filter_map(|i| audio_tracks.get(i).copied()).collect();
+        let targets: Vec<TrackId> =
+            (from..audio_tracks.len()).take_while(|i| width(*i) == 1).take(n).filter_map(|i| audio_tracks.get(i).copied()).collect();
         if targets.len() < n {
             return Err(bad(id, format!("{name} has {n} channels: it needs {n} mono tracks from here down")));
         }
         let fmt = openpt_model::ChannelFormat::for_channels(n);
         for (k, t) in targets.into_iter().enumerate() {
             let ch_name = format!("{name}.{}", fmt.channel_label(k));
-            let buf = openpt_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels: vec![audio.buffer.channels.get(k).cloned().unwrap_or_default()] };
+            let buf = openpt_audio_io::AudioBuffer {
+                sample_rate: s.sample_rate.hz(),
+                channels: vec![audio.buffer.channels.get(k).cloned().unwrap_or_default()],
+            };
             let src = crate::io::add_source(s, &ch_name, buf, None, *format);
             placed.push(place_on(s, t, src, ch_name, i64::try_from(audio.frames()).unwrap_or(i64::MAX), at)?);
         }
@@ -299,7 +346,11 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
         for (k, (name, _, audio)) in files.iter().enumerate() {
             let t = match audio_tracks.get(from + k) {
                 Some(t) => *t,
-                None => s.add_track(openpt_model::TrackKind::Audio, openpt_model::ChannelFormat::for_channels(audio.buffer.num_channels().min(2)), Some(name)),
+                None => s.add_track(
+                    openpt_model::TrackKind::Audio,
+                    openpt_model::ChannelFormat::for_channels(audio.buffer.num_channels().min(2)),
+                    Some(name),
+                ),
             };
             let src = ids[k];
             placed.push(place_on(s, t, src, name.clone(), i64::try_from(audio.frames()).unwrap_or(i64::MAX), at)?);
@@ -412,6 +463,89 @@ fn rename(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"clips": ids.len()}))
+}
+
+fn gain_point(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.gain_point";
+    let cid = clip_id(p, id)?;
+    let at = p.get("at").and_then(Value::as_i64).ok_or_else(|| bad(id, "`at` required"))?;
+    let db = p.get("db").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(id, "`db` required"))? as f32;
+    let from = p.get("from").and_then(Value::as_i64);
+    let c = e.session_mut().find_clip_mut(cid).ok_or_else(|| bad(id, "no such clip"))?;
+    let mut pts: Vec<(Samples, f32)> = if c.gain_env.is_empty() {
+        vec![(0, c.gain_db), (c.length, c.gain_db)]
+    } else {
+        c.gain_env.iter().map(|&(o, _)| (o, clip_db(c, o))).collect()
+    };
+    let mut lo = 0;
+    let mut hi = c.length;
+    if let Some(f) = from
+        && let Some(i) = pts.iter().position(|q| q.0 == f)
+    {
+        lo = if i == 0 { 0 } else { pts.get(i - 1).map_or(0, |q| q.0 + 1) };
+        hi = pts.get(i + 1).map_or(c.length, |q| q.0 - 1);
+        pts.remove(i);
+    }
+    let at = at.clamp(lo, hi.max(lo));
+    pts.retain(|q| q.0 != at);
+    pts.push((at, db.clamp(-144.0, 36.0)));
+    pts.sort_by_key(|q| q.0);
+    c.gain_db = 0.0;
+    c.gain_env = pts;
+    Ok(json!({"at": at}))
+}
+
+fn gain_trim_range(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.gain_trim_range";
+    let cid = clip_id(p, id)?;
+    let num = |k: &str| p.get(k).and_then(Value::as_i64).ok_or_else(|| bad(id, format!("`{k}` required")));
+    let (start, end) = (num("start")?, num("end")?);
+    let delta = p.get("delta").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(id, "`delta` required"))? as f32;
+    let c = e.session_mut().find_clip_mut(cid).ok_or_else(|| bad(id, "no such clip"))?;
+    let (start, end) = (start.clamp(0, c.length), end.clamp(0, c.length));
+    if end <= start {
+        return Ok(json!({}));
+    }
+    let mut pts: Vec<(Samples, f32)> = if c.gain_env.is_empty() {
+        vec![(0, c.gain_db), (c.length, c.gain_db)]
+    } else {
+        c.gain_env.iter().map(|&(o, _)| (o, clip_db(c, o))).collect()
+    };
+    let mut anchors = vec![(start, c.gain_db_at(start)), (end, c.gain_db_at(end))];
+    if start > 0 {
+        anchors.push((start - 1, c.gain_db_at(start - 1)));
+    }
+    if end < c.length {
+        anchors.push((end + 1, c.gain_db_at(end + 1)));
+    }
+    for a in anchors {
+        if !pts.iter().any(|q| q.0 == a.0) {
+            pts.push(a);
+        }
+    }
+    for q in pts.iter_mut().filter(|q| q.0 >= start && q.0 <= end) {
+        q.1 = (q.1 + delta).clamp(-144.0, 36.0);
+    }
+    pts.sort_by_key(|q| q.0);
+    c.gain_db = 0.0;
+    c.gain_env = pts;
+    Ok(json!({}))
+}
+
+fn gain_point_remove(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.gain_point_remove";
+    let cid = clip_id(p, id)?;
+    let at = p.get("at").and_then(Value::as_i64).ok_or_else(|| bad(id, "`at` required"))?;
+    let c = e.session_mut().find_clip_mut(cid).ok_or_else(|| bad(id, "no such clip"))?;
+    let pts: Vec<(Samples, f32)> = c.gain_env.iter().filter(|q| q.0 != at).map(|&(o, _)| (o, clip_db(c, o))).collect();
+    if pts.len() < 2 {
+        let g = pts.first().map_or(c.gain_db, |q| q.1);
+        c.gain_env.clear();
+        c.gain_db = g;
+    } else {
+        set_clip_env(c, pts);
+    }
+    Ok(json!({}))
 }
 
 fn gain(e: &mut Engine, p: &Value) -> Result<Value> {

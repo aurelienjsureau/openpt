@@ -307,7 +307,12 @@ fn io_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
         "delete_input" => {
-            let found = s.inputs.iter().find(|o| o.name.eq_ignore_ascii_case(&name)).map(|o| o.name.clone()).ok_or_else(|| bad(id, format!("no input `{name}`")))?;
+            let found = s
+                .inputs
+                .iter()
+                .find(|o| o.name.eq_ignore_ascii_case(&name))
+                .map(|o| o.name.clone())
+                .ok_or_else(|| bad(id, format!("no input `{name}`")))?;
             s.inputs.retain(|o| o.name != found);
             for t in &mut s.tracks {
                 if t.mixer.input == Route::Hardware(found.clone()) {

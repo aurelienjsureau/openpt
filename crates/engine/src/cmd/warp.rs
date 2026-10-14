@@ -26,7 +26,10 @@ fn clip_param(e: &Engine, id: &str, p: &Value) -> Result<(TrackId, Clip)> {
 }
 
 fn algorithm(s: &Session, id: &str, t: TrackId) -> Result<String> {
-    s.track(t).and_then(|x| x.elastic.clone()).filter(|a| a != "none").ok_or_else(|| bad(id, "Elastic Audio is off on this track: choose an algorithm first"))
+    s.track(t)
+        .and_then(|x| x.elastic.clone())
+        .filter(|a| a != "none")
+        .ok_or_else(|| bad(id, "Elastic Audio is off on this track: choose an algorithm first"))
 }
 
 fn current(c: &Clip, w: &Warp) -> bool {
@@ -99,7 +102,12 @@ pub(crate) fn render(s: &mut Session, id: &str, cid: ClipId, mut w: Warp, clip_l
 }
 
 pub(crate) fn drop_if_unused(s: &mut Session, src: SourceId) {
-    let used = s.tracks.iter().flat_map(|t| t.playlists.iter()).flat_map(|p| &p.clips).any(|c| matches!(c.content, ClipContent::Audio { source, .. } if source == src));
+    let used = s
+        .tracks
+        .iter()
+        .flat_map(|t| t.playlists.iter())
+        .flat_map(|p| &p.clips)
+        .any(|c| matches!(c.content, ClipContent::Audio { source, .. } if source == src));
     if !used {
         s.sources.retain(|x| x.id != src);
         s.pool.remove(src);
@@ -221,7 +229,13 @@ mod tests {
             }
         }
         let s = e.session_mut();
-        let src = crate::io::add_source(s, "Clicks", openpt_audio_io::AudioBuffer { sample_rate: rate, channels: vec![ch] }, None, openpt_audio_io::FileFormat::Wav);
+        let src = crate::io::add_source(
+            s,
+            "Clicks",
+            openpt_audio_io::AudioBuffer { sample_rate: rate, channels: vec![ch] },
+            None,
+            openpt_audio_io::FileFormat::Wav,
+        );
         let t = e.execute("track.new", &json!({"format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
         let clip = e.execute("clip.place_source", &json!({"source": src.0, "track": t, "at": 0})).unwrap()["clip"].as_u64().unwrap();
         (e, clip, t as i64)
@@ -244,12 +258,8 @@ mod tests {
         assert_eq!(w.to_clip(c.length, rate), rate * 3 / 2);
         let ClipContent::Audio { source, .. } = c.content else { panic!() };
         assert_eq!(e.session().pool.get(source).unwrap().frames() as i64, rate * 2);
-        let after: Vec<i64> = e.execute("clip.warp_events", &json!({"clip": clip})).unwrap()["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|v| v.as_i64())
-            .collect();
+        let after: Vec<i64> =
+            e.execute("clip.warp_events", &json!({"clip": clip})).unwrap()["events"].as_array().unwrap().iter().filter_map(|v| v.as_i64()).collect();
         assert!(after.iter().any(|x| (x - rate * 3 / 4).abs() < rate / 20), "the click at 0.5 s now plays near 0.75 s: {after:?}");
         let renders = e.session().sources.len();
         e.execute("clip.remove_warp", &json!({"clips": [clip]})).unwrap();

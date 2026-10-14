@@ -631,6 +631,17 @@ pub fn run_ui_command(app: &mut SoundApp, id: &str, p: &Value) -> Option<Result<
         "ui.new_tracks_dialog" => {
             return Some(Err("ui.new_tracks_dialog opens a dialog from the menu only; call track.new with parameters".into()));
         }
+        "ui.open_plugin" => {
+            let s = app.engine.session();
+            let track = p
+                .get("track")
+                .and_then(|v| v.as_u64().map(openpt_model::TrackId).or_else(|| v.as_str().and_then(|n| s.track_by_name(n)).map(|t| t.id)));
+            let (Some(track), Some(slot)) = (track, p.get("slot").and_then(Value::as_u64)) else {
+                return Some(Err("ui.open_plugin needs {track, slot}".into()));
+            };
+            crate::mix_window::open_plugin(app, track, slot as usize);
+            json!({})
+        }
         "ui.bounce_dialog" => {
             return Some(Err("ui.bounce_dialog opens a dialog from the menu only; call file.bounce_mix with a path".into()));
         }

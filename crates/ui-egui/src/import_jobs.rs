@@ -107,9 +107,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
             ui.separator();
             cancel = ui.button("Cancel").clicked();
         });
-    if cancel
-        && let Some(job) = &app.import_job
-    {
+    if cancel && let Some(job) = &app.import_job {
         job.cancel.store(true, Ordering::Relaxed);
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(50));

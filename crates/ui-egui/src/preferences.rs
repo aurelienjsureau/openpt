@@ -239,7 +239,10 @@ fn tabs(ui: &mut Ui, page: &mut Page) {
             let on = *page == p;
             let text = egui::RichText::new(label).font(bold(12.5)).color(if on { t.text } else { t.text_dim });
             let fill = if on { t.group_bg } else { t.group_header };
-            if ui.add(egui::Button::new(text).fill(fill).corner_radius(egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }).min_size(vec2(96.0, 24.0))).clicked() {
+            if ui
+                .add(egui::Button::new(text).fill(fill).corner_radius(egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }).min_size(vec2(96.0, 24.0)))
+                .clicked()
+            {
                 *page = p;
             }
         }
@@ -318,7 +321,12 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                             ui,
                             "pref_plugin_org",
                             &mut a.plugin_menu_org,
-                            &[("flat", "Flat List"), ("category", "Category"), ("manufacturer", "Manufacturer"), ("category_manufacturer", "Category and Manufacturer")],
+                            &[
+                                ("flat", "Flat List"),
+                                ("category", "Category"),
+                                ("manufacturer", "Manufacturer"),
+                                ("category_manufacturer", "Category and Manufacturer"),
+                            ],
                         )
                     });
                     row(ui, q, "UI Theme", |ui| {
@@ -341,14 +349,20 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                 });
             }
             Page::Operation => {
-                group(left, q, "Transport", &["Insertion Follows Playback", "Link Timeline and Edit Selection", "Pre/Post-Roll", "Pre-Roll", "Post-Roll", "Countoff"], |ui| {
-                    check(ui, q, &mut o.insertion_follows_playback, "Insertion Follows Playback");
-                    check(ui, q, &mut o.link_timeline_edit, "Link Timeline and Edit Selection");
-                    check(ui, q, &mut o.pre_post_roll, "Pre/Post-Roll");
-                    row(ui, q, "Pre-Roll", |ui| number(ui, &mut o.pre_roll_s, 0.0..=60.0, 0.05, "seconds"));
-                    row(ui, q, "Post-Roll", |ui| number(ui, &mut o.post_roll_s, 0.0..=60.0, 0.05, "seconds"));
-                    row(ui, q, "Countoff", |ui| number(ui, &mut o.countoff_bars, 1..=16, 0.1, "bars"));
-                });
+                group(
+                    left,
+                    q,
+                    "Transport",
+                    &["Insertion Follows Playback", "Link Timeline and Edit Selection", "Pre/Post-Roll", "Pre-Roll", "Post-Roll", "Countoff"],
+                    |ui| {
+                        check(ui, q, &mut o.insertion_follows_playback, "Insertion Follows Playback");
+                        check(ui, q, &mut o.link_timeline_edit, "Link Timeline and Edit Selection");
+                        check(ui, q, &mut o.pre_post_roll, "Pre/Post-Roll");
+                        row(ui, q, "Pre-Roll", |ui| number(ui, &mut o.pre_roll_s, 0.0..=60.0, 0.05, "seconds"));
+                        row(ui, q, "Post-Roll", |ui| number(ui, &mut o.post_roll_s, 0.0..=60.0, 0.05, "seconds"));
+                        row(ui, q, "Countoff", |ui| number(ui, &mut o.countoff_bars, 1..=16, 0.1, "bars"));
+                    },
+                );
                 group(left, q, "Auto Backup", &["Enable Session File Auto Backup", "Backup every"], |ui| {
                     check(ui, q, &mut a.autosave_enabled, "Enable Session File Auto Backup");
                     row(ui, q, "Backup every", |ui| number(ui, &mut a.autosave_minutes, 1..=120, 0.1, "minutes"));
@@ -417,7 +431,15 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
             }
             Page::Midi => {
                 group(left, q, "Note Display", &["Middle C", "Note Display"], |ui| {
-                    radios(ui, &mut a.note_names, &[("c3", "Standard Pitch (Middle C = \"C3\")"), ("c4", "Alternate Pitch (Middle C = \"C4\")"), ("number", "MIDI Note Number (Middle C = \"60\")")]);
+                    radios(
+                        ui,
+                        &mut a.note_names,
+                        &[
+                            ("c3", "Standard Pitch (Middle C = \"C3\")"),
+                            ("c4", "Alternate Pitch (Middle C = \"C4\")"),
+                            ("number", "MIDI Note Number (Middle C = \"60\")"),
+                        ],
+                    );
                 });
             }
         }

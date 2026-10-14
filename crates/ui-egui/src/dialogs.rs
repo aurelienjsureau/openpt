@@ -1,30 +1,93 @@
 use crate::SoundApp;
 use crate::theme::{Tokens, bold};
-use egui::{Align2, vec2};
+use egui::{Align2, Color32, vec2};
 use openpt_engine::Engine;
 use openpt_model::{ClipId, Session, SourceId, TrackId};
-use openpt_time::Samples;
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone)]
 pub enum Dialog {
-    NewTracks { count: u32, format: String, kind: String, timebase: String, name: String },
-    Bounce { path: String, format: String, bit_depth: String, normalize: bool },
-    RenameTrack { id: TrackId, name: String },
-    RenameClip { id: ClipId, name: String },
-    RenameMarker { id: openpt_model::MarkerId, name: String },
-    ClearClips { clips: Vec<ClipId>, sources: Vec<SourceId>, message: String },
-    PathPrompt { cmd: String, title: String, path: String, key: String },
-    Number { cmd: String, title: String, key: String, value: f64, suffix: String },
-    TempoChange { at: Samples, bpm: f64 },
+    NewTracks {
+        count: u32,
+        format: String,
+        kind: String,
+        timebase: String,
+        name: String,
+    },
+    Bounce {
+        path: String,
+        format: String,
+        bit_depth: String,
+        normalize: bool,
+    },
+    RenameTrack {
+        id: TrackId,
+        name: String,
+    },
+    RenameClip {
+        id: ClipId,
+        name: String,
+    },
+    RenameMarker {
+        id: openpt_model::MarkerId,
+        name: String,
+    },
+    ClearClips {
+        clips: Vec<ClipId>,
+        sources: Vec<SourceId>,
+        message: String,
+    },
+    PathPrompt {
+        cmd: String,
+        title: String,
+        path: String,
+        key: String,
+    },
+    Number {
+        cmd: String,
+        title: String,
+        key: String,
+        value: f64,
+        suffix: String,
+    },
+    TempoChange {
+        loc: String,
+        bpm: f64,
+        from_tick: Option<i64>,
+        snap_bar: bool,
+    },
     Spot(crate::spot::Spot),
-    Fades { shape: String },
-    StripSilence { threshold: f64, min_ms: f64, pre_ms: f64, post_ms: f64 },
-    Group { name: String, edit: bool, mix: bool, members: Vec<(u64, String, bool)> },
-    Session { frame_rate: String, bit_depth: String },
-    ScoreSetup { title: String, composer: String, bars_per_system: u32, show_track_names: bool },
-    MidiInputDevices { devices: Vec<(String, bool)> },
-    SaveChanges { then: (String, Value) },
+    Fades {
+        shape: String,
+    },
+    StripSilence {
+        threshold: f64,
+        min_ms: f64,
+        pre_ms: f64,
+        post_ms: f64,
+    },
+    Group {
+        name: String,
+        edit: bool,
+        mix: bool,
+        members: Vec<(u64, String, bool)>,
+    },
+    Session {
+        frame_rate: String,
+        bit_depth: String,
+    },
+    ScoreSetup {
+        title: String,
+        composer: String,
+        bars_per_system: u32,
+        show_track_names: bool,
+    },
+    MidiInputDevices {
+        devices: Vec<(String, bool)>,
+    },
+    SaveChanges {
+        then: (String, Value),
+    },
 }
 
 #[derive(Default)]
@@ -278,7 +341,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         Dialog::RenameMarker { .. } => "Rename Marker",
         Dialog::ClearClips { .. } => "Clear",
         Dialog::PathPrompt { title, .. } | Dialog::Number { title, .. } => title.as_str(),
-        Dialog::TempoChange { .. } => "Tempo Change (BPM)",
+        Dialog::TempoChange { .. } => "Tempo Change",
         Dialog::Spot(_) => "Spot",
         Dialog::Fades { .. } => "Fades",
         Dialog::StripSilence { .. } => "Strip Silence",
@@ -310,7 +373,8 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                 ui.selectable_value(format, f.label().to_string(), f.label());
                             }
                         });
-                        egui::ComboBox::from_id_salt("nt_kind").width(130.0)
+                        egui::ComboBox::from_id_salt("nt_kind")
+                            .width(130.0)
                             .selected_text(openpt_model::TrackKind::from_id(kind).map_or("Audio Track", |k| k.label()))
                             .show_ui(ui, |ui| {
                                 for k in openpt_model::TrackKind::ALL {
@@ -321,13 +385,13 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                 }
                             });
                         ui.label("in");
-                        egui::ComboBox::from_id_salt("nt_tb").width(100.0).selected_text(if timebase == "ticks" { "Ticks" } else { "Samples" }).show_ui(
-                            ui,
-                            |ui| {
+                        egui::ComboBox::from_id_salt("nt_tb")
+                            .width(100.0)
+                            .selected_text(if timebase == "ticks" { "Ticks" } else { "Samples" })
+                            .show_ui(ui, |ui| {
                                 ui.selectable_value(timebase, "samples".to_string(), "Samples");
                                 ui.selectable_value(timebase, "ticks".to_string(), "Ticks");
-                            },
-                        );
+                            });
                         ui.label("Name:");
                         ui.add(egui::TextEdit::singleline(name).desired_width(220.0));
                     });
@@ -454,13 +518,26 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         action = Some((cmd.clone(), v));
                     }
                 }
-                Dialog::TempoChange { at, bpm } => {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(bpm).speed(0.1).range(5.0..=1000.0));
-                        ui.label("bpm");
+                Dialog::TempoChange { loc, bpm, from_tick, snap_bar } => {
+                    egui::Grid::new("tempo_change").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
+                        ui.label("Location");
+                        crate::widgets::value_box(ui, |ui| ui.add_sized([110.0, 20.0], egui::TextEdit::singleline(loc)));
+                        ui.end_row();
+                        ui.label("BPM");
+                        crate::widgets::value_box(ui, |ui| {
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(bpm).speed(0.1).range(5.0..=1000.0).max_decimals(4))
+                        });
+                        ui.end_row();
                     });
-                    if buttons(ui, "OK", enter) {
-                        action = Some(tempo_change_action(*at, *bpm));
+                    ui.checkbox(snap_bar, "Snap to Bar");
+                    let tick = parse_bar_beat(app.engine.session(), loc, *snap_bar);
+                    if tick.is_none() {
+                        ui.colored_label(Color32::from_rgb(230, 120, 100), "Location: bar|beat|tick");
+                    }
+                    if buttons(ui, "OK", enter)
+                        && let Some(tick) = tick
+                    {
+                        action = Some(("event.tempo".into(), json!({"bpm": *bpm, "tick": tick, "from_tick": *from_tick})));
                     }
                 }
                 Dialog::Spot(d) => {
@@ -664,8 +741,21 @@ fn name_field(ui: &mut egui::Ui, name: &mut String) {
     }
 }
 
-fn tempo_change_action(at: Samples, bpm: f64) -> (String, Value) {
-    ("event.tempo".into(), json!({"bpm": bpm, "at": at}))
+pub(crate) fn parse_bar_beat(s: &openpt_model::Session, text: &str, bar: bool) -> Option<i64> {
+    let mut n = text.split(|c: char| c == '|' || c == '.' || c.is_whitespace()).filter(|x| !x.is_empty()).map(str::parse::<i64>);
+    let b = n.next()?.ok()?;
+    let beat = n.next().transpose().ok()?.unwrap_or(1);
+    let tick = n.next().transpose().ok()?.unwrap_or(0);
+    if b < 1 || beat < 1 || tick < 0 {
+        return None;
+    }
+    let bb = if bar { openpt_time::BarBeat { bar: b, beat: 1, tick: 0 } } else { openpt_time::BarBeat { bar: b, beat, tick } };
+    Some(s.tempo.tick_at_bar_beat(bb))
+}
+
+pub(crate) fn bar_beat_text(s: &openpt_model::Session, tick: i64) -> String {
+    let bb = s.tempo.bar_beat_at_tick(tick);
+    format!("{}|{}|{:03}", bb.bar, bb.beat, bb.tick)
 }
 
 fn audiosuite_window(app: &mut SoundApp, ctx: &egui::Context) {
@@ -759,11 +849,18 @@ mod tests {
     }
 
     #[test]
-    fn tempo_change_dialog_runs_a_real_command_at_its_position() {
-        let (cmd, params) = tempo_change_action(96_000, 133.5);
-        assert!(openpt_engine::command_specs().iter().any(|c| c.id == cmd), "{cmd} is not a command");
-        assert_eq!(params["at"], 96_000);
-        assert_eq!(params["bpm"], 133.5);
+    fn tempo_change_dialog_places_and_moves_a_change_at_a_bar_beat_location() {
+        let mut e = openpt_engine::demo::demo_engine();
+        let s = e.session().clone();
+        let t5 = parse_bar_beat(&s, "5|1|000", false).unwrap();
+        assert_eq!(bar_beat_text(&s, t5), "5|1|000");
+        assert_eq!(parse_bar_beat(&s, "5 3", true), Some(t5));
+        assert!(parse_bar_beat(&s, "x", false).is_none());
+        e.execute("event.tempo", &json!({"bpm": 133.5, "tick": t5})).unwrap();
+        let t9 = parse_bar_beat(e.session(), "9", false).unwrap();
+        e.execute("event.tempo", &json!({"bpm": 90.0, "tick": t9, "from_tick": t5})).unwrap();
+        let ticks: Vec<(i64, f64)> = e.session().tempo.tempos().iter().map(|x| (x.tick, x.bpm)).collect();
+        assert!(ticks.contains(&(t9, 90.0)) && !ticks.iter().any(|x| x.0 == t5), "{ticks:?}");
     }
 
     #[test]

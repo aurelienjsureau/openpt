@@ -4,7 +4,9 @@ use openpt_model::{TrackHeight, ZoomToggle};
 use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
-    vec![cmd!(noundo "view.zoom_toggle", "Zoom Toggle", [], None, "{width_px?: 1200, height_px?: 600, keep?: false (Cancel Zoom Toggle: stay at this zoom)}", always, toggle)]
+    vec![
+        cmd!(noundo "view.zoom_toggle", "Zoom Toggle", [], None, "{width_px?: 1200, height_px?: 600, keep?: false (Cancel Zoom Toggle: stay at this zoom)}", always, toggle),
+    ]
 }
 
 fn toggle(e: &mut Engine, p: &Value) -> Result<Value> {

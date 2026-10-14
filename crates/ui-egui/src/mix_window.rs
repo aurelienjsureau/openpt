@@ -56,7 +56,9 @@ fn heat_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
     inset(ui.painter(), sec, t.strip_section);
     section_label(ui, sec, "HEAT");
     let heat = app.engine.session().heat;
-    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(sec.shrink2(vec2(4.0, 16.0)).translate(vec2(0.0, 4.0))).layout(egui::Layout::top_down(egui::Align::Center)));
+    let mut c = ui.new_child(
+        egui::UiBuilder::new().max_rect(sec.shrink2(vec2(4.0, 16.0)).translate(vec2(0.0, 4.0))).layout(egui::Layout::top_down(egui::Align::Center)),
+    );
     c.spacing_mut().item_spacing.y = 2.0;
     if text_toggle(&mut c, vec2(sec.width() - 8.0, 16.0), "BYPASS", heat.bypass, t.mode_on, "Bypass HEAT on every track").clicked() {
         let _ = app.run("mix.heat", json!({"bypass": !heat.bypass}));
@@ -625,10 +627,7 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
     if let Some(src) = resp.dnd_release_payload::<InsertDrag>() {
         let copy = click_mods(ui).alt || ui.input(|i| i.modifiers.alt);
         app.capture_plugin_states();
-        let r = app.run(
-            "mix.insert_transfer",
-            json!({"from_track": src.track.0, "from": src.slot, "to_track": id.0, "to": slot, "copy": copy}),
-        );
+        let r = app.run("mix.insert_transfer", json!({"from_track": src.track.0, "from": src.slot, "to_track": id.0, "to": slot, "copy": copy}));
         if let Err(e) = r {
             app.ui.status = e;
         }
@@ -649,9 +648,7 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
     let dot = Rect::from_min_max(r.min, pos2(r.min.x + 13.0, r.max.y));
     if ins.is_some() {
         let dot_resp = ui.interact(dot, ui.id().with(("ins_dot", id.0, slot)), Sense::click()).on_hover_text("Insert menu");
-        egui::Popup::menu(&dot_resp)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| plugin_menu(app, ui, id, slot, true));
+        egui::Popup::menu(&dot_resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| plugin_menu(app, ui, id, slot, true));
     }
     if resp.clicked() && ins.is_some() {
         let m = click_mods(ui);
@@ -814,7 +811,10 @@ fn run_pick(app: &mut SoundApp, ui: &Ui, cmd: &str, params: serde_json::Value) {
 pub(crate) fn safe_mark(ui: &Ui, r: Rect, on: bool) {
     if on {
         ui.painter().rect_filled(r.shrink(1.0), 2.0, egui::Color32::from_black_alpha(120));
-        ui.painter().line_segment([r.left_bottom() + vec2(2.0, -2.0), r.right_top() + vec2(-2.0, 2.0)], Stroke::new(1.5, egui::Color32::from_white_alpha(170)));
+        ui.painter().line_segment(
+            [r.left_bottom() + vec2(2.0, -2.0), r.right_top() + vec2(-2.0, 2.0)],
+            Stroke::new(1.5, egui::Color32::from_white_alpha(170)),
+        );
     }
 }
 
@@ -894,7 +894,10 @@ fn plugin_search(ui: &mut Ui, search: &MenuSearch, instruments: bool) -> Option<
     let vst3 = openpt_vst3_host::cached();
     let mut hosted: Vec<(MenuPlugin, &str)> = Vec::new();
     for d in vst3.iter().flatten().filter(|d| d.is_instrument == instruments) {
-        hosted.push((MenuPlugin { id: d.id.clone(), name: d.name.clone(), vendor: d.vendor.clone(), category: category_label(d.category).into() }, "VST3"));
+        hosted.push((
+            MenuPlugin { id: d.id.clone(), name: d.name.clone(), vendor: d.vendor.clone(), category: category_label(d.category).into() },
+            "VST3",
+        ));
     }
     for d in openpt_au_host::scan().into_iter().filter(|d| d.is_instrument == instruments) {
         hosted.push((MenuPlugin { category: category_label(d.category).into(), id: d.id, name: d.name, vendor: d.vendor }, "AU"));
@@ -1105,7 +1108,6 @@ fn scanning_label(ui: &mut Ui) {
     ui.weak(if total > 0 { format!("Scanning VST3 plug-ins… {done}/{total}") } else { "Scanning VST3 plug-ins…".to_string() });
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
 }
-
 
 pub fn plugin_info(id: &str) -> Option<&'static openpt_dsp::PluginInfo> {
     openpt_dsp::plugin_info(id).or_else(|| openpt_vst3_host::plugin_info(id)).or_else(|| openpt_au_host::plugin_info(id))

@@ -14,7 +14,10 @@ use vst3::Steinberg::Vst::{
     IHostApplicationTrait, IMidiMappingTrait, IParamValueQueueTrait, IParameterChangesTrait,
 };
 use vst3::Steinberg::{self as sb};
-use vst3::Steinberg::{FUnknown, IBStreamTrait, IPlugFrameTrait, IPlugViewTrait, IPluginBaseTrait, IPluginFactory2Trait, IPluginFactoryTrait};
+use vst3::Steinberg::{
+    FUnknown, IBStreamTrait, IPlugFrameTrait, IPlugViewContentScaleSupportTrait, IPlugViewTrait, IPluginBaseTrait, IPluginFactory2Trait,
+    IPluginFactoryTrait,
+};
 use vst3::{Class, ComPtr, ComWrapper, Interface};
 
 const MAX_CLASSES: i32 = 1024;
@@ -1510,6 +1513,11 @@ impl IPlugFrameTrait for PlugFrame {
     }
 }
 
+fn set_content_scale(view: &ComPtr<sb::IPlugView>, scale: f64) -> bool {
+    let Some(s) = view.cast::<sb::IPlugViewContentScaleSupport>() else { return false };
+    ok(unsafe { s.setContentScaleFactor(scale as f32) })
+}
+
 fn rect_size(r: &sb::ViewRect) -> (f64, f64) {
     let w = r.right.saturating_sub(r.left).clamp(1, 16_384);
     let h = r.bottom.saturating_sub(r.top).clamp(1, 16_384);
@@ -1546,8 +1554,15 @@ impl EditorLink {
     }
 
     pub fn probe(&self) -> Result<(u32, u32), String> {
+        self.probe_at(None)
+    }
+
+    pub fn probe_at(&self, scale: Option<f64>) -> Result<(u32, u32), String> {
         let g = self.lock();
         let view = EditorLink::create_view(&g)?;
+        if let Some(k) = scale {
+            set_content_scale(&view, k);
+        }
         let platform = window::PLATFORM_TYPE.ok_or_else(|| "plugin editors are not supported on this platform".to_string())?;
         if unsafe { view.isPlatformTypeSupported(platform) } != sb::kResultTrue {
             return Err("the editor does not support this platform's windows".into());
@@ -1577,10 +1592,14 @@ impl EditorLink {
         if unsafe { view.isPlatformTypeSupported(platform) } != sb::kResultTrue {
             return Err("the editor does not support this platform's windows".into());
         }
+        let win = window::HostWindow::new(title, 400.0, 300.0)?;
+        if let Some(k) = win.scale() {
+            set_content_scale(&view, k);
+        }
         let mut r = sb::ViewRect { left: 0, top: 0, right: 400, bottom: 300 };
         unsafe { view.getSize(&mut r) };
         let (w, h) = rect_size(&r);
-        let win = window::HostWindow::new(title, w, h)?;
+        window::resize(win.raw(), w, h);
         let frame = ComWrapper::new(PlugFrame { window: std::sync::atomic::AtomicPtr::new(win.raw()) });
         if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
             unsafe { view.setFrame(f.as_ptr()) };
@@ -1590,6 +1609,13 @@ impl EditorLink {
             win.close();
             return Err("the editor could not attach to its window".into());
         }
+        let resizable = unsafe { view.canResize() } == sb::kResultTrue;
+        win.set_view(view.as_ptr().cast(), resizable);
+        let mut r2 = r;
+        if ok(unsafe { view.getSize(&mut r2) }) && rect_size(&r2) != (w, h) {
+            let (w, h) = rect_size(&r2);
+            window::resize(win.raw(), w, h);
+        }
         win.raise();
         g.view = Some(view);
         g.frame = Some(frame);
@@ -1598,6 +1624,9 @@ impl EditorLink {
     }
 
     fn teardown(g: &mut EditorInner) {
+        if let Some(w) = &g.window {
+            w.set_view(std::ptr::null_mut(), false);
+        }
         if let Some(view) = g.view.take() {
             unsafe {
                 view.removed();
@@ -1757,6 +1786,12 @@ mod window {
             Ok(HostWindow { window: Retained::into_raw(window) })
         }
 
+        pub fn scale(&self) -> Option<f64> {
+            None
+        }
+
+        pub fn set_view(&self, _view: *mut c_void, _resizable: bool) {}
+
         pub fn raw(&self) -> *mut c_void {
             self.window.cast()
         }
@@ -1800,13 +1835,17 @@ mod window {
 mod window {
     use std::ffi::{c_char, c_void};
     use std::sync::OnceLock;
+    use vst3::Steinberg::{self as sb, IPlugViewTrait};
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AdjustWindowRectEx, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, GWL_EXSTYLE, GWL_STYLE,
-        GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow, WM_CLOSE, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN, WS_OVERLAPPED, WS_SYSMENU,
+        GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW, RegisterClassExW, SW_HIDE, SW_SHOW,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_CLOSE,
+        WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN,
+        WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME,
     };
 
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeHWND);
@@ -1821,10 +1860,57 @@ mod window {
 
     const STYLE: u32 = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
 
+    thread_local! {
+        static PLUGIN_RESIZING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    fn view_of(hwnd: HWND) -> Option<vst3::ComRef<'static, sb::IPlugView>> {
+        unsafe { vst3::ComRef::from_raw(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut sb::IPlugView) }
+    }
+
+    fn frame_insets(hwnd: HWND) -> RECT {
+        let (style, ex) = unsafe { (GetWindowLongPtrW(hwnd, GWL_STYLE) as u32, GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32) };
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { AdjustWindowRectEx(&mut r, style, 0, ex) };
+        r
+    }
+
     unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if msg == WM_CLOSE {
             unsafe { ShowWindow(hwnd, SW_HIDE) };
             return 0;
+        }
+        if msg == WM_SIZING
+            && let Some(v) = view_of(hwnd)
+        {
+            let Some(w) = (unsafe { (lparam as *mut RECT).as_mut() }) else { return 1 };
+            let f = frame_insets(hwnd);
+            let mut r =
+                sb::ViewRect { left: 0, top: 0, right: (w.right - f.right) - (w.left - f.left), bottom: (w.bottom - f.bottom) - (w.top - f.top) };
+            if unsafe { v.checkSizeConstraint(&mut r) } == sb::kResultTrue {
+                let (cw, ch) = (r.right - r.left, r.bottom - r.top);
+                let (ow, oh) = (cw + f.right - f.left, ch + f.bottom - f.top);
+                if matches!(wparam as u32, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT) {
+                    w.left = w.right - ow;
+                } else {
+                    w.right = w.left + ow;
+                }
+                if matches!(wparam as u32, WMSZ_TOP | WMSZ_TOPLEFT | WMSZ_TOPRIGHT) {
+                    w.top = w.bottom - oh;
+                } else {
+                    w.bottom = w.top + oh;
+                }
+            }
+            return 1;
+        }
+        if msg == WM_SIZE
+            && !PLUGIN_RESIZING.with(std::cell::Cell::get)
+            && let Some(v) = view_of(hwnd)
+        {
+            let mut r = sb::ViewRect { left: 0, top: 0, right: (lparam & 0xFFFF) as i32, bottom: ((lparam >> 16) & 0xFFFF) as i32 };
+            if r.right > 0 && r.bottom > 0 {
+                unsafe { v.onSize(&mut r) };
+            }
         }
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     }
@@ -1901,6 +1987,29 @@ mod window {
             Ok(HostWindow { hwnd })
         }
 
+        pub fn scale(&self) -> Option<f64> {
+            let h = self.live()?;
+            let dpi = unsafe { GetDpiForWindow(h) };
+            (dpi > 0).then(|| f64::from(dpi) / 96.0)
+        }
+
+        pub fn set_view(&self, view: *mut c_void, resizable: bool) {
+            let Some(h) = self.live() else { return };
+            unsafe {
+                SetWindowLongPtrW(h, GWLP_USERDATA, view as isize);
+                let style = GetWindowLongPtrW(h, GWL_STYLE) as u32;
+                let style =
+                    if resizable && !view.is_null() { style | WS_THICKFRAME | WS_MAXIMIZEBOX } else { style & !(WS_THICKFRAME | WS_MAXIMIZEBOX) };
+                let mut c = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                GetClientRect(h, &mut c);
+                SetWindowLongPtrW(h, GWL_STYLE, style as isize);
+                let (ow, oh) = outer_size(style, GetWindowLongPtrW(h, GWL_EXSTYLE) as u32, f64::from(c.right), f64::from(c.bottom));
+                PLUGIN_RESIZING.with(|f| f.set(true));
+                SetWindowPos(h, std::ptr::null_mut(), 0, 0, ow, oh, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                PLUGIN_RESIZING.with(|f| f.set(false));
+            }
+        }
+
         pub fn raw(&self) -> *mut c_void {
             self.hwnd
         }
@@ -1935,7 +2044,9 @@ mod window {
         }
         let (style, ex) = unsafe { (GetWindowLongPtrW(window, GWL_STYLE) as u32, GetWindowLongPtrW(window, GWL_EXSTYLE) as u32) };
         let (ow, oh) = outer_size(style, ex, w, h);
+        PLUGIN_RESIZING.with(|f| f.set(true));
         unsafe { SetWindowPos(window, std::ptr::null_mut(), 0, 0, ow, oh, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) };
+        PLUGIN_RESIZING.with(|f| f.set(false));
     }
 }
 
@@ -1955,6 +2066,12 @@ mod window {
         pub fn new(_title: &str, _w: f64, _h: f64) -> Result<HostWindow, String> {
             Err("VST3 editors are not hosted on this platform yet".into())
         }
+        pub fn scale(&self) -> Option<f64> {
+            None
+        }
+
+        pub fn set_view(&self, _view: *mut c_void, _resizable: bool) {}
+
         pub fn raw(&self) -> *mut c_void {
             std::ptr::null_mut()
         }

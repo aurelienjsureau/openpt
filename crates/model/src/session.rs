@@ -268,9 +268,9 @@ impl Default for EditState {
                 "edit_view.sends_ae",
                 "edit_view.io",
             ]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
             values: std::collections::BTreeMap::new(),
         }
     }

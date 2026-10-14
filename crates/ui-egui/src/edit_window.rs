@@ -504,13 +504,55 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
         match id.as_str() {
             "tempo" => {
                 painter.rect_filled(row.shrink2(vec2(0.0, 1.0)), 0.0, t.tempo_ruler);
-                let tresp = ui.interact(row, ui.id().with("tempo_ruler"), Sense::click());
-                if tresp.double_clicked()
-                    && let Some(p) = tresp.interact_pointer_pos()
-                {
-                    let at = snap(&s, sample_at(&s, tl, p.x).max(0));
-                    let bpm = s.tempo.tempo_at_tick(s.tempo.samples_to_ticks(at, sr));
-                    app.dialogs.open = Some(crate::dialogs::Dialog::TempoChange { at, bpm });
+                let tresp = ui.interact(row, ui.id().with("tempo_ruler"), Sense::click_and_drag());
+                let hit = |x: f32| s.tempo.tempos().iter().find(|e| (x_of(&s, tl, s.tempo.tick_to_samples(e.tick, sr)) - x).abs() < 7.0).copied();
+                let drag_key = egui::Id::new("tempo_drag");
+                if let Some(p) = tresp.interact_pointer_pos() {
+                    if tresp.clicked() && crate::mix_window::click_mods(ui).alt {
+                        if let Some(ev) = hit(p.x).filter(|e| e.tick > 0) {
+                            let _ = app.run("event.tempo_remove", json!({"at": s.tempo.tick_to_samples(ev.tick, sr)}));
+                        }
+                    } else if tresp.double_clicked() {
+                        let (tick, bpm, from_tick) = match hit(p.x) {
+                            Some(ev) => (ev.tick, ev.bpm, Some(ev.tick)),
+                            None => {
+                                let tick = s.tempo.samples_to_ticks(snap(&s, sample_at(&s, tl, p.x).max(0)), sr);
+                                (tick, s.tempo.tempo_at_tick(tick), None)
+                            }
+                        };
+                        let loc = crate::dialogs::bar_beat_text(&s, tick);
+                        app.dialogs.open = Some(crate::dialogs::Dialog::TempoChange { loc, bpm, from_tick, snap_bar: false });
+                    }
+                    if tresp.drag_started()
+                        && let Some(ev) = ui.input(|i| i.pointer.press_origin()).and_then(|o| hit(o.x)).filter(|e| e.tick > 0)
+                    {
+                        ui.ctx().data_mut(|d| d.insert_temp(drag_key, (ev.tick, ev.bpm)));
+                    }
+                    if let Some((_, _)) = ui.ctx().data(|d| d.get_temp::<(i64, f64)>(drag_key)) {
+                        ui.painter().vline(p.x, row.min.y..=tl.max.y, Stroke::new(1.0, Color32::from_rgb(220, 60, 50)));
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
+                    if tresp.drag_stopped()
+                        && let Some((tick, bpm)) = ui.ctx().data_mut(|d| d.remove_temp::<(i64, f64)>(drag_key))
+                    {
+                        let to = s.tempo.samples_to_ticks(snap(&s, sample_at(&s, tl, p.x).max(0)), sr).max(1);
+                        if to != tick {
+                            let _ = app.run("event.tempo", json!({"bpm": bpm, "tick": to, "from_tick": tick}));
+                        }
+                    }
+                }
+                let tri = Rect::from_center_size(pos2(lab.min.x + 12.0, lab.center().y), vec2(12.0, 12.0));
+                let open = s.edit.flag("view.ruler.tempo_editor");
+                let tri_resp = ui.interact(tri, ui.id().with("tempo_triangle"), Sense::click()).on_hover_text("Tempo Editor");
+                let c = tri.center();
+                let pts = if open {
+                    vec![pos2(c.x - 4.0, c.y - 2.5), pos2(c.x + 4.0, c.y - 2.5), pos2(c.x, c.y + 3.0)]
+                } else {
+                    vec![pos2(c.x - 2.5, c.y - 4.0), pos2(c.x + 3.0, c.y), pos2(c.x - 2.5, c.y + 4.0)]
+                };
+                ui.painter().add(Shape::convex_polygon(pts, t.ruler_text, Stroke::NONE));
+                if tri_resp.clicked() {
+                    let _ = app.run("view.ruler_tempo_editor", json!({}));
                 }
                 let mut last_label = f32::MIN;
                 for ev in s.tempo.tempos() {
@@ -599,14 +641,62 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                     ));
                     painter.text(pos2(x + 8.0, row.center().y), Align2::LEFT_CENTER, &m.name, bold(11.0), t.marker_text);
                 }
-                let resp = ui.interact(row, ui.id().with(("marker_ruler", lane)), Sense::click());
+                let resp = ui.interact(row, ui.id().with(("marker_ruler", lane)), Sense::click_and_drag());
+                let hit_at = |x: f32| {
+                    s.markers.iter().filter(|m| m.ruler == lane || (lane == 1 && m.ruler == 0)).find(|m| (x_of(&s, tl, m.start) - x).abs() < 8.0)
+                };
+                let menu_key = ui.id().with(("marker_menu", lane));
+                if resp.secondary_clicked() {
+                    let n = resp.interact_pointer_pos().and_then(|p| hit_at(p.x)).map(|m| m.number);
+                    ui.ctx().data_mut(|d| d.insert_temp(menu_key, n));
+                }
+                if let Some(n) = ui.ctx().data(|d| d.get_temp::<Option<u32>>(menu_key)).flatten()
+                    && let Some(m) = s.markers.iter().find(|m| m.number == n)
+                {
+                    resp.context_menu(|ui| {
+                        if ui.button("Rename...").clicked() {
+                            app.dialogs.open_rename_marker(m.id, &m.name);
+                            ui.close();
+                        }
+                        if ui.button("Delete").clicked() {
+                            let _ = app.run("markers.delete", json!({"number": n}));
+                            ui.close();
+                        }
+                    });
+                }
+                let drag_key = egui::Id::new(("marker_drag", lane));
+                if resp.drag_started()
+                    && let Some(m) = ui.input(|i| i.pointer.press_origin()).and_then(|o| hit_at(o.x))
+                {
+                    ui.ctx().data_mut(|d| d.insert_temp(drag_key, m.number));
+                }
+                if let Some(p) = resp.interact_pointer_pos()
+                    && ui.ctx().data(|d| d.get_temp::<u32>(drag_key)).is_some()
+                {
+                    let away = p.y < row.min.y - 12.0 || p.y > row.max.y + 12.0;
+                    ui.painter().vline(
+                        p.x,
+                        row.min.y..=tl.max.y,
+                        Stroke::new(1.0, if away { Color32::from_rgb(200, 60, 50) } else { Color32::from_rgb(232, 200, 64) }),
+                    );
+                    ui.ctx().set_cursor_icon(if away { egui::CursorIcon::NotAllowed } else { egui::CursorIcon::ResizeHorizontal });
+                    if resp.drag_stopped()
+                        && let Some(n) = ui.ctx().data_mut(|d| d.remove_temp::<u32>(drag_key))
+                    {
+                        if away {
+                            let _ = app.run("markers.delete", json!({"number": n}));
+                        } else {
+                            let _ = app.run("markers.edit", json!({"number": n, "at": snap(&s, sample_at(&s, tl, p.x).max(0))}));
+                        }
+                    }
+                }
                 if let Some(p) = resp.interact_pointer_pos() {
-                    let hit = s
-                        .markers
-                        .iter()
-                        .filter(|m| m.ruler == lane || (lane == 1 && m.ruler == 0))
-                        .find(|m| (x_of(&s, tl, m.start) - p.x).abs() < 8.0);
-                    if resp.double_clicked() {
+                    let hit = hit_at(p.x);
+                    if resp.clicked() && crate::mix_window::click_mods(ui).alt {
+                        if let Some(m) = hit {
+                            let _ = app.run("markers.delete", json!({"number": m.number}));
+                        }
+                    } else if resp.double_clicked() {
                         match hit {
                             Some(m) => app.dialogs.open_rename_marker(m.id, &m.name),
                             None => {
@@ -1157,7 +1247,13 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
                 ui.painter().line_segment([c + vec2(0.0, -3.5), c + vec2(0.0, 1.0)], Stroke::new(1.0, t.text));
                 ui.painter().add(Shape::convex_polygon(vec![c + vec2(0.0, 0.5), c + vec2(3.0, 3.5), c + vec2(-3.0, 3.5)], t.text, Stroke::NONE));
                 if let Some(alg) = &track.elastic {
-                    ui.painter().with_clip_rect(field).text(pos2(field.min.x + 14.0, field.center().y), Align2::LEFT_CENTER, elastic_label(alg), bold(10.0), t.text);
+                    ui.painter().with_clip_rect(field).text(
+                        pos2(field.min.x + 14.0, field.center().y),
+                        Align2::LEFT_CENTER,
+                        elastic_label(alg),
+                        bold(10.0),
+                        t.text,
+                    );
                 }
                 egui::Popup::menu(&resp.on_hover_text("Elastic Audio")).show(|ui| {
                     for alg in ["none", "polyphonic", "rhythmic", "monophonic", "varispeed", "x-form"] {
@@ -1330,7 +1426,8 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
         ui.painter().rect_filled(vr, 2.0, Color32::from_gray(15));
         ui.painter().rect_filled(vr.shrink(1.5), 1.5, Color32::BLACK);
         let m = &track.mixer;
-        let pan = m.pan.first().map_or("-".into(), |p| crate::widgets::pan_text(*p));
+        let pan =
+            if m.pan.is_empty() { "-".into() } else { m.pan.iter().take(2).map(|p| crate::widgets::pan_text(*p)).collect::<Vec<_>>().join(" ") };
         let ink = Tokens::DARK.counter_text;
         for (y, label, value) in [(7.5, "vol", crate::widgets::db_text(m.volume_db)), (22.0, "pan", pan)] {
             ui.painter().text(pos2(vr.min.x + 7.0, vr.min.y + y), Align2::LEFT_CENTER, label, bold(10.0), ink);
@@ -1354,7 +1451,13 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
                 }
                 continue;
             }
-            let press = if resp.drag_started() { ui.input(|x| x.pointer.press_origin()) } else if resp.clicked() { resp.interact_pointer_pos() } else { None };
+            let press = if resp.drag_started() {
+                ui.input(|x| x.pointer.press_origin())
+            } else if resp.clicked() {
+                resp.interact_pointer_pos()
+            } else {
+                None
+            };
             if let Some(p) = press {
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("io_mini_fader"), (id.0, i, p)));
                 let pass = ui.ctx().cumulative_pass_nr();
@@ -1390,7 +1493,8 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
         return;
     };
     let t = Tokens::current();
-    let pos0 = if which == 0 { openpt_model::fader_db_to_pos(track.mixer.volume_db) } else { track.mixer.pan.first().map_or(0.5, |p| (p + 1.0) * 0.5) };
+    let pos0 =
+        if which == 0 { openpt_model::fader_db_to_pos(track.mixer.volume_db) } else { track.mixer.pan.first().map_or(0.5, |p| (p + 1.0) * 0.5) };
     let at_key = key.with(("at", tid, which, press.x.to_bits(), press.y.to_bits()));
     let at = ctx.data(|d| d.get_temp::<Pos2>(at_key)).unwrap_or_else(|| {
         let at = if which == 0 {
@@ -1417,12 +1521,24 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
                     let vertical = which == 0;
                     let size = if vertical { vec2(22.0, MINI_FADER_TRAVEL + 10.0) } else { vec2(MINI_FADER_TRAVEL + 10.0, 18.0) };
                     let (r, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
-                    let along = |r: Rect, k: f32| if vertical { pos2(r.center().x, r.max.y - 5.0 - MINI_FADER_TRAVEL * k) } else { pos2(r.min.x + 5.0 + MINI_FADER_TRAVEL * k, r.center().y) };
+                    let along = |r: Rect, k: f32| {
+                        if vertical {
+                            pos2(r.center().x, r.max.y - 5.0 - MINI_FADER_TRAVEL * k)
+                        } else {
+                            pos2(r.min.x + 5.0 + MINI_FADER_TRAVEL * k, r.center().y)
+                        }
+                    };
                     let slot = if vertical { vec2(4.0, MINI_FADER_TRAVEL) } else { vec2(MINI_FADER_TRAVEL, 4.0) };
                     ui.painter().rect_filled(Rect::from_center_size(r.center(), slot), 2.0, t.fader_track);
                     let c = along(r, pos);
                     let cap = if vertical { vec2(16.0, 9.0) } else { vec2(9.0, 16.0) };
-                    ui.painter().rect(Rect::from_center_size(c, cap), 2.0, Color32::from_gray(200), Stroke::new(1.0, Color32::from_gray(40)), StrokeKind::Inside);
+                    ui.painter().rect(
+                        Rect::from_center_size(c, cap),
+                        2.0,
+                        Color32::from_gray(200),
+                        Stroke::new(1.0, Color32::from_gray(40)),
+                        StrokeKind::Inside,
+                    );
                     if vertical {
                         ui.painter().hline(c.x - 5.0..=c.x + 5.0, c.y, Stroke::new(1.0, Color32::from_gray(40)));
                     } else {
@@ -1431,12 +1547,21 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
                     let alt = resp.clicked() && crate::mix_window::click_mods(ui).alt;
                     let fine = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                     let new_pos = if alt {
-                        Some(if which == 0 { openpt_model::fader_db_to_pos(0.0) } else if rows == 2 { k as f32 } else { 0.5 })
+                        Some(if which == 0 {
+                            openpt_model::fader_db_to_pos(0.0)
+                        } else if rows == 2 {
+                            k as f32
+                        } else {
+                            0.5
+                        })
                     } else if resp.dragged() {
                         let d = if vertical { -resp.drag_delta().y } else { resp.drag_delta().x };
                         Some((pos + d / MINI_FADER_TRAVEL * if fine { 0.1 } else { 1.0 }).clamp(0.0, 1.0))
                     } else if resp.clicked() {
-                        resp.interact_pointer_pos().map(|p| if vertical { (r.max.y - 5.0 - p.y) / MINI_FADER_TRAVEL } else { (p.x - r.min.x - 5.0) / MINI_FADER_TRAVEL }.clamp(0.0, 1.0))
+                        resp.interact_pointer_pos().map(|p| {
+                            if vertical { (r.max.y - 5.0 - p.y) / MINI_FADER_TRAVEL } else { (p.x - r.min.x - 5.0) / MINI_FADER_TRAVEL }
+                                .clamp(0.0, 1.0)
+                        })
                     } else {
                         None
                     };
@@ -1445,10 +1570,16 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
                             let db = openpt_model::fader_pos_to_db(np).clamp(-144.0, 12.0);
                             let _ = app.engine.execute_merged("mix.volume", &json!({"track": tid, "db": db}), &format!("fader:{tid}"));
                         } else {
-                            let _ = app.engine.execute_merged("mix.pan", &json!({"track": tid, "pan": np * 2.0 - 1.0, "index": k}), &format!("pan:{tid}:{k}"));
+                            let _ = app.engine.execute_merged(
+                                "mix.pan",
+                                &json!({"track": tid, "pan": np * 2.0 - 1.0, "index": k}),
+                                &format!("pan:{tid}:{k}"),
+                            );
                         }
                     }
-                    crate::widgets::value_box(ui, |ui| ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(label).color(t.field_text).font(bold(10.5)))));
+                    crate::widgets::value_box(ui, |ui| {
+                        ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(label).color(t.field_text).font(bold(10.5))))
+                    });
                 });
             }
         });
@@ -1996,6 +2127,163 @@ fn plugin_range(track: &Track, p: &AutoParam) -> (f32, f32) {
     (0.0, 1.0)
 }
 
+fn auto_range(track: &Track, p: &AutoParam) -> (f32, f32) {
+    if matches!(p, AutoParam::Volume | AutoParam::SendLevel(_)) {
+        (-60.0, 12.0)
+    } else if matches!(p, AutoParam::Plugin { .. }) {
+        plugin_range(track, p)
+    } else {
+        let (lo, hi, _) = p.range();
+        (lo, hi)
+    }
+}
+
+fn auto_default(track: &Track, p: &AutoParam) -> f32 {
+    match p {
+        AutoParam::Volume => track.mixer.volume_db,
+        AutoParam::Pan(i) => track.mixer.pan.get(usize::from(*i)).copied().unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+fn auto_y(lane: Rect, (lo, hi): (f32, f32), v: f32) -> f32 {
+    let k = ((v.clamp(lo, hi) - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0);
+    lane.max.y - 4.0 - k * (lane.height() - 8.0)
+}
+
+fn auto_value(lane: Rect, (lo, hi): (f32, f32), y: f32) -> f32 {
+    lo + (hi - lo) * ((lane.max.y - 4.0 - y) / (lane.height() - 8.0)).clamp(0.0, 1.0)
+}
+
+fn gain_span(s: &Session, lane: Rect) -> (f32, f32) {
+    (lane.min.y + 1.0 + clip_name_height(s, lane), lane.max.y - 1.0)
+}
+
+fn gain_y((top, bot): (f32, f32), db: f32) -> f32 {
+    bot - 3.0 - ((db.clamp(-36.0, 36.0) + 36.0) / 72.0) * (bot - top - 6.0)
+}
+
+fn gain_db_of_y((top, bot): (f32, f32), y: f32) -> f32 {
+    (((bot - 3.0 - y) / (bot - top - 6.0).max(1.0)).clamp(0.0, 1.0) * 72.0 - 36.0).clamp(-36.0, 36.0)
+}
+
+enum LineHit {
+    Auto { param: AutoParam, point: Option<Samples>, at: Samples, value: f32, per_px: f32 },
+    Gain { clip: ClipId, point: Option<Samples>, at: Samples, db: f32, per_px: f32 },
+}
+
+impl LineHit {
+    fn point(&self) -> bool {
+        matches!(self, Self::Auto { point: Some(_), .. } | Self::Gain { point: Some(_), .. })
+    }
+}
+
+fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Tool) -> Option<LineHit> {
+    if !matches!(tool, Tool::Grabber | Tool::Smart) || !lane.contains(q) {
+        return None;
+    }
+    let grabber = tool == Tool::Grabber;
+    let at = sample_at(s, tl, q.x).max(0);
+    let near = |x: f32, y: f32| pos2(x, y).distance(q) < 7.0;
+    if let Some(param) = AutoParam::parse(&track.view) {
+        let range = auto_range(track, &param);
+        let def = auto_default(track, &param);
+        let lane_pts = track.lane(&param);
+        let point = lane_pts.and_then(|l| l.points.iter().find(|pt| near(x_of(s, tl, pt.at), auto_y(lane, range, pt.value)))).map(|pt| pt.at);
+        let line = lane_pts.map_or(def, |l| l.value_at(at, def));
+        let on_line = (auto_y(lane, range, line) - q.y).abs() < 5.0;
+        if point.is_none() && !on_line && !grabber {
+            return None;
+        }
+        let value = if on_line { line } else { auto_value(lane, range, q.y) };
+        return Some(LineHit::Auto { param, point, at, value, per_px: (range.1 - range.0) / (lane.height() - 8.0).max(1.0) });
+    }
+    if track.view != "clip_gain" {
+        return None;
+    }
+    let c = clip_at(track, at).filter(|c| c.is_audio())?;
+    let span = gain_span(s, lane);
+    let point = c.gain_env.iter().find(|(o, db)| near(x_of(s, tl, c.start + o), gain_y(span, c.gain_db + db))).map(|p| p.0);
+    let rel = at - c.start;
+    let line = c.gain_db_at(rel);
+    let on_line = (gain_y(span, line) - q.y).abs() < 5.0;
+    if point.is_none() && !on_line {
+        return None;
+    }
+    let db = if on_line { line } else { gain_db_of_y(span, q.y) };
+    Some(LineHit::Gain { clip: c.id, point, at: rel, db, per_px: 72.0 / (span.1 - span.0 - 6.0).max(1.0) })
+}
+
+fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, y: f32) {
+    app.engine.end_merge();
+    let s = app.engine.session_arc();
+    let sel = s.edit.selection;
+    let in_sel = |at: Samples| !alt && sel.end > sel.start && s.edit.selected_tracks.contains(&track) && at >= sel.start && at <= sel.end;
+    match &hit {
+        LineHit::Auto { param, at, per_px, .. } if in_sel(*at) => {
+            app.gesture = Some(Gesture::LineTrim {
+                track,
+                param: Some(automation_id(param)),
+                clip: None,
+                start: sel.start,
+                end: sel.end,
+                anchor_y: y,
+                per_px: *per_px,
+                applied: 0.0,
+            });
+            return;
+        }
+        LineHit::Gain { clip, at, per_px, .. } if s.find_clip(*clip).is_some_and(|(_, c)| in_sel(c.start + at)) => {
+            let c0 = s.find_clip(*clip).map_or(0, |(_, c)| c.start);
+            app.gesture = Some(Gesture::LineTrim {
+                track,
+                param: None,
+                clip: Some(*clip),
+                start: sel.start - c0,
+                end: sel.end - c0,
+                anchor_y: y,
+                per_px: *per_px,
+                applied: 0.0,
+            });
+            return;
+        }
+        _ => {}
+    }
+    match hit {
+        LineHit::Auto { param, point: Some(at), .. } if alt => {
+            let _ = app.run("automation.delete_point", json!({"track": track.0, "param": automation_id(&param), "at": at}));
+        }
+        LineHit::Gain { clip, point: Some(at), .. } if alt => {
+            let _ = app.run("clip.gain_point_remove", json!({"clip": clip.0, "at": at}));
+        }
+        LineHit::Auto { point: None, .. } | LineHit::Gain { point: None, .. } if alt => {}
+        LineHit::Auto { param, point, at, value, .. } => {
+            let pid = automation_id(&param);
+            let at = match point {
+                Some(p) => p,
+                None => {
+                    let key = format!("auto_point:{}", track.0);
+                    let _ =
+                        app.engine.execute_merged("automation.set_point", &json!({"track": track.0, "param": pid, "at": at, "value": value}), &key);
+                    at
+                }
+            };
+            app.gesture = Some(Gesture::AutoPoint { track, param: pid, at });
+        }
+        LineHit::Gain { clip, point, at, db, .. } => {
+            let at = match point {
+                Some(p) => p,
+                None => {
+                    let key = format!("gain_point:{}", clip.0);
+                    let r = app.engine.execute_merged("clip.gain_point", &json!({"clip": clip.0, "at": at, "db": db}), &key);
+                    r.ok().and_then(|v| v.get("at").and_then(serde_json::Value::as_i64)).unwrap_or(at)
+                }
+            };
+            app.gesture = Some(Gesture::GainPoint { clip, track, at });
+        }
+    }
+}
+
 fn snap(s: &Session, at: Samples) -> Samples {
     let on = s.edit.edit_mode.is_grid() || s.edit.flag(ops::SNAP_TO_GRID);
     if on { s.edit.grid.snap(at, s.sample_rate, &s.tempo, s.frame_rate) } else { at }
@@ -2166,6 +2454,8 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         }
         other => other,
     };
+    let on_line = line_hit(&s, track, lane, tl, origin, tool).is_some();
+    let eff = if auto_view.is_some() && tool == Tool::Smart { Tool::Selector } else { eff };
     if resp.hovered() {
         let icon = match eff {
             Tool::Trim => egui::CursorIcon::ResizeHorizontal,
@@ -2210,9 +2500,22 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     if resp.hovered() && gain_icon_at(p).is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
-    let selector_press = eff == Tool::Selector && fade_corner.is_none() && curve_handle.is_none() && gain_icon_at(origin).is_none();
+    let selector_press = eff == Tool::Selector && !on_line && fade_corner.is_none() && curve_handle.is_none() && gain_icon_at(origin).is_none();
     if selector_press && resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
         place_insertion(app, ui, &s, track.id, at, mods.shift);
+    }
+    if resp.hovered()
+        && gain_icon_at(p).is_none()
+        && let Some(h) = line_hit(&s, track, lane, tl, p, tool)
+    {
+        ui.ctx().set_cursor_icon(if h.point() { egui::CursorIcon::Grab } else { egui::CursorIcon::PointingHand });
+    }
+    if resp.is_pointer_button_down_on()
+        && ui.input(|i| i.pointer.primary_pressed())
+        && gain_icon_at(p).is_none()
+        && let Some(h) = line_hit(&s, track, lane, tl, p, tool)
+    {
+        press_line(app, track.id, h, crate::mix_window::click_mods(ui).alt, p.y);
     }
     let gain_drag = if resp.drag_started() { gain_icon_at(origin) } else { None };
     if let Some(c) = gain_drag {
@@ -2243,7 +2546,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
             to: if fade_in { range.end } else { range.start },
         });
         ui.ctx().request_repaint();
-    } else if resp.drag_started() {
+    } else if resp.drag_started() && !on_line {
         app.gesture = match eff {
             Tool::Selector | Tool::Smart => Some(Gesture::Select { track: track.id, anchor: snap(&s, at_origin), tracks: vec![track.id] }),
             Tool::Grabber => hit.as_ref().map(|c| {
@@ -2280,7 +2583,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         clip_gain_popup(ui.ctx(), *fader_bottom, *pos);
     }
-    if resp.clicked() && curve_handle.is_none() {
+    if resp.clicked() && curve_handle.is_none() && !on_line {
         match eff {
             Tool::Grabber => {
                 if let Some(c) = &hit {
@@ -2326,6 +2629,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     }
     if resp.double_clicked()
         && curve_handle.is_none()
+        && !on_line
         && eff != Tool::Pencil
         && let Some(c) = &hit
     {
@@ -2437,6 +2741,68 @@ fn drive_drag(app: &mut SoundApp, ctx: &egui::Context) {
             *last = at;
             let _ = app.engine.execute("transport.locate", &json!({"at": at}));
         }
+        Some(Gesture::AutoPoint { track, param, at: cur }) => {
+            if let Some(t) = s.track(*track)
+                && let Some(ap) = AutoParam::parse(param)
+                && let Some((_, row)) = rows.iter().find(|(i, _)| *i == t.id.0)
+            {
+                let lane = lane_rect(t, rect(*row), tl);
+                let value = auto_value(lane, auto_range(t, &ap), p.y);
+                let (shift, flip) = ctx.input(|i| (i.modifiers.shift, i.modifiers.command));
+                let to = if shift { *cur } else { drag_snap(&s, at, flip) };
+                let key = format!("auto_point:{}", track.0);
+                if let Ok(v) = app.engine.execute_merged(
+                    "automation.move_point",
+                    &json!({"track": track.0, "param": param, "from": *cur, "at": to, "value": value}),
+                    &key,
+                ) && let Some(a) = v.get("at").and_then(serde_json::Value::as_i64)
+                {
+                    *cur = a;
+                }
+                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
+        }
+        Some(Gesture::LineTrim { track, param, clip, start, end, anchor_y, per_px, applied }) => {
+            let total = (*anchor_y - p.y) * *per_px;
+            let inc = total - *applied;
+            if inc.abs() > 1e-4 {
+                let r = match (param.as_deref(), clip) {
+                    (Some(pid), _) => app.engine.execute_merged(
+                        "automation.trim_range",
+                        &json!({"track": track.0, "param": pid, "start": *start, "end": *end, "delta": inc}),
+                        &format!("line_trim:{}", track.0),
+                    ),
+                    (None, Some(c)) => app.engine.execute_merged(
+                        "clip.gain_trim_range",
+                        &json!({"clip": c.0, "start": *start, "end": *end, "delta": inc}),
+                        &format!("line_trim:{}", track.0),
+                    ),
+                    _ => Ok(json!({})),
+                };
+                if r.is_ok() {
+                    *applied = total;
+                }
+            }
+            ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        Some(Gesture::GainPoint { clip, track, at: cur }) => {
+            if let Some((_, c)) = s.find_clip(*clip)
+                && let Some(t) = s.track(*track)
+                && let Some((_, row)) = rows.iter().find(|(i, _)| *i == t.id.0)
+            {
+                let lane = lane_rect(t, rect(*row), tl);
+                let db = gain_db_of_y(gain_span(&s, lane), p.y);
+                let (shift, flip) = ctx.input(|i| (i.modifiers.shift, i.modifiers.command));
+                let to = if shift { *cur } else { drag_snap(&s, at, flip) - c.start };
+                let key = format!("gain_point:{}", clip.0);
+                if let Ok(v) = app.engine.execute_merged("clip.gain_point", &json!({"clip": clip.0, "from": *cur, "at": to, "db": db}), &key)
+                    && let Some(a) = v.get("at").and_then(serde_json::Value::as_i64)
+                {
+                    *cur = a;
+                }
+                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
+        }
         Some(Gesture::Pencil { track, points }) => {
             if let Some(t) = s.track(*track)
                 && let Some(param) = AutoParam::parse(&t.view)
@@ -2482,6 +2848,7 @@ fn drive_drag(app: &mut SoundApp, ctx: &egui::Context) {
 
 fn finish_drag(app: &mut SoundApp, s: &Session, tl: Rect, p: Option<Pos2>) {
     match app.gesture.take() {
+        Some(Gesture::AutoPoint { .. } | Gesture::GainPoint { .. } | Gesture::LineTrim { .. }) => app.engine.end_merge(),
         Some(Gesture::MoveClips { clips, delta, from_track, to_track, .. }) => drop_clips(app, clips, delta, from_track, to_track),
         Some(Gesture::Fade { clip, fade_in, to, .. }) => {
             let to = p.map_or(to, |p| sample_at(s, tl, p.x).max(0));

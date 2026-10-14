@@ -238,6 +238,10 @@ impl Clip {
         }
     }
 
+    pub fn gain_db_at(&self, rel: Samples) -> f32 {
+        self.gain_db + if self.gain_env.is_empty() { 0.0 } else { env_value(&self.gain_env, rel) }
+    }
+
     pub fn gain_at(&self, rel: Samples) -> f32 {
         self.gain_at_with_fades(rel, self.fade_in, self.fade_out)
     }

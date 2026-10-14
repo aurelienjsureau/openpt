@@ -20,7 +20,13 @@ fn drag_track(app: &mut SoundApp, ui: &Ui, row: Rect, id: u64, dropped: bool) {
         let y = row.min.y + (gap - from as f32) * pitch - spacing / 2.0;
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         let clip = ui.clip_rect();
-        let push = if p.y < clip.min.y + 20.0 { clip.min.y + 20.0 - p.y } else if p.y > clip.max.y - 20.0 { clip.max.y - 20.0 - p.y } else { 0.0 };
+        let push = if p.y < clip.min.y + 20.0 {
+            clip.min.y + 20.0 - p.y
+        } else if p.y > clip.max.y - 20.0 {
+            clip.max.y - 20.0 - p.y
+        } else {
+            0.0
+        };
         if push != 0.0 {
             ui.scroll_with_delta(vec2(0.0, (push * 0.5).clamp(-30.0, 30.0)));
             ui.ctx().request_repaint();
@@ -182,8 +188,13 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
     let items: Vec<(u64, String, bool, [u8; 3], bool)> = {
         let s = app.engine.session();
         let mut v = Vec::new();
-        let renders: Vec<openpt_model::SourceId> =
-            s.tracks.iter().flat_map(|t| t.playlists.iter()).flat_map(|p| &p.clips).filter_map(|c| c.warp.as_ref().and_then(|w| w.rendered)).collect();
+        let renders: Vec<openpt_model::SourceId> = s
+            .tracks
+            .iter()
+            .flat_map(|t| t.playlists.iter())
+            .flat_map(|p| &p.clips)
+            .filter_map(|c| c.warp.as_ref().and_then(|w| w.rendered))
+            .collect();
         for src in s.sources.iter().filter(|x| !renders.contains(&x.id)) {
             v.push((src.id.0, format!("{} ({}ch)", src.name, src.channels), true, [150, 150, 150], s.edit.selected_sources.contains(&src.id)));
         }
@@ -254,7 +265,11 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
                     (true, Some(a), Some(b)) if m.shift => files[a.min(b)..=a.max(b)].to_vec(),
                     (true, _, _) if m.command => {
                         let mut s = chosen.clone();
-                        if selected { s.retain(|x| *x != id) } else { s.push(id) }
+                        if selected {
+                            s.retain(|x| *x != id)
+                        } else {
+                            s.push(id)
+                        }
                         s
                     }
                     _ => vec![id],

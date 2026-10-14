@@ -83,37 +83,53 @@ pub fn specs() -> Vec<CommandSpec> {
         )),
         cmd!("track.pin", "Pin Track", [], None, "{tracks?}", has_selection, |e, p| flag(e, p, "track.pin", |t, v| t.pinned = v, |t| t.pinned)),
         cmd!("track.move", "Move Track", [], None, "{track, to: index}", has_tracks, move_track),
-        cmd!("track.playlist_step", "Previous/Next Playlist", [], None, "{tracks?, direction: -1|1} — the main playlist becomes the previous or next one", has_selection, |e, p| {
-            let tracks = tracks_required(e, "track.playlist_step", p)?;
-            let dir: i64 = if i64_or(p, "direction", 1) < 0 { -1 } else { 1 };
-            let s = e.session_mut();
-            for t in &tracks {
-                if let Some(tr) = s.track_mut(*t) {
-                    let n = tr.playlists.len() as i64;
-                    if n > 1 {
-                        tr.active_playlist = (tr.active_playlist as i64 + dir).rem_euclid(n) as usize;
+        cmd!(
+            "track.playlist_step",
+            "Previous/Next Playlist",
+            [],
+            None,
+            "{tracks?, direction: -1|1} — the main playlist becomes the previous or next one",
+            has_selection,
+            |e, p| {
+                let tracks = tracks_required(e, "track.playlist_step", p)?;
+                let dir: i64 = if i64_or(p, "direction", 1) < 0 { -1 } else { 1 };
+                let s = e.session_mut();
+                for t in &tracks {
+                    if let Some(tr) = s.track_mut(*t) {
+                        let n = tr.playlists.len() as i64;
+                        if n > 1 {
+                            tr.active_playlist = (tr.active_playlist as i64 + dir).rem_euclid(n) as usize;
+                        }
                     }
                 }
+                Ok(json!({"tracks": tracks.len()}))
             }
-            Ok(json!({"tracks": tracks.len()}))
-        }),
-        cmd!("track.view_toggle", "Toggle Track View", [], None, "{tracks?} — between the clips view (waveform or notes) and volume automation", always, |e, p| {
-            let mut tracks = tracks_param(e, "track.view_toggle", p)?;
-            if tracks.is_empty() {
-                tracks = e.session().tracks.iter().map(|t| t.id).collect();
-            }
-            let s = e.session_mut();
-            for t in &tracks {
-                if let Some(tr) = s.track_mut(*t) {
-                    let clips_view = if tr.kind.is_midi() { "notes" } else { "waveform" };
-                    if !tr.kind.has_playlist() {
-                        continue;
-                    }
-                    tr.view = if tr.view == clips_view { "volume".into() } else { clips_view.into() };
+        ),
+        cmd!(
+            "track.view_toggle",
+            "Toggle Track View",
+            [],
+            None,
+            "{tracks?} — between the clips view (waveform or notes) and volume automation",
+            always,
+            |e, p| {
+                let mut tracks = tracks_param(e, "track.view_toggle", p)?;
+                if tracks.is_empty() {
+                    tracks = e.session().tracks.iter().map(|t| t.id).collect();
                 }
+                let s = e.session_mut();
+                for t in &tracks {
+                    if let Some(tr) = s.track_mut(*t) {
+                        let clips_view = if tr.kind.is_midi() { "notes" } else { "waveform" };
+                        if !tr.kind.has_playlist() {
+                            continue;
+                        }
+                        tr.view = if tr.view == clips_view { "volume".into() } else { clips_view.into() };
+                    }
+                }
+                Ok(json!({"tracks": tracks.len()}))
             }
-            Ok(json!({"tracks": tracks.len()}))
-        }),
+        ),
         cmd!("track.freeze", "Freeze", ["Track"], None, "{tracks?}", has_selection, |e, p| flag(
             e,
             p,
@@ -759,9 +775,8 @@ fn height_step(e: &mut Engine, p: &Value, taller: bool) -> Result<Value> {
 fn view(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.view", p)?;
     let v = str_param(p, "view").ok_or_else(|| bad("track.view", "`view` required"))?.to_string();
-    let ok =
-        matches!(v.as_str(), "waveform" | "warp" | "analysis" | "blocks" | "notes" | "regions" | "clip_gain" | "playlists")
-            || openpt_model::AutoParam::parse(&v).is_some();
+    let ok = matches!(v.as_str(), "waveform" | "warp" | "analysis" | "blocks" | "notes" | "regions" | "clip_gain" | "playlists")
+        || openpt_model::AutoParam::parse(&v).is_some();
     if !ok {
         return Err(bad("track.view", format!("unknown view `{v}`")));
     }

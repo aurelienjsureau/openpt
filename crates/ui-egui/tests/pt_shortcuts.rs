@@ -209,9 +209,6 @@ fn reaches(spec: &str, want: &str) -> Result<(), String> {
 
 #[test]
 fn every_guide_shortcut_reaches_its_command() {
-    let failures: Vec<String> = GUIDE
-        .iter()
-        .filter_map(|(spec, want, what)| reaches(spec, want).err().map(|e| format!("{e}   ({what})")))
-        .collect();
+    let failures: Vec<String> = GUIDE.iter().filter_map(|(spec, want, what)| reaches(spec, want).err().map(|e| format!("{e}   ({what})"))).collect();
     assert!(failures.is_empty(), "{} of {} shortcuts miss:\n{}", failures.len(), GUIDE.len(), failures.join("\n"));
 }

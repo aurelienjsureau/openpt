@@ -85,11 +85,12 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     let exists = app.recent_exists(now);
     egui::Modal::new(egui::Id::new("dashboard")).show(ctx, |ui| {
-            ui.set_width(640.0);
-            let t = Tokens::current();
-            ui.label(egui::RichText::new("Dashboard").font(bold(14.0)));
-            ui.separator();
-            ui.allocate_ui(vec2(640.0, 300.0), |ui| ui.horizontal_top(|ui| {
+        ui.set_width(640.0);
+        let t = Tokens::current();
+        ui.label(egui::RichText::new("Dashboard").font(bold(14.0)));
+        ui.separator();
+        ui.allocate_ui(vec2(640.0, 300.0), |ui| {
+            ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
                     ui.set_width(110.0);
                     ui.add_space(4.0);
@@ -109,23 +110,23 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                 ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(320.0));
                                 ui.end_row();
                                 ui.label("Template");
-                                egui::ComboBox::from_id_salt("dash_tpl").width(320.0).selected_text(if d.demo { "Demo session" } else { "Blank" }).show_ui(
-                                    ui,
-                                    |ui| {
+                                egui::ComboBox::from_id_salt("dash_tpl")
+                                    .width(320.0)
+                                    .selected_text(if d.demo { "Demo session" } else { "Blank" })
+                                    .show_ui(ui, |ui| {
                                         ui.selectable_value(&mut d.demo, false, "Blank");
                                         ui.selectable_value(&mut d.demo, true, "Demo session");
-                                    },
-                                );
+                                    });
                                 ui.end_row();
                                 ui.label("Sample Rate");
-                                egui::ComboBox::from_id_salt("dash_rate").width(320.0).selected_text(format!("{} kHz", f64::from(d.sample_rate) / 1000.0)).show_ui(
-                                    ui,
-                                    |ui| {
+                                egui::ComboBox::from_id_salt("dash_rate")
+                                    .width(320.0)
+                                    .selected_text(format!("{} kHz", f64::from(d.sample_rate) / 1000.0))
+                                    .show_ui(ui, |ui| {
                                         for r in openpt_time::SampleRate::COMMON {
                                             ui.selectable_value(&mut d.sample_rate, r, format!("{} kHz", f64::from(r) / 1000.0));
                                         }
-                                    },
-                                );
+                                    });
                                 ui.end_row();
                                 ui.label("Bit Depth");
                                 egui::ComboBox::from_id_salt("dash_bits").width(320.0).selected_text(bits_label(&d.bit_depth)).show_ui(ui, |ui| {
@@ -181,31 +182,32 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         ui.colored_label(t.rec, d.error.as_str());
                     }
                 });
-            }));
-            ui.separator();
-            ui.horizontal(|ui| {
-                crate::widgets::checkbox(ui, &mut app.ui.dashboard_at_startup, "Show on startup");
-                ui.allocate_ui_with_layout(vec2(ui.available_width(), 28.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let ok = if d.tab == Tab::Create { "Create" } else { "Open" };
-                    let enabled = d.tab == Tab::Create || d.picked.is_some();
-                    if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(ok).strong()).fill(t.accent)).clicked() || (enter && enabled) {
-                        run = match d.tab {
-                            Tab::Create => Some(("session.new", create_params(&d))),
-                            Tab::Recent => d.picked.and_then(|i| app.ui.recent_sessions.get(i)).map(|p| ("session.open", json!({"path": p}))),
-                        };
-                    }
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                    if let Some(pick) = &app.services.pick_open
-                        && ui.button("Open from Disk…").clicked()
-                        && let Some(p) = pick("session.open", &[])
-                    {
-                        run = Some(("session.open", json!({"path": p})));
-                    }
-                });
+            })
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            crate::widgets::checkbox(ui, &mut app.ui.dashboard_at_startup, "Show on startup");
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), 28.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let ok = if d.tab == Tab::Create { "Create" } else { "Open" };
+                let enabled = d.tab == Tab::Create || d.picked.is_some();
+                if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(ok).strong()).fill(t.accent)).clicked() || (enter && enabled) {
+                    run = match d.tab {
+                        Tab::Create => Some(("session.new", create_params(&d))),
+                        Tab::Recent => d.picked.and_then(|i| app.ui.recent_sessions.get(i)).map(|p| ("session.open", json!({"path": p}))),
+                    };
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+                if let Some(pick) = &app.services.pick_open
+                    && ui.button("Open from Disk…").clicked()
+                    && let Some(p) = pick("session.open", &[])
+                {
+                    run = Some(("session.open", json!({"path": p})));
+                }
             });
         });
+    });
     if let Some((cmd, params)) = run {
         match crate::dialogs::run_or_ask(app, cmd, params) {
             Ok(_) => {

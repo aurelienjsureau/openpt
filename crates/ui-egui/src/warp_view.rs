@@ -59,7 +59,11 @@ pub fn draw(app: &mut SoundApp, ctx: &egui::Context, painter: &Painter, s: &Sess
             let c = if hot { t.accent } else { Color32::from_gray(15) };
             painter.line_segment([pos2(x, lane.min.y), pos2(x, lane.max.y)], Stroke::new(if hot { 2.0 } else { 1.5 }, c));
             let y = lane.min.y + 1.0;
-            painter.add(Shape::convex_polygon(vec![pos2(x - 5.0, y), pos2(x + 5.0, y), pos2(x, y + 7.0)], c, Stroke::new(1.0, Color32::from_white_alpha(120))));
+            painter.add(Shape::convex_polygon(
+                vec![pos2(x - 5.0, y), pos2(x + 5.0, y), pos2(x, y + 7.0)],
+                c,
+                Stroke::new(1.0, Color32::from_white_alpha(120)),
+            ));
         }
     }
 }

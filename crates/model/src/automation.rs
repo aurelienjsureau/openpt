@@ -170,6 +170,29 @@ impl AutomationLane {
         before - self.points.len()
     }
 
+    pub fn trim_range(&mut self, start: Samples, end: Samples, delta: f32, default: f32) {
+        if end <= start || !delta.is_finite() {
+            return;
+        }
+        let mut anchors = vec![
+            (start, self.value_at(start, default)),
+            (end, self.value_at(end, default)),
+            (end.saturating_add(1), self.value_at(end.saturating_add(1), default)),
+        ];
+        if start > 0 {
+            anchors.push((start - 1, self.value_at(start - 1, default)));
+        }
+        for (at, v) in anchors {
+            if self.points.binary_search_by(|p| p.at.cmp(&at)).is_err() {
+                self.set_point(at, v);
+            }
+        }
+        let (lo, hi, _) = self.param.range();
+        for p in self.points.iter_mut().filter(|p| p.at >= start && p.at <= end) {
+            p.value = (p.value + delta).clamp(lo, hi);
+        }
+    }
+
     pub fn write_range(&mut self, start: Samples, end: Samples, value: f32, default: f32) {
         if end <= start {
             return;

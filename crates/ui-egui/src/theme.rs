@@ -431,7 +431,13 @@ pub fn control_colors(light: bool) -> [Color32; 5] {
     if light {
         [t.button, t.button_hi, t.slot_bg, t.button_border, t.border]
     } else {
-        [Color32::from_rgb(34, 34, 34), Color32::from_rgb(48, 48, 48), Color32::from_rgb(22, 22, 22), Color32::from_rgb(104, 104, 104), Color32::from_rgb(170, 170, 170)]
+        [
+            Color32::from_rgb(34, 34, 34),
+            Color32::from_rgb(48, 48, 48),
+            Color32::from_rgb(22, 22, 22),
+            Color32::from_rgb(104, 104, 104),
+            Color32::from_rgb(170, 170, 170),
+        ]
     }
 }
 
@@ -453,7 +459,12 @@ pub fn apply(ctx: &egui::Context, light: bool) {
     v.selection.stroke = stroke(Color32::WHITE);
     v.hyperlink_color = t.accent;
     let [rest, hover, press, rim, rim_hi] = control_colors(light);
-    for (w, fill, rim) in [(&mut v.widgets.inactive, rest, rim), (&mut v.widgets.hovered, hover, rim_hi), (&mut v.widgets.active, press, rim_hi), (&mut v.widgets.open, press, rim_hi)] {
+    for (w, fill, rim) in [
+        (&mut v.widgets.inactive, rest, rim),
+        (&mut v.widgets.hovered, hover, rim_hi),
+        (&mut v.widgets.active, press, rim_hi),
+        (&mut v.widgets.open, press, rim_hi),
+    ] {
         w.bg_fill = fill;
         w.weak_bg_fill = fill;
         w.bg_stroke = stroke(rim);

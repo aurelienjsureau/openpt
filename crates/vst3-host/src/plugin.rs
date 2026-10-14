@@ -127,6 +127,10 @@ impl Vst3Plugin {
         self.inst.editor().ok_or_else(|| "this plugin has no edit controller".to_string())?.probe()
     }
 
+    pub fn editor_size_at(&self, scale: f64) -> Result<(u32, u32), String> {
+        self.inst.editor().ok_or_else(|| "this plugin has no edit controller".to_string())?.probe_at(Some(scale))
+    }
+
     fn refresh_values(&mut self) {
         for i in 0..self.ids.len() {
             let (Some(pi), Some(&id)) = (self.info.params.get(i), self.ids.get(i)) else { continue };

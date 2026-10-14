@@ -765,7 +765,13 @@ fn io_grid(ui: &mut egui::Ui, paths: &[openpt_model::OutputPath], n: usize, real
             let (r, _) = ui.allocate_exact_size(vec2(cell * n as f32, 18.0), egui::Sense::hover());
             for c in 0..n {
                 let x = r.min.x + cell * (c as f32 + 0.5);
-                ui.painter().text(egui::pos2(x, r.center().y), egui::Align2::CENTER_CENTER, format!("{}", c + 1), bold(11.0), if c < real { t.text } else { t.text_dim.gamma_multiply(0.5) });
+                ui.painter().text(
+                    egui::pos2(x, r.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    format!("{}", c + 1),
+                    bold(11.0),
+                    if c < real { t.text } else { t.text_dim.gamma_multiply(0.5) },
+                );
             }
             ui.end_row();
             for p in paths {
@@ -785,9 +791,27 @@ fn io_grid(ui: &mut egui::Ui, paths: &[openpt_model::OutputPath], n: usize, real
                 for c in 0..n {
                     let cr = egui::Rect::from_min_size(egui::pos2(r.min.x + cell * c as f32, r.min.y), vec2(cell - 2.0, r.height()));
                     let lit = (first..first + width).contains(&c);
-                    ui.painter().rect(cr, 1.5, if lit { t.accent } else if c < real { t.field_bg } else { t.group_header }, egui::Stroke::new(1.0, t.border_light), egui::StrokeKind::Inside);
+                    ui.painter().rect(
+                        cr,
+                        1.5,
+                        if lit {
+                            t.accent
+                        } else if c < real {
+                            t.field_bg
+                        } else {
+                            t.group_header
+                        },
+                        egui::Stroke::new(1.0, t.border_light),
+                        egui::StrokeKind::Inside,
+                    );
                     if lit && width > 1 {
-                        ui.painter().text(cr.center(), egui::Align2::CENTER_CENTER, p.format.channel_label(c - first), bold(9.5), egui::Color32::WHITE);
+                        ui.painter().text(
+                            cr.center(),
+                            egui::Align2::CENTER_CENTER,
+                            p.format.channel_label(c - first),
+                            bold(9.5),
+                            egui::Color32::WHITE,
+                        );
                     }
                 }
                 if resp.clicked()

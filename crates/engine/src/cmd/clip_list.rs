@@ -20,14 +20,15 @@ pub fn specs() -> Vec<CommandSpec> {
             Ok(json!({"sources": s.edit.selected_sources.len()}))
         }),
         cmd!(
-        "clip.clear",
-        "Clear Clips",
-        [],
-        Some("Cmd+Shift+B"),
-        "{clips?: [id], sources?: [id], with_clips?: bool} — removes clips and audio files from the session (files stay on disk); default: the Clip List selection. A file still used on the timeline needs `with_clips: true`, which removes those clips too",
-        has_list_selection,
-        clear
-    )]
+            "clip.clear",
+            "Clear Clips",
+            [],
+            Some("Cmd+Shift+B"),
+            "{clips?: [id], sources?: [id], with_clips?: bool} — removes clips and audio files from the session (files stay on disk); default: the Clip List selection. A file still used on the timeline needs `with_clips: true`, which removes those clips too",
+            has_list_selection,
+            clear
+        ),
+    ]
 }
 
 fn has_list_selection(e: &Engine) -> std::result::Result<(), String> {

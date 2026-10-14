@@ -6,10 +6,10 @@ pub mod dashboard;
 pub mod dialogs;
 pub mod docking;
 pub mod edit_window;
-pub mod import_jobs;
 pub mod extra_windows;
 pub mod fonts;
 pub mod icons;
+pub mod import_jobs;
 pub mod menus;
 pub mod midi_editor;
 pub mod mix_window;
@@ -238,18 +238,88 @@ pub struct MeterDisplay {
 
 #[derive(Debug, Clone)]
 pub enum Gesture {
-    Select { track: TrackId, anchor: Samples, tracks: Vec<TrackId> },
-    MoveClips { clips: Vec<openpt_model::ClipId>, grab_at: Samples, delta: Samples, from_track: TrackId, to_track: TrackId },
-    TrimStart { clip: openpt_model::ClipId, track: TrackId, to: Samples },
-    TrimEnd { clip: openpt_model::ClipId, track: TrackId, to: Samples },
-    Fade { clip: openpt_model::ClipId, track: TrackId, fade_in: bool, to: Samples },
-    FadeCurve { clip: openpt_model::ClipId, fade_in: bool, curvature: f32, anchor: (f32, f32), height: f32 },
-    Scrub { last: Samples },
-    Fader { track: TrackId, start_db: f32 },
-    ClipGain { clip: openpt_model::ClipId, track: TrackId, pos: f32, anchor: (f32, f32), fine: bool, fader_bottom: egui::Pos2 },
-    Pencil { track: TrackId, points: Vec<(Samples, f32)> },
-    MidiClip { track: TrackId, from: Samples, to: Samples },
-    ZoomBox { start: f32 },
+    Select {
+        track: TrackId,
+        anchor: Samples,
+        tracks: Vec<TrackId>,
+    },
+    MoveClips {
+        clips: Vec<openpt_model::ClipId>,
+        grab_at: Samples,
+        delta: Samples,
+        from_track: TrackId,
+        to_track: TrackId,
+    },
+    TrimStart {
+        clip: openpt_model::ClipId,
+        track: TrackId,
+        to: Samples,
+    },
+    TrimEnd {
+        clip: openpt_model::ClipId,
+        track: TrackId,
+        to: Samples,
+    },
+    Fade {
+        clip: openpt_model::ClipId,
+        track: TrackId,
+        fade_in: bool,
+        to: Samples,
+    },
+    FadeCurve {
+        clip: openpt_model::ClipId,
+        fade_in: bool,
+        curvature: f32,
+        anchor: (f32, f32),
+        height: f32,
+    },
+    Scrub {
+        last: Samples,
+    },
+    Fader {
+        track: TrackId,
+        start_db: f32,
+    },
+    ClipGain {
+        clip: openpt_model::ClipId,
+        track: TrackId,
+        pos: f32,
+        anchor: (f32, f32),
+        fine: bool,
+        fader_bottom: egui::Pos2,
+    },
+    AutoPoint {
+        track: TrackId,
+        param: String,
+        at: Samples,
+    },
+    GainPoint {
+        clip: openpt_model::ClipId,
+        track: TrackId,
+        at: Samples,
+    },
+    LineTrim {
+        track: TrackId,
+        param: Option<String>,
+        clip: Option<openpt_model::ClipId>,
+        start: Samples,
+        end: Samples,
+        anchor_y: f32,
+        per_px: f32,
+        applied: f32,
+    },
+    Pencil {
+        track: TrackId,
+        points: Vec<(Samples, f32)>,
+    },
+    MidiClip {
+        track: TrackId,
+        from: Samples,
+        to: Samples,
+    },
+    ZoomBox {
+        start: f32,
+    },
 }
 
 pub struct SoundApp {

@@ -178,6 +178,25 @@ pub fn specs() -> Vec<CommandSpec> {
             set_point
         ),
         cmd!("automation.write_range", "Write Automation", [], None, "{track?, param, start?, end?, value}", has_selection, write_range),
+        cmd!(
+            "automation.move_point",
+            "Move Automation Point",
+            [],
+            None,
+            "{track, param, from: position, at: position, value} — the point at `from`, kept between its neighbours",
+            always,
+            move_point
+        ),
+        cmd!(
+            "automation.trim_range",
+            "Trim Automation",
+            [],
+            None,
+            "{track, param, start, end, delta} — offsets the segment, anchored just outside",
+            always,
+            trim_range
+        ),
+        cmd!("automation.delete_point", "Delete Automation Point", [], None, "{track, param, at: position}", always, delete_point),
         cmd!("automation.clear", "Clear Automation", [], None, "{track?, param?, start?, end?}", has_selection, clear_lane),
         cmd!("automation.thin", "Thin", ["Edit", "Automation"], Some("Cmd+Alt+T"), "{tracks?, tolerance?: 0.1}", has_selection, |e, p| thin(
             e, p, false
@@ -452,7 +471,10 @@ fn insert_transfer(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let mut ins = s.track(from_t).and_then(|t| t.mixer.inserts.get(from).cloned().flatten()).ok_or_else(|| bad(id, "no insert in that slot"))?;
     let dest = s.track(to_t).ok_or_else(|| bad(id, "no such track"))?;
-    if matches!(dest.kind, openpt_model::TrackKind::Midi | openpt_model::TrackKind::Vca | openpt_model::TrackKind::Folder | openpt_model::TrackKind::Video) {
+    if matches!(
+        dest.kind,
+        openpt_model::TrackKind::Midi | openpt_model::TrackKind::Vca | openpt_model::TrackKind::Folder | openpt_model::TrackKind::Video
+    ) {
         return Err(bad(id, "that track has no inserts"));
     }
     if dest.format.channels() < 2 {
@@ -580,6 +602,48 @@ fn set_point(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"at": at, "value": v}))
+}
+
+fn move_point(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "automation.move_point";
+    let t = track_param(e, id, p, "track")?.ok_or_else(|| bad(id, "`track` required"))?;
+    let param = lane_param(p, id)?;
+    let from = position_param(e, id, p, "from")?.ok_or_else(|| bad(id, "`from` required"))?;
+    let at = position_param(e, id, p, "at")?.ok_or_else(|| bad(id, "`at` required"))?.max(0);
+    let v = p.get("value").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(id, "`value` required"))? as f32;
+    let s = e.session_mut();
+    let lane = s.track_mut(t).ok_or_else(|| bad(id, "no such track"))?.lane_mut(&param);
+    let i = lane.points.iter().position(|q| q.at == from).ok_or_else(|| bad(id, "no point there"))?;
+    let lo = if i == 0 { 0 } else { lane.points.get(i - 1).map_or(0, |q| q.at + 1) };
+    let hi = lane.points.get(i + 1).map_or(Samples::MAX, |q| q.at - 1);
+    let at = at.clamp(lo, hi.max(lo));
+    lane.points.remove(i);
+    lane.set_point(at, v);
+    Ok(json!({"at": at, "value": v}))
+}
+
+fn trim_range(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "automation.trim_range";
+    let t = track_param(e, id, p, "track")?.ok_or_else(|| bad(id, "`track` required"))?;
+    let param = lane_param(p, id)?;
+    let start = position_param(e, id, p, "start")?.ok_or_else(|| bad(id, "`start` required"))?;
+    let end = position_param(e, id, p, "end")?.ok_or_else(|| bad(id, "`end` required"))?;
+    let delta = p.get("delta").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(id, "`delta` required"))? as f32;
+    let tr = e.session_mut().track_mut(t).ok_or_else(|| bad(id, "no such track"))?;
+    let def = current_value(tr, &param);
+    tr.lane_mut(&param).trim_range(start, end, delta, def);
+    Ok(json!({}))
+}
+
+fn delete_point(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "automation.delete_point";
+    let t = track_param(e, id, p, "track")?.ok_or_else(|| bad(id, "`track` required"))?;
+    let param = lane_param(p, id)?;
+    let at = position_param(e, id, p, "at")?.ok_or_else(|| bad(id, "`at` required"))?;
+    let lane = e.session_mut().track_mut(t).ok_or_else(|| bad(id, "no such track"))?.lane_mut(&param);
+    let before = lane.points.len();
+    lane.points.retain(|q| q.at != at);
+    Ok(json!({"removed": before - lane.points.len()}))
 }
 
 fn write_range(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -829,7 +893,9 @@ mod tests {
         e.execute("mix.route_to_new_aux", &json!({"tracks": [kick.0], "send_slot": 2, "name": "Verb 2"})).unwrap();
         let s = e.session();
         assert!(s.track_by_name("Verb 2").is_some());
-        assert!(matches!(&s.track(kick).unwrap().mixer.sends[2], Some(x) if x.target == openpt_model::Route::Bus(s.bus_by_name("Verb 2").unwrap().id)));
+        assert!(
+            matches!(&s.track(kick).unwrap().mixer.sends[2], Some(x) if x.target == openpt_model::Route::Bus(s.bus_by_name("Verb 2").unwrap().id))
+        );
         e.execute("edit.undo", &json!({})).unwrap();
         assert!(e.session().track_by_name("Verb 2").is_none(), "one undo step");
     }
