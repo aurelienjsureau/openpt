@@ -842,6 +842,14 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
     let audio_dir = dir.join("Audio Files");
     let mut s = session.clone();
     let from = s.folder.clone();
+    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    for (k, bytes) in openpt_vst3_host::ara_store_documents() {
+        let text = openpt_model::b64::encode(&bytes);
+        match s.ara_archives.iter_mut().find(|(f, _)| *f == k) {
+            Some(e) => e.1 = text,
+            None => s.ara_archives.push((k, text)),
+        }
+    }
     let same_dir = from.as_deref().is_some_and(|f| same_path(f, &dir));
     let mut written = 0;
     let shared_paths: Vec<bool> = {
@@ -1040,6 +1048,8 @@ pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
     }
     missing.extend(relink_videos(&mut s, &dir));
     s.folder = Some(dir);
+    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    openpt_vst3_host::ara_set_pending_archives(s.ara_archives.iter().filter_map(|(k, t)| Some((k.clone(), openpt_model::b64::decode(t)?))).collect());
     e.replace_session(s);
     e.path = Some(path.to_string());
     for m in &missing {

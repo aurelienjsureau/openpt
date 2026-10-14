@@ -1368,6 +1368,14 @@ impl Instance {
         Ok(layout)
     }
 
+    #[cfg(target_arch = "x86_64")]
+    pub fn ara_bind(&self, track: &openpt_dsp::AraTrack) -> Option<crate::ara::Binding> {
+        if self.active {
+            return None;
+        }
+        unsafe { crate::ara::bind(self.component.as_ptr().cast(), track) }
+    }
+
     pub fn shutdown(&mut self) {
         if self.processing {
             if let Some(p) = self.processor() {

@@ -187,6 +187,12 @@ pub trait Plugin: Send {
     fn set_sample(&mut self, _sample: Option<Arc<dyn SampleSource>>) -> bool {
         false
     }
+    fn ara_bind(&mut self, _track: &AraTrack) -> bool {
+        false
+    }
+
+    fn ara_update(&mut self, _track: &AraTrack) {}
+
     fn save_state(&mut self) -> Option<Vec<u8>> {
         self.state_reader()?.save_state()
     }
@@ -230,6 +236,26 @@ pub trait SampleSource: Send + Sync {
     fn frames(&self) -> usize {
         (0..self.num_channels()).filter_map(|c| self.channel(c)).map(<[f32]>::len).min().unwrap_or(0)
     }
+}
+
+#[derive(Clone)]
+pub struct AraTrack {
+    pub track: u64,
+    pub name: String,
+    pub sample_rate: f64,
+    pub clips: Vec<AraClip>,
+}
+
+#[derive(Clone)]
+pub struct AraClip {
+    pub clip: u64,
+    pub name: String,
+    pub source: u64,
+    pub source_name: String,
+    pub audio: Arc<dyn SampleSource>,
+    pub offset: i64,
+    pub length: i64,
+    pub start: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

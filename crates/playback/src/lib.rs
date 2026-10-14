@@ -410,11 +410,21 @@ struct Side {
     refused: HashSet<(TrackId, usize)>,
     garbage: Receiver<Vec<Box<dyn Plugin>>>,
     old_sessions: Option<Receiver<Arc<Session>>>,
+    ara_seen: HashMap<u64, u64>,
 }
 
 impl Side {
     fn new(rate: f32, garbage: Receiver<Vec<Box<dyn Plugin>>>) -> Side {
-        Side { shadow: HashMap::new(), rate, editors: HashMap::new(), states: BTreeMap::new(), refused: HashSet::new(), garbage, old_sessions: None }
+        Side {
+            shadow: HashMap::new(),
+            rate,
+            editors: HashMap::new(),
+            states: BTreeMap::new(),
+            refused: HashSet::new(),
+            garbage,
+            old_sessions: None,
+            ara_seen: HashMap::new(),
+        }
     }
 
     fn collect_garbage(&mut self) {
@@ -842,7 +852,8 @@ impl Side {
                 continue;
             }
             self.forget(key);
-            let made = openpt_mix::create_instance(&spec.id, spec.state.as_deref(), sr, BLOCK, spec.ch);
+            let ara = if spec.id.starts_with("vst3:") { openpt_mix::ara_track(s, spec.track) } else { None };
+            let made = openpt_mix::create_instance_on(&spec.id, spec.state.as_deref(), sr, BLOCK, spec.ch, ara.as_ref());
             log::debug!("plugin instance for {:?} slot {}: {} ({} ch, created: {})", spec.track, spec.slot, spec.id, spec.ch, made.is_some());
             self.shadow.insert(key, (spec.id.clone(), spec.ch, made.is_some()));
             if let Some(openpt_mix::NewInstance { mut plugin, refused_state }) = made {
@@ -858,6 +869,7 @@ impl Side {
                 out.push(PreparedInstance { track: spec.track, slot: spec.slot, id: spec.id, ch: spec.ch, plugin });
             }
         }
+        openpt_mix::ara_follow(s, &mut self.ara_seen);
         out
     }
 }

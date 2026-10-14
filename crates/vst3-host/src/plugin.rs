@@ -38,6 +38,8 @@ pub struct Vst3Plugin {
     tail: usize,
     position: i64,
     transport: Option<Transport>,
+    #[cfg(target_arch = "x86_64")]
+    ara: Option<crate::ara::Binding>,
 }
 
 impl Vst3Plugin {
@@ -84,6 +86,8 @@ impl Vst3Plugin {
             tail: 0,
             position: 0,
             transport: None,
+            #[cfg(target_arch = "x86_64")]
+            ara: None,
             ids,
             maps,
             inst,
@@ -156,6 +160,21 @@ impl Vst3Plugin {
 }
 
 impl Plugin for Vst3Plugin {
+    #[cfg(target_arch = "x86_64")]
+    fn ara_bind(&mut self, track: &openpt_dsp::AraTrack) -> bool {
+        if self.ara.is_none() {
+            self.ara = self.inst.ara_bind(track);
+        }
+        self.ara.is_some()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn ara_update(&mut self, track: &openpt_dsp::AraTrack) {
+        if let Some(b) = &self.ara {
+            b.update(track);
+        }
+    }
+
     fn info(&self) -> &'static PluginInfo {
         self.info
     }

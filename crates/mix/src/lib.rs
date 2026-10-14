@@ -72,6 +72,17 @@ pub struct NewInstance {
 }
 
 pub fn create_instance(id: &str, state: Option<&[u8]>, sample_rate: f32, max_block: usize, ch: usize) -> Option<NewInstance> {
+    create_instance_on(id, state, sample_rate, max_block, ch, None)
+}
+
+pub fn create_instance_on(
+    id: &str,
+    state: Option<&[u8]>,
+    sample_rate: f32,
+    max_block: usize,
+    ch: usize,
+    ara: Option<&openpt_dsp::AraTrack>,
+) -> Option<NewInstance> {
     let (mut plugin, refused_state) = match id.strip_prefix(openpt_model::MULTI_MONO_PREFIX) {
         Some(inner) => {
             let (mm, refused) = multi_mono::MultiMono::new(inner, state)?;
@@ -85,6 +96,9 @@ pub fn create_instance(id: &str, state: Option<&[u8]>, sample_rate: f32, max_blo
     };
     if refused_state {
         log::warn!("{id}: the plugin did not accept its stored state");
+    }
+    if let Some(t) = ara {
+        plugin.ara_bind(t);
     }
     plugin.prepare(sample_rate, max_block, ch);
     Some(NewInstance { plugin, refused_state })
@@ -1519,6 +1533,89 @@ fn chase_controllers(s: &Session, t: &Track, pos: Samples, inst: &mut PluginSlot
             inst.plugin.midi(0, ctrl_message(kind, value, 0));
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AraRequest {
+    Start,
+    Stop,
+    Locate(f64),
+    Cycle(f64, f64),
+    EnableCycle(bool),
+}
+
+pub fn ara_bindings() -> Vec<(TrackId, String)> {
+    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    {
+        openpt_vst3_host::ara_bindings().into_iter().map(|(t, n)| (TrackId(t), n)).collect()
+    }
+    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    {
+        Vec::new()
+    }
+}
+
+pub fn ara_requests() -> Vec<AraRequest> {
+    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    {
+        use openpt_vst3_host::PlaybackRequest as P;
+        openpt_vst3_host::ara_playback_requests()
+            .into_iter()
+            .map(|r| match r {
+                P::Start => AraRequest::Start,
+                P::Stop => AraRequest::Stop,
+                P::Locate(t) => AraRequest::Locate(t),
+                P::Cycle(a, d) => AraRequest::Cycle(a, d),
+                P::EnableCycle(on) => AraRequest::EnableCycle(on),
+            })
+            .collect()
+    }
+    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    {
+        Vec::new()
+    }
+}
+
+pub fn ara_follow(s: &Session, seen: &mut std::collections::HashMap<u64, u64>) {
+    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    for t in openpt_vst3_host::ara_bound_tracks() {
+        let Some(at) = ara_track(s, TrackId(t)) else { continue };
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for c in &at.clips {
+            std::hash::Hash::hash(&(c.clip, c.source, c.offset, c.length, c.start), &mut h);
+        }
+        let fp = std::hash::Hasher::finish(&h);
+        if seen.insert(t, fp) != Some(fp) {
+            openpt_vst3_host::ara_sync_track(&at);
+        }
+    }
+    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    openpt_vst3_host::ara_finish_restores();
+    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    let _ = (s, seen);
+}
+
+pub fn ara_track(s: &Session, t: TrackId) -> Option<openpt_dsp::AraTrack> {
+    let tr = s.track(t).filter(|tr| tr.kind.has_playlist() && !tr.kind.is_midi())?;
+    let clips = tr
+        .clips()
+        .iter()
+        .filter_map(|c| {
+            let src = c.source()?;
+            let audio = s.pool.get(src)?;
+            Some(openpt_dsp::AraClip {
+                clip: c.id.0,
+                name: c.name.clone(),
+                source: src.0,
+                source_name: s.source(src).map_or_else(|| c.name.clone(), |x| x.name.clone()),
+                audio: Arc::new(PoolSample(Arc::clone(audio))),
+                offset: c.source_offset(),
+                length: c.length,
+                start: c.start,
+            })
+        })
+        .collect();
+    Some(openpt_dsp::AraTrack { track: t.0, name: tr.name.clone(), sample_rate: s.sample_rate.as_f64(), clips })
 }
 
 struct PoolSample(Arc<SourceAudio>);

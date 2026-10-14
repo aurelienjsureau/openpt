@@ -1048,6 +1048,20 @@ impl SoundApp {
         }
     }
 
+    fn ara_requests(&mut self) {
+        let rate = self.engine.session().sample_rate.as_f64();
+        for r in openpt_mix::ara_requests() {
+            let at = |t: f64| (t.max(0.0) * rate) as i64;
+            let _ = match r {
+                openpt_mix::AraRequest::Start => self.run("transport.play", json!({})),
+                openpt_mix::AraRequest::Stop => self.run("transport.stop", json!({})),
+                openpt_mix::AraRequest::Locate(t) => self.run("transport.locate", json!({"at": at(t)})),
+                openpt_mix::AraRequest::Cycle(a, d) => self.run("edit.select", json!({"start": at(a), "end": at(a + d)})),
+                openpt_mix::AraRequest::EnableCycle(on) => self.run("options.loop_playback", json!({"value": on})),
+            };
+        }
+    }
+
     fn follow_selection_while_playing(&mut self, ctx: &egui::Context) {
         let sel = self.engine.session().edit.selection;
         if !self.engine.transport.playing || self.engine.transport.recording {
@@ -1235,6 +1249,7 @@ impl SoundApp {
         control::drain(self, ctx);
         peripherals::run(self, ctx);
         self.follow_selection_while_playing(ctx);
+        self.ara_requests();
         self.note_recent_session();
         self.apply_editor_edits();
         bounce::step(self, ctx);

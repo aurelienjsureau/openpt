@@ -287,6 +287,8 @@ pub struct Session {
     pub tempo: TempoMap,
     #[serde(default)]
     pub key_signatures: Vec<(Samples, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ara_archives: Vec<(String, String)>,
     pub tracks: Vec<Track>,
     pub sources: Vec<Source>,
     #[serde(default)]
@@ -337,6 +339,7 @@ impl Session {
             timecode_start: 0,
             tempo: TempoMap::default(),
             key_signatures: Vec::new(),
+            ara_archives: Vec::new(),
             tracks: Vec::new(),
             sources: Vec::new(),
             videos: Vec::new(),

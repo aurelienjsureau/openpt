@@ -154,6 +154,33 @@ fn dock_tabs(app: &mut SoundApp, ui: &mut Ui) {
         }
         x = tr.max.x + 6.0;
     }
+    let bound = openpt_mix::ara_bindings();
+    let mut names: Vec<String> = bound.iter().map(|(_, n)| n.clone()).collect();
+    names.sort();
+    names.dedup();
+    for name in names {
+        let label = name.to_uppercase();
+        let g = ui.painter().layout_no_wrap(label.clone(), bold(10.5), t.text_dim);
+        let tr = Rect::from_min_size(pos2(x, r.min.y + 2.0), vec2(g.size().x + 16.0, r.height() - 4.0));
+        ui.painter().galley(pos2(tr.min.x + 8.0, tr.center().y - g.size().y * 0.5), g, Color32::WHITE);
+        let resp = ui.interact(tr, ui.id().with(("dock_ara", &name)), Sense::click()).on_hover_text(format!("Open {name}"));
+        if resp.clicked() {
+            let s = app.engine.session();
+            let on: Vec<TrackId> = bound.iter().filter(|(_, n)| *n == name).map(|(t, _)| *t).collect();
+            let track = s.edit.selected_tracks.iter().find(|t| on.contains(t)).or_else(|| on.first()).copied();
+            let slot = track.and_then(|t| s.track(t)).and_then(|tr| {
+                tr.mixer.inserts.iter().position(|i| {
+                    i.as_ref()
+                        .and_then(|i| openpt_dsp::plugin_info(&i.plugin))
+                        .is_some_and(|info| info.name.eq_ignore_ascii_case(&name) || name.to_lowercase().contains(&info.name.to_lowercase()))
+                })
+            });
+            if let (Some(t), Some(slot)) = (track, slot) {
+                crate::mix_window::open_plugin(app, t, slot);
+            }
+        }
+        x = tr.max.x + 6.0;
+    }
 }
 
 fn status_bar(app: &mut SoundApp, ui: &mut Ui) {

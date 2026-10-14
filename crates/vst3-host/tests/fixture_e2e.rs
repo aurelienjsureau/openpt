@@ -272,3 +272,15 @@ fn editor_view_is_probed_and_edits_come_back_as_plain_values() {
     let synth = openpt_vst3_host::instantiate_plugin(&id_of("Fixture Synth")).unwrap();
     assert!(synth.editor_size().is_err());
 }
+
+#[test]
+fn a_plugin_without_ara_declines_the_binding() {
+    use openpt_dsp::Plugin;
+    let id = id_of("Fixture Gain");
+    let mut p = openpt_vst3_host::instantiate_plugin(&id).unwrap();
+    let track = openpt_dsp::AraTrack { track: 1, name: "Vox".into(), sample_rate: 48_000.0, clips: Vec::new() };
+    assert!(!p.ara_bind(&track));
+    p.prepare(48_000.0, 64, 2);
+    let mut io = vec![vec![0.5f32; 64], vec![0.5f32; 64]];
+    p.process(&mut io, 64);
+}

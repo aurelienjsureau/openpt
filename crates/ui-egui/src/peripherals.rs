@@ -58,10 +58,10 @@ pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
     for row in 0..CONTROLLER_ROWS {
         let cfg = cfgs.get(row).cloned().unwrap_or_default();
         let live = app.surfaces.live.get_mut(row).and_then(Option::as_mut);
-        if live.is_some_and(|l| l.cfg != cfg) || !cfg.active() {
-            if let Some(slot) = app.surfaces.live.get_mut(row) {
-                *slot = None;
-            }
+        if (live.is_some_and(|l| l.cfg != cfg) || !cfg.active())
+            && let Some(slot) = app.surfaces.live.get_mut(row)
+        {
+            *slot = None;
         }
         let connected = app.surfaces.live.get(row).is_some_and(Option::is_some);
         let retry = app.surfaces.failed.get(row).cloned().flatten().is_none_or(|(c, at, _)| c != cfg || now - at > 5.0);
