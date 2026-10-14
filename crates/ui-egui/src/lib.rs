@@ -17,6 +17,7 @@ pub mod ops_windows;
 pub mod palette;
 pub mod panels;
 pub mod peripherals;
+pub mod plugin_ui;
 pub mod preferences;
 mod recent;
 pub mod recovery;

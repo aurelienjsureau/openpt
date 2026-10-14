@@ -2178,12 +2178,19 @@ impl LineHit {
     }
 }
 
+fn in_trim_zone(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2) -> bool {
+    let sel = s.edit.selection;
+    let at = sample_at(s, tl, q.x);
+    sel.end > sel.start && s.edit.selected_tracks.contains(&track.id) && at >= sel.start && at <= sel.end && q.y < lane.min.y + lane.height() * 0.35
+}
+
 fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Tool) -> Option<LineHit> {
     if !matches!(tool, Tool::Grabber | Tool::Smart) || !lane.contains(q) {
         return None;
     }
     let grabber = tool == Tool::Grabber;
     let at = sample_at(s, tl, q.x).max(0);
+    let trim = in_trim_zone(s, track, lane, tl, q);
     let near = |x: f32, y: f32| pos2(x, y).distance(q) < 7.0;
     if let Some(param) = AutoParam::parse(&track.view) {
         let range = auto_range(track, &param);
@@ -2191,6 +2198,9 @@ fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Too
         let lane_pts = track.lane(&param);
         let point = lane_pts.and_then(|l| l.points.iter().find(|pt| near(x_of(s, tl, pt.at), auto_y(lane, range, pt.value)))).map(|pt| pt.at);
         let line = lane_pts.map_or(def, |l| l.value_at(at, def));
+        if trim {
+            return Some(LineHit::Auto { param, point: None, at, value: line, per_px: (range.1 - range.0) / (lane.height() - 8.0).max(1.0) });
+        }
         let on_line = (auto_y(lane, range, line) - q.y).abs() < 5.0;
         if point.is_none() && !on_line && !grabber {
             return None;
@@ -2207,10 +2217,10 @@ fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Too
     let rel = at - c.start;
     let line = c.gain_db_at(rel);
     let on_line = (gain_y(span, line) - q.y).abs() < 5.0;
-    if point.is_none() && !on_line {
+    if point.is_none() && !on_line && !trim {
         return None;
     }
-    let db = if on_line { line } else { gain_db_of_y(span, q.y) };
+    let db = if on_line || trim { line } else { gain_db_of_y(span, q.y) };
     Some(LineHit::Gain { clip: c.id, point, at: rel, db, per_px: 72.0 / (span.1 - span.0 - 6.0).max(1.0) })
 }
 
@@ -2508,7 +2518,14 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         && gain_icon_at(p).is_none()
         && let Some(h) = line_hit(&s, track, lane, tl, p, tool)
     {
-        ui.ctx().set_cursor_icon(if h.point() { egui::CursorIcon::Grab } else { egui::CursorIcon::PointingHand });
+        let icon = if in_trim_zone(&s, track, lane, tl, p) {
+            egui::CursorIcon::ResizeVertical
+        } else if h.point() {
+            egui::CursorIcon::Grab
+        } else {
+            egui::CursorIcon::PointingHand
+        };
+        ui.ctx().set_cursor_icon(icon);
     }
     if resp.is_pointer_button_down_on()
         && ui.input(|i| i.pointer.primary_pressed())

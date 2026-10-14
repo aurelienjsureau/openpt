@@ -177,3 +177,24 @@ fn with_a_selection_the_clip_gain_line_moves_as_a_plateau() {
     assert!(at((a + b) / 2 - c.start) > 1.0, "inside raised: {:?}", c.gain_env);
     assert!(at(a - c.start - 10).abs() < 0.01 && at(b - c.start + 10).abs() < 0.01, "outside unchanged: {:?}", c.gain_env);
 }
+
+#[test]
+fn the_top_of_a_selection_trims_it_without_aiming_at_the_line() {
+    let (mut h, kick) = harness("volume", "smart");
+    let [top, bottom, left, right] = lane(&h, kick);
+    let s = h.state().engine.session();
+    let (vol, scroll, spp) = (s.track(kick).unwrap().mixer.volume_db, s.edit.zoom.scroll, s.edit.zoom.samples_per_px);
+    let at = |x: f32| scroll + (f64::from(x - left) * spp) as i64;
+    let (x0, x1) = (left + (right - left) * 0.4, left + (right - left) * 0.6);
+    h.state_mut().run("edit.select", json!({"tracks": [kick.0], "start": at(x0), "end": at(x1)})).unwrap();
+    h.run_steps(2);
+    let grip = pos2((x0 + x1) / 2.0, top + (bottom - top) * 0.15);
+    let line_y = bottom - 4.0 - (vol + 60.0) / 72.0 * (bottom - top - 8.0);
+    assert!((grip.y - line_y).abs() > 10.0, "the grip is away from the line");
+    drag(&mut h, grip, grip - vec2(0.0, 20.0));
+    let pts = volume_points(&h, kick);
+    assert_eq!(pts.len(), 4, "{pts:?}");
+    assert!(pts[1].1 > vol + 2.0, "raised: {pts:?}");
+    let sel = h.state().engine.session().edit.selection;
+    assert_eq!((sel.start, sel.end), (at(x0), at(x1)), "the selection stays");
+}

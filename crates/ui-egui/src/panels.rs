@@ -491,6 +491,20 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
             .default_width(340.0)
             .default_pos(egui::pos2(ctx.content_rect().width() - 380.0, 120.0))
             .show(ctx, |ui| {
+                if !instrument && !openpt_mix::is_third_party(&ins.plugin) {
+                    crate::plugin_ui::header(app, ui, tid, slot, info, &ins, |app, ui| preset_menu(app, ui, tid, slot, info, &ins));
+                    ui.add_space(4.0);
+                    let mut changes: Vec<(String, f32)> = Vec::new();
+                    crate::plugin_ui::panel(ui, info, &ins, |id, v| changes.push((id.to_string(), v)));
+                    for (id, v) in changes {
+                        let _ = app.engine.execute_merged(
+                            "mix.insert_param",
+                            &json!({"track": tid.0, "slot": slot, "param": id, "value": v}),
+                            &format!("param:{}:{slot}:{id}", tid.0),
+                        );
+                    }
+                    return;
+                }
                 ui.horizontal(|ui| {
                     if !instrument {
                         ui.label(egui::RichText::new(&ins.preset).color(Tokens::current().text_dim));
