@@ -76,6 +76,37 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             session_setup
         ),
+        cmd!("options.heat", "Activate HEAT", ["Options"], None, "{value?: bool}", always, |e, p| {
+            let h = &mut e.session_mut().heat;
+            h.active = p.get("value").and_then(Value::as_bool).unwrap_or(!h.active);
+            Ok(json!({"value": h.active}))
+        }),
+        cmd!("mix.heat", "HEAT Drive and Tone", [], None, "{drive?: 0..1, tone?: -1..1}", always, |e, p| {
+            let h = &mut e.session_mut().heat;
+            if let Some(d) = p.get("drive").and_then(Value::as_f64) {
+                h.drive = (d as f32).clamp(0.0, 1.0);
+            }
+            if let Some(t) = p.get("tone").and_then(Value::as_f64) {
+                h.tone = (t as f32).clamp(-1.0, 1.0);
+            }
+            Ok(json!({"drive": h.drive, "tone": h.tone}))
+        }),
+        cmd!("mix.heat_track", "HEAT on Track", [], None, "{tracks?, bypass?: bool, pre?: bool}", has_selection, |e, p| {
+            let tracks = tracks_required(e, "mix.heat_track", p)?;
+            let (bypass, pre) = (p.get("bypass").and_then(Value::as_bool), p.get("pre").and_then(Value::as_bool));
+            let s = e.session_mut();
+            for t in &tracks {
+                if let Some(tr) = s.track_mut(*t) {
+                    if let Some(b) = bypass {
+                        tr.mixer.heat_bypass = b;
+                    }
+                    if let Some(x) = pre {
+                        tr.mixer.heat_pre = x;
+                    }
+                }
+            }
+            Ok(json!({"tracks": tracks.len()}))
+        }),
         cmd!(noundo "setup.reset_edit_state", "Reset Edit Settings", [], None, "{}", always, |e, _| {
             let s = e.session_mut();
             let keep = (s.edit.selection, s.edit.selected_tracks.clone());

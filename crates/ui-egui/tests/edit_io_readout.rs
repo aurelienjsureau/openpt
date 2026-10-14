@@ -19,7 +19,7 @@ fn contrast(a: Color32, b: Color32) -> f64 {
 fn the_io_columns_vol_and_pan_readout_is_readable_in_both_themes() {
     for mode in [ThemeMode::Dark, ThemeMode::Light] {
         let mut app = SoundApp::new(openpt_engine::demo::demo_engine(), None, Services::default());
-        app.run("view.edit_io", json!({})).unwrap();
+        app.run("view.edit_io", json!({"value": true})).unwrap();
         app.run("track.height", json!({"tracks": ["Kick"], "height": "medium"})).unwrap();
         app.run("ui.theme", json!({"mode": mode.id()})).unwrap();
         let mut harness = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(

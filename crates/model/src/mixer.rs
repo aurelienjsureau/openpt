@@ -366,6 +366,20 @@ pub struct OutputPath {
     pub format: ChannelFormat,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct HeatSettings {
+    pub active: bool,
+    pub drive: f32,
+    pub tone: f32,
+}
+
+impl Default for HeatSettings {
+    fn default() -> Self {
+        HeatSettings { active: false, drive: 0.5, tone: 0.0 }
+    }
+}
+
 pub type InputPath = OutputPath;
 
 pub fn default_inputs() -> Vec<InputPath> {
@@ -480,6 +494,10 @@ pub struct Mixer {
     #[serde(default)]
     pub trim_db: f32,
     #[serde(default)]
+    pub heat_bypass: bool,
+    #[serde(default)]
+    pub heat_pre: bool,
+    #[serde(default)]
     pub vca: Option<u64>,
     #[serde(default)]
     pub surround: Option<SurroundPan>,
@@ -507,6 +525,8 @@ impl Mixer {
             sends: vec![None; SEND_SLOTS],
             automation_mode: AutomationMode::Read,
             trim_db: 0.0,
+            heat_bypass: false,
+            heat_pre: false,
             vca: None,
             surround: None,
         }

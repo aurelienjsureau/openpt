@@ -456,6 +456,20 @@ pub fn multi_meter(ui: &Ui, r: Rect, levels: &[f32], labels: &[String], clip: bo
     }
 }
 
+pub fn value_box<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let t = Tokens::current();
+    ui.scope(|ui| {
+        let w = &mut ui.visuals_mut().widgets;
+        for s in [&mut w.inactive, &mut w.hovered, &mut w.active] {
+            s.weak_bg_fill = t.field_bg;
+            s.bg_fill = t.field_bg;
+            s.fg_stroke.color = t.field_text;
+        }
+        add(ui)
+    })
+    .inner
+}
+
 pub fn checkbox(ui: &mut Ui, on: &mut bool, label: impl Into<egui::WidgetText>) -> Response {
     let text: egui::WidgetText = label.into();
     let side = 13.0;

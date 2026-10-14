@@ -15,7 +15,7 @@ pub use clip::{Clip, ClipContent, Fade, FadeShape, Warp, WarpMarker};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use markers::{Group, MarkerKind, MemoryLocation};
 pub use mixer::{
-    Bus, ChannelFormat, INSERT_SLOTS, InputPath, Insert, MULTI_MONO_PREFIX, Mixer, OutputPath, Route, default_inputs, SEND_SLOTS, SendSlot, Speaker, SurroundPan,
+    Bus, ChannelFormat, HeatSettings, INSERT_SLOTS, InputPath, Insert, MULTI_MONO_PREFIX, Mixer, OutputPath, Route, default_inputs, SEND_SLOTS, SendSlot, Speaker, SurroundPan,
     fader_db_to_pos, fader_pos_to_db,
 };
 pub use session::{

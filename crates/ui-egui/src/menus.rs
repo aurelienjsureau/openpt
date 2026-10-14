@@ -99,6 +99,7 @@ fn mix_view_aliases() -> &'static [(&'static str, &'static str)] {
             "Mic Preamps",
             "Instruments",
             "Object",
+            "HEAT",
         ]
         .into_iter()
         .map(|sec| {
@@ -370,6 +371,7 @@ fn mix_section_id(label: &str) -> &'static str {
         "Mic Preamps" => "mic_preamps",
         "Instruments" => "instruments",
         "Object" => "object",
+        "HEAT" => "heat",
         _ => "",
     }
 }
@@ -669,7 +671,7 @@ mod tests {
         let a = first.iter().find(|(path, _)| path.contains("Mix Window Views > All")).map(|(path, _)| *path).unwrap();
         let b = second.iter().find(|(path, _)| path.contains("Mix Window Views > All")).map(|(path, _)| *path).unwrap();
         assert!(std::ptr::eq(a, b));
-        assert_eq!(first.iter().filter(|(path, _)| path.contains("Mix Window Views")).count(), 14);
+        assert_eq!(first.iter().filter(|(path, _)| path.contains("Mix Window Views")).count(), 15);
     }
 
     #[test]

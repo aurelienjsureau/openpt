@@ -257,6 +257,46 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         }
         y = sec.max.y + 4.0;
     }
+    let heat = app.engine.session().heat;
+    if heat.active && (all || has("heat")) && matches!(track.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux | TrackKind::Master) {
+        let master = track.kind == TrackKind::Master;
+        let sec = Rect::from_min_size(pos2(x0, y), vec2(inner_w, 56.0));
+        inset(ui.painter(), sec, t.strip_section);
+        section_label(ui, sec, "HEAT");
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_size(pos2(x0 + 4.0, sec.min.y + 15.0), vec2(inner_w - 8.0, 18.0)))
+                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+        );
+        row.spacing_mut().item_spacing.x = 4.0;
+        let bw = (inner_w - 12.0) / 2.0;
+        if text_toggle(&mut row, vec2(bw, 16.0), "ON", !track.mixer.heat_bypass, t.mode_on, "HEAT on this track").clicked() {
+            let _ = run_scoped(app, &row, "mix.heat_track", json!({"track": id.0, "bypass": !track.mixer.heat_bypass}));
+        }
+        if text_toggle(&mut row, vec2(bw, 16.0), "PRE", track.mixer.heat_pre, t.accent, "HEAT before the inserts (else after them)").clicked() {
+            let _ = run_scoped(app, &row, "mix.heat_track", json!({"track": id.0, "pre": !track.mixer.heat_pre}));
+        }
+        if master {
+            let mut row = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(Rect::from_min_size(pos2(x0 + 4.0, sec.min.y + 36.0), vec2(inner_w - 8.0, 18.0)))
+                    .layout(egui::Layout::left_to_right(egui::Align::Min)),
+            );
+            row.spacing_mut().item_spacing.x = 4.0;
+            let (mut drive, mut tone) = (heat.drive, heat.tone);
+            let w = [bw - 2.0, 16.0];
+            let d = crate::widgets::value_box(&mut row, |ui| {
+                ui.add_sized(w, egui::DragValue::new(&mut drive).range(0.0..=1.0).speed(0.005).custom_formatter(|v, _| format!("D {:.0}", v * 100.0)))
+            });
+            let tn = crate::widgets::value_box(&mut row, |ui| {
+                ui.add_sized(w, egui::DragValue::new(&mut tone).range(-1.0..=1.0).speed(0.01).custom_formatter(|v, _| format!("T {:+.0}", v * 100.0)))
+            });
+            if d.on_hover_text("HEAT Drive").changed() || tn.on_hover_text("HEAT Tone: dark (−) to bright (+)").changed() {
+                let _ = app.engine.execute_merged("mix.heat", &json!({"drive": drive, "tone": tone}), "heat_master");
+            }
+        }
+        y = sec.max.y + 4.0;
+    }
     if all || has("io") {
         let sec = Rect::from_min_size(pos2(x0, y), vec2(inner_w, 16.0 + 2.0 * 18.0 + 30.0));
         inset(ui.painter(), sec, t.strip_section);

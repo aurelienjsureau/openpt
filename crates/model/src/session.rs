@@ -295,6 +295,8 @@ pub struct Session {
     pub outputs: Vec<OutputPath>,
     #[serde(default = "crate::default_inputs")]
     pub inputs: Vec<crate::InputPath>,
+    #[serde(default)]
+    pub heat: crate::HeatSettings,
     pub markers: Vec<MemoryLocation>,
     pub groups: Vec<Group>,
     pub edit: EditState,
@@ -341,6 +343,7 @@ impl Session {
             busses: Vec::new(),
             outputs: vec![OutputPath { name: "Out 1-2".into(), first_channel: 0, format: ChannelFormat::Stereo }],
             inputs: crate::default_inputs(),
+            heat: crate::HeatSettings::default(),
             markers: Vec::new(),
             groups: Vec::new(),
             edit: EditState::default(),

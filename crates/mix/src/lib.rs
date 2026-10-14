@@ -211,6 +211,7 @@ impl HeldNotes {
 
 struct Strip {
     buf: Vec<Vec<f32>>,
+    heat: openpt_dsp::heat::Heat,
     pre: Vec<Vec<f32>>,
     scratch: Vec<f32>,
     plugins: Vec<Option<PluginSlot>>,
@@ -307,6 +308,7 @@ impl Strip {
             out_extra: DelayLine::default(),
             outbuf: Vec::new(),
             failures: PluginFailures::default(),
+            heat: openpt_dsp::heat::Heat::default(),
         }
     }
 }
@@ -975,6 +977,11 @@ fn process_strip(
             c.iter_mut().take(frames).for_each(|x| *x *= trim);
         }
     }
+    let heat = s.heat.active && !t.mixer.heat_bypass && matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux | TrackKind::Master);
+    let sr = s.sample_rate.as_f64() as f32;
+    if heat && t.mixer.heat_pre {
+        strip.heat.process(&mut strip.buf, frames, s.heat.drive, s.heat.tone, sr);
+    }
     let mut gr = 0.0f32;
     let mut latency = 0usize;
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
@@ -993,6 +1000,9 @@ fn process_strip(
         if gr == 0.0 {
             gr = slot.plugin.gain_reduction_db();
         }
+    }
+    if heat && !t.mixer.heat_pre {
+        strip.heat.process(&mut strip.buf, frames, s.heat.drive, s.heat.tone, sr);
     }
     strip.gr = gr;
     strip.latency = latency.min(MAX_LATENCY);
@@ -2514,6 +2524,33 @@ mod tests {
         eng.adopt(vec![PreparedInstance { track: t, slot: INSTRUMENT_SLOT, id: "vst3:test.keys".into(), ch: 2, plugin: Box::new(keys) }]);
         render_block(&mut eng, &s, 0);
         assert_eq!(*heard.lock().unwrap(), vec![(72, 80)]);
+    }
+
+    #[test]
+    fn heat_colours_tracks_unless_bypassed() {
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let sine: Vec<f32> = (0..48_000).map(|i| 0.8 * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / 48_000.0).sin()).collect();
+        s.pool.insert(SourceId(901), Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![sine] })));
+        let id = s.new_clip_id();
+        if let Some(pl) = s.track_mut(t).and_then(|t| t.playlist_mut()) {
+            pl.clips.push(Clip::audio(id, "sine", SourceId(901), 0, 0, 48_000));
+        }
+        let render = |s: &Session| {
+            let mut eng = MixEngine::new(48_000.0, 512);
+            let mut out = vec![vec![0.0f32; 512]; 2];
+            for k in 0..20 {
+                eng.render(s, k * 512, 512, &mut out);
+            }
+            out[0].clone()
+        };
+        let dry = render(&s);
+        s.heat = openpt_model::HeatSettings { active: true, drive: 1.0, tone: 0.0 };
+        let hot = render(&s);
+        let diff = dry.iter().zip(&hot).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+        assert!(diff > 0.01, "HEAT changes a loud track: {diff}");
+        s.track_mut(t).unwrap().mixer.heat_bypass = true;
+        assert_eq!(render(&s), dry, "bypassed on this track");
     }
 
     fn render_block(eng: &mut MixEngine, s: &Session, pos: i64) -> f32 {

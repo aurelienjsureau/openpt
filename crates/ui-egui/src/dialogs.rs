@@ -300,16 +300,17 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
             match &mut d {
                 Dialog::NewTracks { count, format, kind, timebase, name } => {
+                    ui.set_min_width(860.0);
                     ui.horizontal(|ui| {
                         ui.label("Create");
-                        ui.add(egui::DragValue::new(count).range(1..=128));
+                        crate::widgets::value_box(ui, |ui| ui.add_sized([46.0, 20.0], egui::DragValue::new(count).range(1..=128)));
                         ui.label("new");
-                        egui::ComboBox::from_id_salt("nt_fmt").selected_text(format.as_str()).show_ui(ui, |ui| {
+                        egui::ComboBox::from_id_salt("nt_fmt").width(110.0).selected_text(format.as_str()).show_ui(ui, |ui| {
                             for f in openpt_model::ChannelFormat::ALL {
                                 ui.selectable_value(format, f.label().to_string(), f.label());
                             }
                         });
-                        egui::ComboBox::from_id_salt("nt_kind")
+                        egui::ComboBox::from_id_salt("nt_kind").width(130.0)
                             .selected_text(openpt_model::TrackKind::from_id(kind).map_or("Audio Track", |k| k.label()))
                             .show_ui(ui, |ui| {
                                 for k in openpt_model::TrackKind::ALL {
@@ -320,7 +321,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                 }
                             });
                         ui.label("in");
-                        egui::ComboBox::from_id_salt("nt_tb").selected_text(if timebase == "ticks" { "Ticks" } else { "Samples" }).show_ui(
+                        egui::ComboBox::from_id_salt("nt_tb").width(100.0).selected_text(if timebase == "ticks" { "Ticks" } else { "Samples" }).show_ui(
                             ui,
                             |ui| {
                                 ui.selectable_value(timebase, "samples".to_string(), "Samples");
@@ -328,7 +329,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                             },
                         );
                         ui.label("Name:");
-                        ui.add(egui::TextEdit::singleline(name).desired_width(140.0));
+                        ui.add(egui::TextEdit::singleline(name).desired_width(220.0));
                     });
                     if buttons(ui, "Create", enter) {
                         action =
@@ -642,12 +643,12 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
 fn buttons(ui: &mut egui::Ui, ok: &str, enter: bool) -> bool {
     let mut pressed = enter;
     ui.separator();
-    ui.horizontal(|ui| {
-        if ui.button("Cancel").clicked() {
-            ui.ctx().memory_mut(|m| m.data.insert_temp(egui::Id::new("dlg_cancel"), true));
-        }
-        if ui.add(egui::Button::new(egui::RichText::new(ok).strong()).fill(Tokens::current().accent)).clicked() {
+    ui.allocate_ui_with_layout(egui::vec2(ui.available_width().max(260.0), 24.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if ui.add(egui::Button::new(egui::RichText::new(ok).strong()).fill(Tokens::current().accent).min_size(egui::vec2(88.0, 22.0))).clicked() {
             pressed = true;
+        }
+        if ui.add(egui::Button::new("Cancel").min_size(egui::vec2(88.0, 22.0))).clicked() {
+            ui.ctx().memory_mut(|m| m.data.insert_temp(egui::Id::new("dlg_cancel"), true));
         }
     });
     pressed

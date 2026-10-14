@@ -275,16 +275,7 @@ fn check(ui: &mut Ui, q: &str, on: &mut bool, label: &str) {
 }
 
 fn number<N: egui::emath::Numeric>(ui: &mut Ui, v: &mut N, range: std::ops::RangeInclusive<N>, speed: f64, suffix: &str) {
-    let t = Tokens::current();
-    ui.scope(|ui| {
-        let w = &mut ui.visuals_mut().widgets;
-        for s in [&mut w.inactive, &mut w.hovered, &mut w.active] {
-            s.weak_bg_fill = t.field_bg;
-            s.bg_fill = t.field_bg;
-            s.fg_stroke.color = t.field_text;
-        }
-        ui.add(egui::DragValue::new(v).range(range).speed(speed).min_decimals(0).max_decimals(2));
-    });
+    crate::widgets::value_box(ui, |ui| ui.add(egui::DragValue::new(v).range(range).speed(speed).min_decimals(0).max_decimals(2)));
     if !suffix.is_empty() {
         ui.label(suffix);
     }
