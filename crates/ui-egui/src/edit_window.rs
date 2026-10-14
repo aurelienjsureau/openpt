@@ -1377,7 +1377,12 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
     };
     let t = Tokens::current();
     let pos0 = if which == 0 { openpt_model::fader_db_to_pos(track.mixer.volume_db) } else { track.mixer.pan.first().map_or(0.5, |p| (p + 1.0) * 0.5) };
-    let at = press - vec2(6.0 + 5.0 + MINI_FADER_TRAVEL * pos0, 6.0 + 9.0);
+    let at_key = key.with(("at", tid, which, press.x.to_bits(), press.y.to_bits()));
+    let at = ctx.data(|d| d.get_temp::<Pos2>(at_key)).unwrap_or_else(|| {
+        let at = press - vec2(6.0 + 5.0 + MINI_FADER_TRAVEL * pos0, 6.0 + 9.0);
+        ctx.data_mut(|d| d.insert_temp(at_key, at));
+        at
+    });
     let area = egui::Area::new(key.with("area")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::new().fill(t.dialog_bg).stroke(Stroke::new(1.0, t.border)).corner_radius(2).inner_margin(6).show(ui, |ui| {
             let pans: Vec<f32> = if which == 1 { track.mixer.pan.iter().copied().take(2).collect() } else { vec![] };
