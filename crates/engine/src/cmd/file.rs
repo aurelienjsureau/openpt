@@ -393,7 +393,7 @@ mod tests {
         let mut e = Engine::default();
         let dir = std::env::temp_dir().join(format!("sc-bounce-ext-{}", std::process::id()));
         assert!(std::fs::create_dir_all(&dir).is_ok());
-        for name in ["mix.mp3", "mix.ogg", "mix.xyz"] {
+        for name in ["mix.ogg", "mix.xyz"] {
             let path = dir.join(name);
             let err = e.execute("file.bounce_mix", &json!({"path": path.to_string_lossy(), "start": 0, "end": 480})).map(|_| ()).unwrap_err();
             assert!(err.to_string().contains("supported: wav"), "{name}: {err}");

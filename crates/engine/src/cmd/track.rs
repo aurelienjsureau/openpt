@@ -59,7 +59,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("track.comments", "Track Comments", [], None, "{track, comments}", has_tracks, comments),
         cmd!("track.color", "Track Color", [], None, "{tracks?, color: [r,g,b] | palette index}", has_selection, color),
         cmd!(
-            "track.height",
+            noundo "track.height",
             "Track Height",
             [],
             None,
@@ -73,7 +73,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("track.height_down", "Decrease Track Height", [], Some("Ctrl+Down"), "{tracks?} — one preset shorter", has_selection, |e, p| {
             height_step(e, p, false)
         }),
-        cmd!("track.view", "Track View", [], None, "{tracks?, view: waveform|blocks|notes|volume|pan|mute|<automation id>}", has_selection, view),
+        cmd!(noundo "track.view", "Track View", [], None, "{tracks?, view: waveform|blocks|notes|volume|pan|mute|<automation id>}", has_selection, view),
         cmd!("track.hide", "Hide Track", [], None, "{tracks?, hidden?: bool}", has_selection, |e, p| flag(
             e,
             p,

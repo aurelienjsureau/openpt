@@ -229,6 +229,22 @@ impl Engine {
     }
 
     fn keep_edit_mode(&mut self, from: &Session) {
+        type Listen = (bool, bool, bool, bool, bool, bool, openpt_model::TrackHeight, String);
+        let listen = |t: &openpt_model::Track| -> Listen {
+            let m = &t.mixer;
+            (m.solo, m.mute, m.record_arm, m.input_monitor, m.solo_safe, m.record_safe, t.height, t.view.clone())
+        };
+        let was: std::collections::HashMap<openpt_model::TrackId, Listen> = from.tracks.iter().map(|t| (t.id, listen(t))).collect();
+        if self.doc.tracks.iter().any(|t| was.get(&t.id).is_some_and(|w| *w != listen(t))) {
+            for t in &mut Arc::make_mut(&mut self.doc).tracks {
+                if let Some((solo, mute, rec, input, solo_safe, rec_safe, height, view)) = was.get(&t.id).cloned() {
+                    let m = &mut t.mixer;
+                    (m.solo, m.mute, m.record_arm, m.input_monitor, m.solo_safe, m.record_safe) = (solo, mute, rec, input, solo_safe, rec_safe);
+                    t.height = height;
+                    t.view = view;
+                }
+            }
+        }
         use edit::{RELATIVE_GRID, SHUFFLE_LOCK, SNAP_TO_GRID};
         let flags = [SNAP_TO_GRID, SHUFFLE_LOCK, RELATIVE_GRID];
         let ed = &self.doc.edit;
@@ -456,7 +472,7 @@ mod merge_tests {
         e.execute("transport.stop", &json!({})).unwrap();
         e.execute_merged("mix.volume", &json!({"track": t.0, "db": -2.0}), "fader").unwrap();
         assert_eq!(e.undo_history().len(), 1);
-        e.execute("mix.mute", &json!({"track": t.0})).unwrap();
+        e.execute("mix.pan", &json!({"tracks": [t.0], "pan": 0.5})).unwrap();
         e.execute_merged("mix.volume", &json!({"track": t.0, "db": -3.0}), "fader").unwrap();
         assert_eq!(e.undo_history().len(), 3);
     }
@@ -465,6 +481,21 @@ mod merge_tests {
 #[cfg(test)]
 mod dirty_tests {
     use super::*;
+
+    #[test]
+    fn undo_leaves_solo_mute_and_track_views_alone() {
+        let mut e = crate::demo::demo_engine();
+        e.execute("mix.pan", &json!({"tracks": ["Kick"], "pan": 0.5})).unwrap();
+        e.execute("mix.mute", &json!({"tracks": ["Kick"]})).unwrap();
+        e.execute("mix.solo", &json!({"tracks": ["Snare"]})).unwrap();
+        e.execute("track.height", &json!({"tracks": ["Kick"], "height": "large"})).unwrap();
+        assert!(e.undo());
+        let s = e.session();
+        let (kick, snare) = (s.track_by_name("Kick").unwrap(), s.track_by_name("Snare").unwrap());
+        assert!(kick.mixer.pan.first().is_some_and(|p| p.abs() < 1e-6), "the pan is undone");
+        assert!(kick.mixer.mute && snare.mixer.solo, "listening stays");
+        assert_eq!(kick.height, openpt_model::TrackHeight::Large);
+    }
 
     #[test]
     fn selecting_locating_and_zooming_leave_the_session_clean() {
@@ -479,7 +510,7 @@ mod dirty_tests {
             e.execute(id, &p).unwrap();
             assert!(!e.is_dirty(), "{id}");
         }
-        e.execute("mix.mute", &json!({"track": "Kick"})).unwrap();
+        e.execute("mix.pan", &json!({"tracks": ["Kick"], "pan": 0.5})).unwrap();
         assert!(e.is_dirty());
         e.undo();
         assert!(!e.is_dirty());

@@ -7,15 +7,15 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("mix.volume", "Set Volume", [], None, "{tracks?, db: -144..12 | delta_db}", has_selection, volume),
         cmd!("mix.pan", "Set Pan", [], None, "{tracks?, pan: -1..1, index?: 0|1}", has_selection, pan),
-        cmd!("mix.mute", "Mute", [], Some("Shift+M"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
+        cmd!(noundo "mix.mute", "Mute", [], Some("Shift+M"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
             p,
             "mix.mute",
             |s, t, v| set_grouped(s, t, "mute", |tr| tr.mixer.mute = v),
             |tr| tr.mixer.mute
         )),
-        cmd!("mix.solo", "Solo", [], Some("Shift+S"), "{tracks?, value?: bool, exclusive?: bool}", has_selection, solo),
-        cmd!("mix.record_safe", "Record Safe", [], None, "{tracks?, value?: bool}", has_selection, |e, p| toggle(
+        cmd!(noundo "mix.solo", "Solo", [], Some("Shift+S"), "{tracks?, value?: bool, exclusive?: bool}", has_selection, solo),
+        cmd!(noundo "mix.record_safe", "Record Safe", [], None, "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
             p,
             "mix.record_safe",
@@ -29,7 +29,7 @@ pub fn specs() -> Vec<CommandSpec> {
             },
             |tr| tr.mixer.record_safe
         )),
-        cmd!("mix.solo_safe", "Solo Safe", [], None, "{tracks?, value?: bool}", has_selection, |e, p| toggle(
+        cmd!(noundo "mix.solo_safe", "Solo Safe", [], None, "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
             p,
             "mix.solo_safe",
@@ -52,7 +52,7 @@ pub fn specs() -> Vec<CommandSpec> {
             }
             Ok(json!({}))
         }),
-        cmd!("mix.record_arm", "Record Enable", [], Some("Shift+R"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
+        cmd!(noundo "mix.record_arm", "Record Enable", [], Some("Shift+R"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
             p,
             "mix.record_arm",
@@ -61,7 +61,7 @@ pub fn specs() -> Vec<CommandSpec> {
             }),
             |tr| tr.mixer.record_arm
         )),
-        cmd!("mix.input_monitor", "Input Monitoring", [], Some("Shift+I"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
+        cmd!(noundo "mix.input_monitor", "Input Monitoring", [], Some("Shift+I"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
             p,
             "mix.input_monitor",
