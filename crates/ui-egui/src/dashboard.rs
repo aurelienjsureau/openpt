@@ -14,7 +14,7 @@ enum Tab {
 struct Draft {
     tab: Tab,
     name: String,
-    demo: bool,
+    template: String,
     sample_rate: u32,
     bit_depth: String,
     dir: String,
@@ -41,12 +41,62 @@ fn create_params(d: &Draft) -> Value {
         "name": d.name.trim(),
         "sample_rate": d.sample_rate,
         "bit_depth": d.bit_depth,
-        "template": if d.demo { "demo" } else { "blank" },
+        "template": d.template,
     });
     if !d.dir.trim().is_empty() {
         p["path"] = json!(session_path(d.dir.trim(), &d.name));
     }
     p
+}
+
+fn template_dirs() -> Vec<std::path::PathBuf> {
+    let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
+    let home = env("USERPROFILE").or_else(|| env("HOME"));
+    let mut dirs = Vec::new();
+    if let Some(a) = env("APPDATA") {
+        dirs.push(a.join("OpenPT").join("Templates"));
+    } else if let Some(h) = &home {
+        dirs.push(h.join(if cfg!(target_os = "macos") { "Library/Application Support/OpenPT/Templates" } else { ".config/OpenPT/Templates" }));
+    }
+    if let Some(h) = home {
+        dirs.push(h.join("Documents").join("Pro Tools").join("Session Templates"));
+    }
+    dirs
+}
+
+fn templates() -> Vec<String> {
+    let is_tpl = |p: &std::path::Path| {
+        p.extension().and_then(|x| x.to_str()).is_some_and(|x| ["openpt", "ptxt", "ptx"].contains(&x.to_ascii_lowercase().as_str()))
+    };
+    let mut out = Vec::new();
+    for d in template_dirs() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(
+                    std::fs::read_dir(&p)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|f| f.path())
+                        .filter(|f| is_tpl(f))
+                        .map(|f| f.to_string_lossy().into_owned()),
+                );
+            } else if is_tpl(&p) {
+                out.push(p.to_string_lossy().into_owned());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn template_label(t: &str) -> String {
+    match t {
+        "blank" => "Blank".into(),
+        "demo" => "Demo session".into(),
+        p => std::path::Path::new(p).file_stem().map_or_else(|| p.to_string(), |s| s.to_string_lossy().into_owned()),
+    }
 }
 
 fn default_dir(app: &SoundApp) -> String {
@@ -69,7 +119,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     let mut d = ctx.data(|d| d.get_temp::<Draft>(draft_id())).unwrap_or_else(|| Draft {
         tab: if app.engine.path.is_none() && !app.ui.recent_sessions.is_empty() && app.ui.dashboard_tab_recent { Tab::Recent } else { Tab::Create },
         name: free_name(&default_dir(app)),
-        demo: false,
+        template: "blank".into(),
         sample_rate: 48_000,
         bit_depth: "24".into(),
         dir: default_dir(app),
@@ -110,13 +160,24 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                 ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(320.0));
                                 ui.end_row();
                                 ui.label("Template");
-                                egui::ComboBox::from_id_salt("dash_tpl")
-                                    .width(320.0)
-                                    .selected_text(if d.demo { "Demo session" } else { "Blank" })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut d.demo, false, "Blank");
-                                        ui.selectable_value(&mut d.demo, true, "Demo session");
-                                    });
+                                egui::ComboBox::from_id_salt("dash_tpl").width(320.0).selected_text(template_label(&d.template)).show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut d.template, "blank".to_string(), "Blank");
+                                    ui.selectable_value(&mut d.template, "demo".to_string(), "Demo session");
+                                    let found = templates();
+                                    if !found.is_empty() {
+                                        ui.separator();
+                                    }
+                                    for t in found {
+                                        let label = template_label(&t);
+                                        ui.selectable_value(&mut d.template, t, label);
+                                    }
+                                });
+                                if let Some(pick) = &app.services.pick_open
+                                    && ui.small_button("Browse…").on_hover_text("A template or session file (OpenPT or Pro Tools)").clicked()
+                                    && let Some(p) = pick("session.open", &[])
+                                {
+                                    d.template = p;
+                                }
                                 ui.end_row();
                                 ui.label("Sample Rate");
                                 egui::ComboBox::from_id_salt("dash_rate")
@@ -262,7 +323,7 @@ mod tests {
         let d = Draft {
             tab: Tab::Create,
             name: "Mix".into(),
-            demo: false,
+            template: "blank".into(),
             sample_rate: 96_000,
             bit_depth: "32f".into(),
             dir: dir.to_string_lossy().into_owned(),

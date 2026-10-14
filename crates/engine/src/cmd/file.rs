@@ -6,7 +6,7 @@ use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(noundo "session.new", "New...", ["File"], Some("Cmd+N"), "{name?: 'Untitled', sample_rate?: 48000, bit_depth?: 24, template?: blank|demo, path?: session file to create it at, replace?: false}", always, new_session),
+        cmd!(noundo "session.new", "New...", ["File"], Some("Cmd+N"), "{name?: 'Untitled', sample_rate?: 48000, bit_depth?: 24, template?: blank|demo|template or session file (.openpt, .ptx, .ptxt), path?: session file to create it at, replace?: false}", always, new_session),
         cmd!(noundo "session.open", "Open Session...", ["File"], Some("Cmd+O"), "{path}", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("session.open", "`path` required"))?.to_string();
             let missing = crate::io::open_session(e, &path)?;
@@ -210,7 +210,25 @@ fn new_session(e: &mut Engine, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").unwrap_or("Untitled").to_string();
     let sr =
         SampleRate::new(i64_or(p, "sample_rate", 48_000).clamp(0, i64::from(u32::MAX)) as u32).map_err(|err| bad("session.new", err.to_string()))?;
-    let mut s = if str_param(p, "template") == Some("demo") { crate::demo::demo_session() } else { Session::new(name.clone(), sr) };
+    let mut s = match str_param(p, "template") {
+        Some("demo") => crate::demo::demo_session(),
+        None | Some("blank" | "") => Session::new(name.clone(), sr),
+        Some(path) if crate::io::is_ptx_path(path) => crate::io::ptx_session(path)?,
+        Some(path) => {
+            let mut t = Session::from_json(&crate::io::read_text(path)?).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
+            for tr in &mut t.tracks {
+                for pl in &mut tr.playlists {
+                    pl.clips.clear();
+                }
+            }
+            t.sources.clear();
+            t.videos.clear();
+            t
+        }
+    };
+    if p.get("sample_rate").is_some() {
+        s.sample_rate = sr;
+    }
     s.name = name;
     if let Some(b) = p.get("bit_depth") {
         s.bit_depth = match b.to_string().trim_matches('"') {
@@ -460,6 +478,24 @@ mod tests {
                 let _ = std::fs::remove_file(&p);
             }
         }
+    }
+
+    #[test]
+    fn a_new_session_starts_from_a_saved_template() {
+        let mut e = crate::demo::demo_engine();
+        let dir = std::env::temp_dir().join(format!("openpt-tpl-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let tpl = dir.join("Mix Template.openpt");
+        e.execute("session.save_template", &json!({"path": tpl.to_string_lossy()})).unwrap();
+        let before = std::fs::read(&tpl).unwrap();
+        let n = e.session().tracks.len();
+        e.execute("session.new", &json!({"name": "Song", "template": tpl.to_string_lossy()})).unwrap();
+        let s = e.session();
+        assert_eq!((s.name.as_str(), s.tracks.len()), ("Song", n));
+        assert!(s.tracks.iter().all(|t| t.clips().is_empty()));
+        assert!(e.path.is_none(), "the template is not the new session");
+        assert_eq!(std::fs::read(&tpl).unwrap(), before, "the template is left alone");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
