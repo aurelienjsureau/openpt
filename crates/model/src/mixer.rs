@@ -366,6 +366,14 @@ pub struct OutputPath {
     pub format: ChannelFormat,
 }
 
+pub type InputPath = OutputPath;
+
+pub fn default_inputs() -> Vec<InputPath> {
+    let mono = (0..8u16).map(|c| InputPath { name: format!("In {}", c + 1), first_channel: c, format: ChannelFormat::Mono });
+    let pairs = (0..4u16).map(|p| InputPath { name: format!("In {}-{}", 2 * p + 1, 2 * p + 2), first_channel: 2 * p, format: ChannelFormat::Stereo });
+    mono.chain(pairs).collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum Route {
     #[default]

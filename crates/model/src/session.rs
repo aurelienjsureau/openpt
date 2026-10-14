@@ -293,6 +293,8 @@ pub struct Session {
     pub videos: Vec<VideoSource>,
     pub busses: Vec<Bus>,
     pub outputs: Vec<OutputPath>,
+    #[serde(default = "crate::default_inputs")]
+    pub inputs: Vec<crate::InputPath>,
     pub markers: Vec<MemoryLocation>,
     pub groups: Vec<Group>,
     pub edit: EditState,
@@ -314,6 +316,13 @@ impl Default for Session {
 }
 
 impl Session {
+    pub fn input_first_channel(&self, name: &str) -> usize {
+        if let Some(p) = self.inputs.iter().find(|p| p.name == name) {
+            return usize::from(p.first_channel);
+        }
+        name.trim_start_matches("In ").split(['-', ' ']).next().and_then(|n| n.parse::<usize>().ok()).map_or(0, |n| n.saturating_sub(1))
+    }
+
     pub const FORMAT_VERSION: u32 = 1;
 
     pub fn new(name: impl Into<String>, sample_rate: SampleRate) -> Self {
@@ -331,6 +340,7 @@ impl Session {
             videos: Vec::new(),
             busses: Vec::new(),
             outputs: vec![OutputPath { name: "Out 1-2".into(), first_channel: 0, format: ChannelFormat::Stereo }],
+            inputs: crate::default_inputs(),
             markers: Vec::new(),
             groups: Vec::new(),
             edit: EditState::default(),

@@ -834,9 +834,7 @@ fn process_strip(
     match t.kind {
         TrackKind::Audio if !live.input.is_empty() && (t.mixer.input_monitor || (t.mixer.record_arm && (live.monitor_only || live.recording))) => {
             let first = match &t.mixer.input {
-                Route::Hardware(h) => {
-                    h.trim_start_matches("In ").split(['-', ' ']).next().and_then(|n| n.parse::<usize>().ok()).map_or(0, |n| n.saturating_sub(1))
-                }
+                Route::Hardware(h) => s.input_first_channel(h),
                 _ => 0,
             };
             let n_in = live.input.len().max(1);

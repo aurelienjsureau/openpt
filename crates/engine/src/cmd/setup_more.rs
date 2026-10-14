@@ -53,7 +53,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "I/O...",
             ["Setup"],
             None,
-            "{action?: list|create_bus|rename_bus|delete_bus|create_output|rename_output|delete_output, name?, new_name?, format?: stereo, first_channel?: 0}",
+            "{action?: list|create_bus|rename_bus|delete_bus|create_output|rename_output|delete_output|set_output|create_input|rename_input|delete_input|set_input, name?, new_name?, format?: stereo, first_channel?: 0}",
             always,
             io_setup
         ),
@@ -214,7 +214,7 @@ fn peripherals(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 fn io_state(s: &Session) -> Value {
-    json!({"busses": s.busses, "outputs": s.outputs})
+    json!({"busses": s.busses, "outputs": s.outputs, "inputs": s.inputs})
 }
 
 fn io_setup(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -284,6 +284,45 @@ fn io_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             s.outputs.retain(|o| !o.name.eq_ignore_ascii_case(&name));
             if s.outputs.len() == before {
                 return Err(bad(id, format!("no output `{name}`")));
+            }
+        }
+        "create_input" => {
+            if s.inputs.iter().any(|o| o.name.eq_ignore_ascii_case(&name)) {
+                return Err(bad(id, format!("an input named `{name}` exists")));
+            }
+            let first = i64_or(p, "first_channel", 0).clamp(0, 1023) as u16;
+            s.inputs.push(openpt_model::InputPath { name, first_channel: first, format });
+        }
+        "rename_input" => {
+            let to = new_name.ok_or_else(|| bad(id, "`new_name` required"))?;
+            if s.inputs.iter().any(|o| o.name.eq_ignore_ascii_case(&to)) {
+                return Err(bad(id, format!("an input named `{to}` exists")));
+            }
+            let i = s.inputs.iter_mut().find(|o| o.name.eq_ignore_ascii_case(&name)).ok_or_else(|| bad(id, format!("no input `{name}`")))?;
+            let old = std::mem::replace(&mut i.name, to.clone());
+            for t in &mut s.tracks {
+                if t.mixer.input == Route::Hardware(old.clone()) {
+                    t.mixer.input = Route::Hardware(to.clone());
+                }
+            }
+        }
+        "delete_input" => {
+            let found = s.inputs.iter().find(|o| o.name.eq_ignore_ascii_case(&name)).map(|o| o.name.clone()).ok_or_else(|| bad(id, format!("no input `{name}`")))?;
+            s.inputs.retain(|o| o.name != found);
+            for t in &mut s.tracks {
+                if t.mixer.input == Route::Hardware(found.clone()) {
+                    t.mixer.input = Route::None;
+                }
+            }
+        }
+        "set_input" | "set_output" => {
+            let paths = if action == "set_input" { &mut s.inputs } else { &mut s.outputs };
+            let path = paths.iter_mut().find(|o| o.name.eq_ignore_ascii_case(&name)).ok_or_else(|| bad(id, format!("no path `{name}`")))?;
+            if p.get("first_channel").is_some() {
+                path.first_channel = i64_or(p, "first_channel", 0).clamp(0, 1023) as u16;
+            }
+            if p.get("format").is_some() {
+                path.format = format;
             }
         }
         other => return Err(bad(id, format!("unknown action `{other}`"))),
@@ -498,6 +537,27 @@ mod tests {
         assert!(e.session().edit.flag("options.midi_thru"));
         e.execute("options.midi_thru", &json!({"value": false})).unwrap();
         assert!(!e.session().edit.flag("options.midi_thru"));
+    }
+
+    #[test]
+    fn input_paths_route_recording_and_follow_renames() {
+        let mut e = Engine::default();
+        assert_eq!(e.session().input_first_channel("In 3"), 2);
+        assert_eq!(e.session().input_first_channel("In 5-6"), 4);
+        e.execute("setup.io", &json!({"action": "create_input", "name": "Guitar DI", "first_channel": 9, "format": "mono"})).unwrap();
+        assert_eq!(e.session().input_first_channel("Guitar DI"), 9);
+        let t = e.execute("track.new", &json!({"format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+        e.execute("track.input", &json!({"track": t, "input": "Guitar DI"})).unwrap();
+        e.execute("setup.io", &json!({"action": "set_input", "name": "Guitar DI", "first_channel": 3})).unwrap();
+        assert_eq!(e.session().input_first_channel("Guitar DI"), 3);
+        e.execute("setup.io", &json!({"action": "rename_input", "name": "Guitar DI", "new_name": "Gtr"})).unwrap();
+        let input = |e: &Engine| e.session().track(openpt_model::TrackId(t)).map(|x| x.mixer.input.clone());
+        assert_eq!(input(&e), Some(Route::Hardware("Gtr".into())));
+        assert!(e.execute("setup.io", &json!({"action": "create_input", "name": "gtr"})).is_err(), "names are unique");
+        e.execute("setup.io", &json!({"action": "delete_input", "name": "Gtr"})).unwrap();
+        assert_eq!(input(&e), Some(Route::None));
+        let listed = e.execute("setup.io", &json!({})).unwrap();
+        assert_eq!(listed["inputs"].as_array().map(Vec::len), Some(12));
     }
 
     #[test]

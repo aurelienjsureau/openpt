@@ -1317,9 +1317,18 @@ fn route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, input: bool) {
         ui.close();
     }
     if input {
-        for i in 1..=8 {
-            if ui.button(format!("In {i}")).clicked() {
-                let _ = run_scoped(app, ui, cmd, json!({"track": id.0, key: format!("In {i}")}));
+        let paths: Vec<String> = app.engine.session().inputs.iter().map(|p| p.name.clone()).collect();
+        for name in paths {
+            if ui.button(&name).clicked() {
+                let _ = run_scoped(app, ui, cmd, json!({"track": id.0, key: name}));
+                ui.close();
+            }
+        }
+    } else {
+        let outs: Vec<String> = app.engine.session().outputs.iter().skip(1).map(|p| p.name.clone()).collect();
+        for name in outs {
+            if ui.button(&name).clicked() {
+                let _ = run_scoped(app, ui, cmd, json!({"track": id.0, key: name}));
                 ui.close();
             }
         }

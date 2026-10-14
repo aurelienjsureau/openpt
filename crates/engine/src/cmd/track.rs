@@ -843,7 +843,12 @@ fn route(e: &mut Engine, p: &Value, input: bool) -> Result<Value> {
     let create_bus = bool_or(p, "create_bus", true);
     let s = e.session_mut();
     let mut r = parse_route(s, &v);
+    let paths = if input { &s.inputs } else { &s.outputs };
     if let Route::Hardware(name) = &r
+        && let Some(path) = paths.iter().find(|p| p.name.eq_ignore_ascii_case(name))
+    {
+        r = Route::Hardware(path.name.clone());
+    } else if let Route::Hardware(name) = &r
         && create_bus
         && !name.to_ascii_lowercase().starts_with("in ")
     {
