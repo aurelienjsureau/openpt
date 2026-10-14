@@ -32,6 +32,14 @@ fn click(h: &mut Harness<'_, SoundApp>, pos: Pos2) {
     press(h, pos, PointerButton::Primary, Modifiers::NONE);
 }
 
+fn category(c: openpt_dsp::Category) -> String {
+    match format!("{c:?}").as_str() {
+        "Eq" => "EQ".into(),
+        "PitchShift" => "Pitch Shift".into(),
+        other => other.into(),
+    }
+}
+
 fn kick(h: &Harness<'_, SoundApp>) -> Track {
     h.state().engine.session().track_by_name("Kick").cloned().unwrap()
 }
@@ -46,7 +54,19 @@ fn bypassed(h: &Harness<'_, SoundApp>, slot: usize) -> bool {
 
 fn harness(track: &str, height: &str, view: &str) -> (Harness<'static, SoundApp>, TrackId, [f32; 4]) {
     let mut app = SoundApp::new(openpt_engine::demo::demo_engine(), None, Services::default());
-    app.run(view, json!({})).unwrap();
+    app.ui.plugin_menu_org = "category".into();
+    for v in [
+        "view.edit_inserts_ae",
+        "view.edit_inserts_fj",
+        "view.edit_sends_ae",
+        "view.edit_sends_fj",
+        "view.edit_io",
+        "view.edit_comments",
+        "view.edit_color",
+    ] {
+        let _ = app.run(v, json!({"value": false}));
+    }
+    app.run(view, json!({"value": true})).unwrap();
     app.run("track.height", json!({"tracks": [track], "height": height})).unwrap();
     let id = app.engine.session().track_by_name(track).unwrap().id;
     let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
@@ -104,7 +124,7 @@ fn edit_window_insert_slots_open_change_and_add_plugins() {
 
     let plugin = openpt_dsp::plugins().iter().find(|p| !p.is_instrument).unwrap();
     click(&mut h, slot(2));
-    let category = h.get_by_label(&format!("{:?} ⏵", plugin.category)).rect().center();
+    let category = h.get_by_label(&format!("{} ⏵", category(plugin.category))).rect().center();
     h.state_mut().synthetic.push(Event::PointerMoved(category));
     for _ in 0..10 {
         step(&mut h);
@@ -127,7 +147,7 @@ fn short_tracks_show_insert_slots_as_squares() {
 
     click(&mut h, square(4));
     let plugin = openpt_dsp::plugins().iter().find(|p| !p.is_instrument).unwrap();
-    assert!(h.query_by_label(&format!("{:?} ⏵", plugin.category)).is_some());
+    assert!(h.query_by_label(&format!("{} ⏵", category(plugin.category))).is_some());
 }
 
 #[test]
@@ -162,16 +182,17 @@ fn the_io_columns_route_menus_stay_open_while_searching_buses() {
 }
 
 #[test]
-fn only_a_sends_fader_icon_opens_its_level() {
+fn the_send_letter_picks_the_destination_and_the_name_opens_the_send_window() {
     let (mut h, snare, row) = harness("Snare", "medium", "view.edit_sends_ae");
     let send_a = |x: f32| pos2(row[0] + HEADER_W + x, row[1] + 8.5);
 
-    click(&mut h, send_a(50.0));
+    click(&mut h, send_a(10.0));
     assert!(h.query_by_label("DESTINATION").is_some());
     assert_eq!(h.state().ui.send_window, None);
     click(&mut h, pos2(800.0, 990.0));
 
-    click(&mut h, send_a(65.5));
+    click(&mut h, send_a(40.0));
     assert_eq!(h.state().ui.send_window, Some((snare, 0)));
     assert!(h.query_by_label("DESTINATION").is_none());
+    assert!(h.query_by_label("Snare · Send A").is_some());
 }

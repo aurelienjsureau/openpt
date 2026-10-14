@@ -56,7 +56,7 @@ fn double_click_right_of_the_last_strip_opens_new_tracks() {
     let mut h = harness(1);
     h.state_mut().ui.window = MainWindow::Mix;
     h.run_steps(4);
-    let strip = h.get_by_label("Record enable").rect();
+    let strip = h.get_by_label("Record enable · Ctrl-click: Record Safe").rect();
     let at = pos2(strip.max.x + 150.0, strip.center().y);
     click(&mut h, at);
     click(&mut h, at);

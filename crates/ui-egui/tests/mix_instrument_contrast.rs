@@ -167,7 +167,7 @@ fn populated_mix_instrument_uses_readable_palette_in_real_frames() {
         harness.step();
     }
     harness.step();
-    harness.get_by_label_contains("Built-in").hover();
+    harness.get_by_label("OpenPT ⏵").hover();
     harness.step();
     harness.step();
     harness.get_by_label("Drum Synth").click();

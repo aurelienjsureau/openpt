@@ -1498,7 +1498,7 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
     let at_key = key.with(("at", tid, which, press.x.to_bits(), press.y.to_bits()));
     let at = ctx.data(|d| d.get_temp::<Pos2>(at_key)).unwrap_or_else(|| {
         let at = if which == 0 {
-            press - vec2(6.0 + 29.0, 6.0 + 5.0 + MINI_FADER_TRAVEL * (1.0 - pos0))
+            press - vec2(6.0 + 11.0, 6.0 + 5.0 + MINI_FADER_TRAVEL * (1.0 - pos0))
         } else {
             press - vec2(6.0 + 5.0 + MINI_FADER_TRAVEL * pos0, 6.0 + 9.0)
         };
@@ -1510,7 +1510,7 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
             let pans: Vec<f32> = if which == 1 { track.mixer.pan.iter().copied().take(2).collect() } else { vec![] };
             let rows = if which == 0 { 1 } else { pans.len().max(1) };
             for k in 0..rows {
-                let layout = if which == 0 { egui::Layout::top_down(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
+                let layout = if which == 0 { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Center) };
                 ui.with_layout(layout, |ui| {
                     let (pos, label) = if which == 0 {
                         (openpt_model::fader_db_to_pos(track.mixer.volume_db), format!("{} dB", crate::widgets::db_text(track.mixer.volume_db)))

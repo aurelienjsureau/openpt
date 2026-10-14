@@ -447,7 +447,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     let thin_w = thin_bars * 6.0;
     let fader_w = if wide_meter { inner_w * 0.45 } else { inner_w - thin_w - if narrow { 4.0 } else { 20.0 } };
     let fr = Rect::from_min_size(pos2(x0, y), vec2(fader_w, fh));
-    if let Some(db) = fader(ui, fr, track.mixer.volume_db, ui.id().with(("fader", id.0))) {
+    if let Some(db) = crate::widgets::fader_with(ui, fr, track.mixer.volume_db, ui.id().with(("fader", id.0)), !narrow) {
         app.gesture = Some(crate::Gesture::Fader { track: id, start_db: track.mixer.volume_db });
         let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
     }
@@ -646,7 +646,7 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
         }
     }
     let dot = Rect::from_min_max(r.min, pos2(r.min.x + 13.0, r.max.y));
-    if ins.is_some() {
+    if ins.is_some() && r.width() >= COMPACT_SLOT {
         let dot_resp = ui.interact(dot, ui.id().with(("ins_dot", id.0, slot)), Sense::click()).on_hover_text("Insert menu");
         egui::Popup::menu(&dot_resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| plugin_menu(app, ui, id, slot, true));
     }
@@ -1118,9 +1118,17 @@ pub(crate) fn send_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: us
     let id = track.id;
     let snd = track.mixer.sends.get(slot).cloned().flatten();
     let compact = r.width() < COMPACT_SLOT;
-    let level_r = if compact { r } else { level_icon(r).expand2(vec2(3.0, 0.0)).with_min_y(r.min.y).with_max_y(r.max.y) };
-    let route_r = Rect::from_min_max(r.min, pos2((level_r.min.x - 1.0).max(r.min.x), r.max.y));
-    let route_resp = ui.interact(if snd.is_some() { route_r } else { r }, ui.id().with(("snd-route", id.0, slot)), Sense::click());
+    let level_r = if compact { r } else { Rect::from_min_max(pos2((r.min.x + 13.0).min(r.max.x), r.min.y), r.max) };
+    let route_r = Rect::from_min_max(r.min, pos2((r.min.x + 13.0).min(r.max.x), r.max.y));
+    let route_resp = ui.interact(
+        match (&snd, compact) {
+            (None, _) => r,
+            (Some(_), false) => route_r,
+            (Some(_), true) => Rect::from_min_size(r.min, vec2(0.0, 0.0)),
+        },
+        ui.id().with(("snd-route", id.0, slot)),
+        Sense::click(),
+    );
     route_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Send {}", (b'A' + slot as u8) as char)));
     let mark = if compact { Mark::Arrow } else { Mark::Letter((b'a' + slot as u8) as char) };
     match &snd {
@@ -1134,7 +1142,7 @@ pub(crate) fn send_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: us
             let level_resp = ui.interact(level_r, ui.id().with(("send-value", id.0, slot)), Sense::click_and_drag());
             level_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Send {which} level")));
             if shown {
-                ui.painter().rect_stroke(level_r.shrink(0.5), 1.0, Stroke::new(1.5, t.accent), StrokeKind::Inside);
+                ui.painter().rect_stroke(r.shrink(0.5), 1.0, Stroke::new(1.5, t.accent), StrokeKind::Inside);
             }
             if level_resp.clicked() {
                 if ui.input(|i| i.modifiers.alt) {
@@ -1150,7 +1158,7 @@ pub(crate) fn send_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: us
                     app.engine.execute_merged("mix.send_level", &json!({"track": id.0, "slot": slot, "db": db}), &format!("send:{}:{slot}", id.0));
             }
             let _ = level_resp.clone().on_hover_text(format!(
-                "Send {which} to {name}: {} dB\nClick for the send fader · drag vertically to adjust · Shift-drag for fine control · Alt-click for 0 dB · right-click for options",
+                "Send {which} to {name}: {} dB\nClick for the send window · drag vertically to adjust · Shift-drag for fine control · Alt-click for 0 dB · right-click for options",
                 db_text(s.level_db)
             ));
             level_resp.context_menu(|ui| send_options_menu(app, ui, id, slot, s));
@@ -1214,16 +1222,19 @@ fn send_window_contents(app: &mut SoundApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(route_name(app, &send.target)).color(t.counter_text));
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.add_space(((ui.available_width() - 62.0) / 2.0).max(0.0));
+                    ui.add_space(((ui.available_width() - 104.0) / 2.0).max(0.0));
                     if text_toggle(ui, vec2(36.0, 18.0), "PRE", send.pre_fader, t.accent, "Pre-fader").clicked() {
                         let _ = app.run("mix.send_level", json!({"track": id.0, "slot": slot, "pre_fader": !send.pre_fader}));
                     }
                     if text_toggle(ui, vec2(22.0, 18.0), "M", send.mute, t.mute, "Mute send").clicked() {
                         let _ = app.run("mix.send_level", json!({"track": id.0, "slot": slot, "mute": !send.mute}));
                     }
+                    if text_toggle(ui, vec2(36.0, 18.0), "FMP", send.follow_main_pan, t.accent, "Follow Main Pan").clicked() {
+                        let _ = app.run("mix.send_level", json!({"track": id.0, "slot": slot, "follow_main_pan": !send.follow_main_pan}));
+                    }
                 });
                 let mut pan = send.pan;
-                pan_knob(ui, 32.0, &mut pan, "Send pan (drag; double-click centres)");
+                ui.add_enabled_ui(!send.follow_main_pan, |ui| pan_knob(ui, 32.0, &mut pan, "Send pan (drag; double-click centres)"));
                 if (pan - send.pan).abs() > f32::EPSILON {
                     let _ = app.engine.execute_merged(
                         "mix.send_level",

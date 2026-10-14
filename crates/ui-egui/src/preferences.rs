@@ -38,6 +38,7 @@ struct Opts {
     mirrored_midi: bool,
     delay_compensation: bool,
     pre_fader_metering: bool,
+    sends_default_inf: bool,
     solo_mode: String,
 }
 
@@ -60,6 +61,7 @@ impl Opts {
             mirrored_midi: e.mirrored_midi,
             delay_compensation: e.delay_compensation,
             pre_fader_metering: e.pre_fader_metering,
+            sends_default_inf: e.flag("pref.sends_default_inf"),
             solo_mode: e.solo_mode.split('+').next().unwrap_or("sip").to_string(),
         }
     }
@@ -81,6 +83,7 @@ impl Opts {
         flag("options.mirrored_midi", self.mirrored_midi, before.mirrored_midi);
         flag("options.delay_compensation", self.delay_compensation, before.delay_compensation);
         flag("options.pre_fader_metering", self.pre_fader_metering, before.pre_fader_metering);
+        flag("options.sends_default_inf", self.sends_default_inf, before.sends_default_inf);
         if (self.pre_roll_s - before.pre_roll_s).abs() > 1e-6 {
             out.push(("options.pre_roll", json!({"length": {"seconds": self.pre_roll_s}})));
         }
@@ -398,8 +401,9 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                 });
             }
             Page::Mixing => {
-                group(left, q, "Setup", &["Open Plug-ins in Their Own Editor", "Solo Mode"], |ui| {
+                group(left, q, "Setup", &["Open Plug-ins in Their Own Editor", "Solo Mode", "Send Levels Default to -INF"], |ui| {
                     check(ui, q, &mut a.plugin_native_editor, "Open Plug-ins in Their Own Editor");
+                    check(ui, q, &mut o.sends_default_inf, "Send Levels Default to -INF");
                     if hit(q, "Solo Mode") {
                         ui.label("Solo Mode:");
                         ui.indent("solo", |ui| radios(ui, &mut o.solo_mode, &[("sip", "Solo In Place"), ("afl", "AFL"), ("pfl", "PFL")]));

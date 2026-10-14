@@ -108,6 +108,7 @@ pub fn specs() -> Vec<CommandSpec> {
             sort_rulers(&mut s.edit.rulers);
             Ok(json!({"rulers": s.edit.rulers}))
         }),
+        flag!("options.sends_default_inf", "Send Levels Default to -INF", [], "pref.sends_default_inf"),
         flag!("view.ruler_tempo_editor", "Tempo Editor", ["View", "Rulers", "Tempo"], "view.ruler.tempo_editor"),
         flag!("view.ruler_key_staff", "Key Signature Staff", ["View", "Rulers", "Key Signature"], "view.ruler.key_staff"),
         flag!("view.marker_track_lane", "Track Lane", ["View", "Marker Displays"], "view.marker.track_lane"),

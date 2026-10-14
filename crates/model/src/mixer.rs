@@ -461,7 +461,7 @@ pub struct SendSlot {
     pub pan: f32,
     pub mute: bool,
     pub pre_fader: bool,
-    #[serde(default = "yes")]
+    #[serde(default)]
     pub follow_main_pan: bool,
     #[serde(default)]
     pub surround: Option<SurroundPan>,
@@ -469,7 +469,7 @@ pub struct SendSlot {
 
 impl SendSlot {
     pub fn new(target: Route) -> Self {
-        SendSlot { target, level_db: -144.0, pan: 0.0, mute: false, pre_fader: false, follow_main_pan: true, surround: None }
+        SendSlot { target, level_db: -144.0, pan: 0.0, mute: false, pre_fader: false, follow_main_pan: false, surround: None }
     }
 }
 

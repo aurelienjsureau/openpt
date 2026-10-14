@@ -23,7 +23,7 @@ fn near(a: [i32; 3], b: Color32) -> bool {
 }
 
 #[test]
-fn grid_lines_are_drawn_over_clips_while_shown() {
+fn grid_lines_are_drawn_over_clips_while_shown_and_not_at_all_when_hidden() {
     let mut app = SoundApp::new(openpt_engine::demo::demo_engine(), None, Services::default());
     let ctx = egui::Context::default();
     for theme in ["dark", "light"] {
@@ -59,8 +59,12 @@ fn grid_lines_are_drawn_over_clips_while_shown() {
                     _ => None,
                 })
                 .collect();
-            assert!(lines.len() > 4, "{theme} {shown}: {} lines", lines.len());
-            assert!(lines.iter().all(|(i, _)| (*i > body) == shown), "{theme} {shown}");
+            if !shown {
+                assert!(lines.is_empty(), "{theme}: a hidden grid draws nothing, {} lines", lines.len());
+                continue;
+            }
+            assert!(lines.len() > 4, "{theme}: {} lines", lines.len());
+            assert!(lines.iter().all(|(i, _)| *i > body), "{theme}: over the clips");
             for (_, col) in &lines {
                 let look = over(*col, t.playlist_bg);
                 assert!(near(look, t.grid_line) || near(look, t.bar_line), "{theme} {shown}: {look:?}");

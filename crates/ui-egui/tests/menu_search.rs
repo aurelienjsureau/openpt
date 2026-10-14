@@ -6,9 +6,18 @@ use openpt_model::Route;
 use openpt_ui_egui::{MainWindow, Services, SoundApp};
 use serde_json::json;
 
+fn category_label(c: openpt_dsp::Category) -> String {
+    match format!("{c:?}").as_str() {
+        "Eq" => "EQ".into(),
+        "PitchShift" => "Pitch Shift".into(),
+        other => other.into(),
+    }
+}
+
 fn harness(engine: openpt_engine::Engine) -> Harness<'static, SoundApp> {
     let mut app = SoundApp::new(engine, None, Services::default());
     app.ui.window = MainWindow::Mix;
+    app.ui.plugin_menu_org = "category".into();
     let mut h = Harness::builder().with_size(vec2(1400.0, 1000.0)).build_ui_state(
         |ui, app: &mut SoundApp| {
             app.logic(&ui.ctx().clone());
@@ -79,7 +88,7 @@ fn a_menu_opens_with_an_empty_search() {
     assert!(h.query_by_label(built_in(false, "reverb")[0].name).is_none(), "Escape closes the menu");
 
     open(&mut h, "Insert B");
-    let category = format!("{:?}", openpt_dsp::plugins().iter().find(|p| !p.is_instrument).unwrap().category);
+    let category = category_label(openpt_dsp::plugins().iter().find(|p| !p.is_instrument).unwrap().category);
     assert!(h.query_by_label_contains(&category).is_some(), "the old search is gone, so the categories show");
     type_text(&mut h, "zzzz");
     assert!(h.query_by_label("No matches").is_some());
@@ -91,7 +100,7 @@ fn a_menu_opens_with_an_empty_search() {
 fn picks_without_the_search_still_close_the_menu() {
     let first = openpt_dsp::plugins().iter().find(|p| !p.is_instrument).unwrap();
     let other = openpt_dsp::plugins().iter().find(|p| p.category == first.category && p.id != first.id).unwrap();
-    let category = format!("{:?} ⏵", first.category);
+    let category = format!("{} ⏵", category_label(first.category));
     let mut h = harness(vox());
     for (plugin, click) in [(first, egui::PointerButton::Primary), (other, egui::PointerButton::Secondary)] {
         h.get_by_label("Insert C").click_button(click);

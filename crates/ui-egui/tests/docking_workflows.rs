@@ -72,7 +72,7 @@ fn real_drag_float_close_reopen_reload_retains_transport_and_mixer_commands() {
     reloaded.run_steps(4);
     assert_eq!(serde_json::to_value(&reloaded.state().ui.docking).unwrap(), edit);
     assert!(!reloaded.state().ui.mix_docking.layout.contains(&Panel::Clips));
-    let record = reloaded.get_by_label("Record enable");
+    let record = reloaded.get_by_label("Record enable · Ctrl-click: Record Safe");
     assert!(!egui::Rect::from_min_size(egui::pos2(900.0, 70.0), vec2(220.0, 420.0)).contains(record.rect().center()));
     record.click();
     reloaded.run_steps(3);

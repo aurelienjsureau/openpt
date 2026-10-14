@@ -774,7 +774,12 @@ impl MixEngine {
             if gain <= 0.0 {
                 continue;
             }
-            let stereo = if src.len() == 1 { [snd.pan, 0.0] } else { [-1.0, 1.0] };
+            let stereo = match (src.len(), snd.follow_main_pan) {
+                (1, true) => [pan_at(t, 0, pos), 0.0],
+                (1, false) => [snd.pan, 0.0],
+                (_, true) => [pan_at(t, 0, pos), pan_at(t, 1, pos)],
+                _ => [-1.0, 1.0],
+            };
             let surround = snd.surround.as_ref().or(if snd.follow_main_pan { t.mixer.surround.as_ref() } else { None });
             let m = build_matrix(src_fmt, src.len(), dst.fmt, dst.buf.len(), &PanSpec { stereo, surround }, law);
             apply_matrix(src, frames, &mut dst.buf, &m, gain);
@@ -3088,6 +3093,21 @@ mod tests {
         s.track_mut(t).unwrap().mixer.output = Route::Bus(bus);
         let out = render_range(&s, Range::new(0, 4800), 512);
         assert!((out[0][1000] - 0.5 * gains(0.0, PanLaw::Minus3).0).abs() < 1e-6, "{}", out[0][1000]);
+    }
+
+    #[test]
+    fn a_send_to_a_bus_is_heard_through_the_aux_listening_to_it() {
+        let (mut s, t) = session_with_dc(0.5, 4800);
+        let bus = s.add_bus("Bus 7", ChannelFormat::Stereo);
+        let aux = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Aux 7"));
+        s.track_mut(aux).unwrap().mixer.input = Route::Bus(bus);
+        let tr = s.track_mut(t).unwrap();
+        tr.mixer.output = Route::None;
+        let mut snd = openpt_model::SendSlot::new(Route::Bus(bus));
+        snd.level_db = 0.0;
+        tr.mixer.sends[0] = Some(snd);
+        let out = render_range(&s, Range::new(0, 4800), 512);
+        assert!(out[0][1000].abs() > 0.1 && out[1][1000].abs() > 0.1, "{} {}", out[0][1000], out[1][1000]);
     }
 
     #[test]

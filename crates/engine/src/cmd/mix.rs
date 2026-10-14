@@ -543,12 +543,17 @@ fn send(e: &mut Engine, p: &Value) -> Result<Value> {
     let t = tracks_required(e, "mix.send", p)?.first().copied().ok_or_else(|| bad("mix.send", "no track"))?;
     let explicit = slot_of(p, "slot", SEND_SLOTS);
     let s = e.session_mut();
+    let inf_default = s.edit.flag("pref.sends_default_inf");
     let bid = s.add_bus(&bus, openpt_model::ChannelFormat::Stereo);
     let tr = s.track_mut(t).ok_or_else(|| bad("mix.send", "no track"))?;
     let slot = explicit.or_else(|| tr.mixer.sends.iter().position(Option::is_none)).ok_or_else(|| bad("mix.send", "all send slots are in use"))?;
     let mut sl = match tr.mixer.sends.get(slot).cloned().flatten() {
         Some(old) => SendSlot { target: openpt_model::Route::Bus(bid), ..old },
-        None => SendSlot::new(openpt_model::Route::Bus(bid)),
+        None => {
+            let mut n = SendSlot::new(openpt_model::Route::Bus(bid));
+            n.level_db = if inf_default { -144.0 } else { 0.0 };
+            n
+        }
     };
     sl.level_db = f32_or(p, "level_db", sl.level_db).clamp(-144.0, 12.0);
     sl.pre_fader = bool_or(p, "pre_fader", sl.pre_fader);
@@ -577,6 +582,9 @@ fn send_level(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     if let Some(m) = p.get("pre_fader").and_then(Value::as_bool) {
         sl.pre_fader = m;
+    }
+    if let Some(m) = p.get("follow_main_pan").and_then(Value::as_bool) {
+        sl.follow_main_pan = m;
     }
     Ok(json!({"send": sl.clone()}))
 }

@@ -286,6 +286,10 @@ pub fn fader_slot(r: Rect) -> Rect {
 }
 
 pub fn fader(ui: &mut Ui, r: Rect, db: f32, id: egui::Id) -> Option<f32> {
+    fader_with(ui, r, db, id, true)
+}
+
+pub fn fader_with(ui: &mut Ui, r: Rect, db: f32, id: egui::Id, numbers: bool) -> Option<f32> {
     let t = Tokens::current();
     let resp = ui.interact(r, id, Sense::click_and_drag());
     let p = ui.painter();
@@ -294,12 +298,12 @@ pub fn fader(ui: &mut Ui, r: Rect, db: f32, id: egui::Id) -> Option<f32> {
     p.rect_filled(slot, 2.0, t.fader_track);
     p.vline(slot.min.x + 0.5, slot.min.y + 1.0..=slot.max.y - 1.0, Stroke::new(1.0, Color32::from_black_alpha(120)));
     p.vline(slot.max.x + 0.5, slot.min.y + 2.0..=slot.max.y - 2.0, Stroke::new(1.0, Color32::from_white_alpha(18)));
-    let numbers_x = slot.center().x - cap_w * 0.5 - 1.0;
+    let numbers_x = slot.min.x - 7.0;
     let mut last = f32::NEG_INFINITY;
     for mark in [12.0f32, 6.0, 0.0, -5.0, -10.0, -15.0, -20.0, -30.0, -40.0, -60.0] {
         let y = slot.max.y - slot.height() * openpt_model::fader_db_to_pos(mark);
         p.hline(slot.min.x - 6.0..=slot.min.x - 2.0, y, Stroke::new(1.0, t.text_dim.gamma_multiply(0.7)));
-        if numbers_x - r.min.x >= 10.0 && y - last >= 9.0 {
+        if numbers && numbers_x - r.min.x >= 10.0 && y - last >= 9.0 {
             p.text(pos2(numbers_x, y), Align2::RIGHT_CENTER, format!("{}", mark.abs()), regular(8.0), t.text_dim);
             last = y;
         }
