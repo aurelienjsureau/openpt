@@ -977,7 +977,7 @@ fn process_strip(
             c.iter_mut().take(frames).for_each(|x| *x *= trim);
         }
     }
-    let heat = s.heat.active && !t.mixer.heat_bypass && matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux | TrackKind::Master);
+    let heat = s.heat.active && !s.heat.bypass && !t.mixer.heat_bypass && matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux | TrackKind::Master);
     let sr = s.sample_rate.as_f64() as f32;
     if heat && t.mixer.heat_pre {
         strip.heat.process(&mut strip.buf, frames, s.heat.drive, s.heat.tone, sr);
@@ -2545,7 +2545,7 @@ mod tests {
             out[0].clone()
         };
         let dry = render(&s);
-        s.heat = openpt_model::HeatSettings { active: true, drive: 1.0, tone: 0.0 };
+        s.heat = openpt_model::HeatSettings { active: true, bypass: false, drive: 1.0, tone: 0.0 };
         let hot = render(&s);
         let diff = dry.iter().zip(&hot).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
         assert!(diff > 0.01, "HEAT changes a loud track: {diff}");

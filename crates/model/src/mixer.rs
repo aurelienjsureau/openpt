@@ -370,13 +370,14 @@ pub struct OutputPath {
 #[serde(default)]
 pub struct HeatSettings {
     pub active: bool,
+    pub bypass: bool,
     pub drive: f32,
     pub tone: f32,
 }
 
 impl Default for HeatSettings {
     fn default() -> Self {
-        HeatSettings { active: false, drive: 0.5, tone: 0.0 }
+        HeatSettings { active: false, bypass: false, drive: 0.5, tone: 0.0 }
     }
 }
 

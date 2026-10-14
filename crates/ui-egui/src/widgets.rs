@@ -154,39 +154,36 @@ pub(crate) fn selector_box_with_tooltip(ui: &mut Ui, width: f32, height: f32, te
 }
 
 pub fn pan_knob(ui: &mut Ui, size: f32, value: &mut f32, tip: &str) -> Response {
+    knob(ui, size, value, -1.0..=1.0, 0.0, tip)
+}
+
+pub fn knob(ui: &mut Ui, size: f32, value: &mut f32, range: std::ops::RangeInclusive<f32>, default: f32, tip: &str) -> Response {
     let t = Tokens::current();
-    let (r, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click_and_drag());
+    let (lo, hi) = (*range.start(), *range.end());
+    let (r, mut resp) = ui.allocate_exact_size(vec2(size, size), Sense::click_and_drag());
     if resp.dragged() {
         let d = resp.drag_delta();
-        *value = (*value + (d.x - d.y) * 0.01).clamp(-1.0, 1.0);
+        let fine = if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) { 0.1 } else { 1.0 };
+        *value = (*value + (d.x - d.y) * 0.005 * (hi - lo) * fine).clamp(lo, hi);
+        resp.mark_changed();
     }
     if resp.double_clicked() {
-        *value = 0.0;
+        *value = default;
+        resp.mark_changed();
     }
     let p = ui.painter();
     let c = r.center();
-    let rad = size * 0.42;
-    let n = 24;
+    let rad = size * 0.38;
     let start = std::f32::consts::PI * 0.75;
     let sweep = std::f32::consts::PI * 1.5;
-    let arc = |a0: f32, a1: f32| -> Vec<egui::Pos2> {
-        (0..=n)
-            .map(|i| {
-                let a = a0 + (a1 - a0) * i as f32 / n as f32;
-                c + vec2(a.cos(), a.sin()) * (rad + 2.5)
-            })
-            .collect()
-    };
-    let mid = start + sweep * 0.5;
-    let at = start + sweep * (*value * 0.5 + 0.5);
-    let (a0, a1) = if at < mid { (at, mid) } else { (mid, at) };
-    p.add(egui::Shape::line(arc(start, start + sweep), Stroke::new(2.0, t.meter_bg)));
-    p.add(egui::Shape::line(arc(a0, a1), Stroke::new(2.0, t.counter_text)));
-    p.circle_filled(c + vec2(0.0, 1.0), rad, Color32::from_black_alpha(90));
-    rounded_vgradient(p, Rect::from_center_size(c, Vec2::splat(2.0 * rad)), 2.0 * rad, shade(t.knob_bg, 0.14), shade(t.knob_bg, -0.2));
-    p.circle_stroke(c, rad - 0.75, Stroke::new(1.5, t.knob_ring));
+    let k = if hi > lo { ((*value - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 };
+    let at = start + sweep * k;
     let d = vec2(at.cos(), at.sin());
-    p.line_segment([c + d * rad * 0.15, c + d * (rad - 2.5)], Stroke::new(2.0, t.knob_pointer));
+    p.circle_filled(c + vec2(0.0, 1.0), rad + 1.0, Color32::from_black_alpha(110));
+    rounded_vgradient(p, Rect::from_center_size(c, Vec2::splat(2.0 * rad)), 2.0 * rad, shade(t.knob_bg, 0.18), shade(t.knob_bg, -0.25));
+    p.circle_stroke(c, rad, Stroke::new(1.2, t.knob_ring));
+    p.line_segment([c + d * rad * 0.1, c + d * (rad - 1.5)], Stroke::new(1.6, t.knob_pointer));
+    p.circle_filled(c + d * (rad + 3.0), 1.8, t.counter_text);
     resp.on_hover_text(tip)
 }
 

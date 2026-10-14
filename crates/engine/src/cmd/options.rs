@@ -81,7 +81,7 @@ pub fn specs() -> Vec<CommandSpec> {
             h.active = p.get("value").and_then(Value::as_bool).unwrap_or(!h.active);
             Ok(json!({"value": h.active}))
         }),
-        cmd!("mix.heat", "HEAT Drive and Tone", [], None, "{drive?: 0..1, tone?: -1..1}", always, |e, p| {
+        cmd!("mix.heat", "HEAT Drive and Tone", [], None, "{drive?: 0..1, tone?: -1..1, bypass?: bool}", always, |e, p| {
             let h = &mut e.session_mut().heat;
             if let Some(d) = p.get("drive").and_then(Value::as_f64) {
                 h.drive = (d as f32).clamp(0.0, 1.0);
@@ -89,7 +89,10 @@ pub fn specs() -> Vec<CommandSpec> {
             if let Some(t) = p.get("tone").and_then(Value::as_f64) {
                 h.tone = (t as f32).clamp(-1.0, 1.0);
             }
-            Ok(json!({"drive": h.drive, "tone": h.tone}))
+            if let Some(b) = p.get("bypass").and_then(Value::as_bool) {
+                h.bypass = b;
+            }
+            Ok(json!({"drive": h.drive, "tone": h.tone, "bypass": h.bypass}))
         }),
         cmd!("mix.heat_track", "HEAT on Track", [], None, "{tracks?, bypass?: bool, pre?: bool}", has_selection, |e, p| {
             let tracks = tracks_required(e, "mix.heat_track", p)?;
