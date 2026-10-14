@@ -1,0 +1,12 @@
+[package]
+name = "openpt-ptx"
+description = "OpenPT: reads Pro Tools session files (.ptx) for interoperability: tracks, formats, audio files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

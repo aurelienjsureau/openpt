@@ -1016,6 +1016,16 @@ fn store_wav(dir: &Path, stem: &str, bytes: &[u8]) -> Result<(String, bool)> {
 }
 
 pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
+    if is_ptx_path(path) {
+        let s = ptx_session(path)?;
+        let n = s.tracks.len();
+        e.replace_session(s);
+        e.path = None;
+        e.message(format!(
+            "Opened from Pro Tools: {n} tracks (clips, routing and plug-ins are not imported yet). Save to keep it as an OpenPT session."
+        ));
+        return Ok(Vec::new());
+    }
     let text = read_text(path)?;
     let mut s = Session::from_json(&text).map_err(|err| EngineError::Io(err.to_string()))?;
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
@@ -2038,4 +2048,34 @@ mod bundle_tests {
         assert_eq!(std::fs::read(&p).unwrap(), b"hello");
         let _ = std::fs::remove_file(&p);
     }
+}
+
+pub fn ptx_session(path: &str) -> Result<Session> {
+    let bytes = std::fs::read(path).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
+    let p = openpt_ptx::read(&bytes).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
+    let name = Path::new(path).file_stem().map_or_else(|| "Pro Tools Session".to_string(), |s| s.to_string_lossy().into_owned());
+    let rate = p.sample_rate.and_then(|r| openpt_time::SampleRate::new(r).ok()).unwrap_or(openpt_time::SampleRate::HZ_48000);
+    let mut s = Session::new(name, rate);
+    s.tracks.retain(|t| t.kind != openpt_model::TrackKind::Master);
+    for t in &p.tracks {
+        use openpt_model::TrackKind as K;
+        let kind = match t.kind {
+            openpt_ptx::TrackKind::Audio => K::Audio,
+            openpt_ptx::TrackKind::Aux => K::Aux,
+            openpt_ptx::TrackKind::Master => K::Master,
+            openpt_ptx::TrackKind::Vca => K::Vca,
+            openpt_ptx::TrackKind::Folder => K::Folder,
+            openpt_ptx::TrackKind::Other(_) => K::Audio,
+        };
+        let format = if t.stereo { openpt_model::ChannelFormat::Stereo } else { openpt_model::ChannelFormat::Mono };
+        s.add_track(kind, format, Some(&t.name));
+    }
+    if p.bit_depth == Some(16) {
+        s.bit_depth = openpt_model::BitDepthSetting::Int16;
+    }
+    Ok(s)
+}
+
+pub fn is_ptx_path(path: &str) -> bool {
+    Path::new(path).extension().is_some_and(|x| x.eq_ignore_ascii_case("ptx") || x.eq_ignore_ascii_case("ptxt"))
 }

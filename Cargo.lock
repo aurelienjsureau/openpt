@@ -2933,6 +2933,7 @@ dependencies = [
  "openpt-midi",
  "openpt-mix",
  "openpt-model",
+ "openpt-ptx",
  "openpt-time",
  "openpt-video",
  "openpt-vst3-host",
@@ -2997,6 +2998,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "openpt-ptx"
+version = "0.6.1"
 
 [[package]]
 name = "openpt-time"

@@ -146,7 +146,10 @@ fn services() -> Services {
         pick_open: Some(Box::new(|purpose: &str, _exts: &[&str]| {
             let d = rfd::FileDialog::new();
             let d = match purpose {
-                "session.open" => d.add_filter("OpenPT Session", &["openpt"]),
+                "session.open" | "file.import_session_data" => d
+                    .add_filter("Sessions (OpenPT, Pro Tools)", &["openpt", "ptx", "ptxt"])
+                    .add_filter("OpenPT Session", &["openpt"])
+                    .add_filter("Pro Tools Session", &["ptx", "ptxt"]),
                 "file.import_midi" => d.add_filter("MIDI", &["mid", "midi", "smf"]),
                 _ => d.add_filter(
                     "Audio",

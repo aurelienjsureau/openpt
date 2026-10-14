@@ -381,8 +381,10 @@ fn workspace(app: &mut SoundApp, ctx: &egui::Context) {
                         }
                         let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
                         let ext = std::path::Path::new(&name).extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
-                        (is_dir || ["wav", "aif", "aiff", "flac", "mp3", "ogg", "m4a", "m4b", "caf", "mid", "midi", "openpt"].contains(&ext.as_str()))
-                            .then_some((name, is_dir))
+                        (is_dir
+                            || ["wav", "aif", "aiff", "flac", "mp3", "ogg", "m4a", "m4b", "caf", "mid", "midi", "openpt", "ptx", "ptxt"]
+                                .contains(&ext.as_str()))
+                        .then_some((name, is_dir))
                     })
                     .collect()
             })
@@ -396,7 +398,7 @@ fn workspace(app: &mut SoundApp, ctx: &egui::Context) {
                 if r.double_clicked() {
                     if is_dir {
                         app.ui.workspace_dir = path;
-                    } else if name.ends_with(".openpt") {
+                    } else if name.ends_with(".openpt") || name.ends_with(".ptx") || name.ends_with(".ptxt") {
                         let _ = crate::dialogs::run_or_ask(app, "session.open", json!({"path": path}));
                     } else if name.ends_with(".mid") || name.ends_with(".midi") {
                         let _ = app.run("file.import_midi", json!({"path": path}));

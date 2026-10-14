@@ -391,7 +391,7 @@ impl MixEngine {
             main_fmt: ChannelFormat::Stereo,
             meters: HashMap::new(),
             main_meter: StripMeter::default(),
-            pan_law: PanLaw::Minus3,
+            pan_law: PanLaw::Minus2_5,
             last_end: 0,
             synced: (0, 0, 0),
             order: Vec::new(),
@@ -2145,6 +2145,8 @@ mod tests {
     use openpt_model::{Insert, SourceAudio, SourceId};
     use std::sync::Arc;
 
+    const CENTER: f32 = 0.749_894_2;
+
     fn synth_session(level_db: f32) -> Session {
         use openpt_midi::{Note, Sequence};
         let mut s = Session::default();
@@ -2201,10 +2203,10 @@ mod tests {
     }
 
     #[test]
-    fn mono_center_pan_is_minus_3db() {
+    fn mono_center_pan_is_minus_2_5db() {
         let (s, _) = session_with_dc(0.5, 4800);
         let out = render_range(&s, Range::new(0, 4800), 512);
-        let expect = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+        let expect = 0.5 * CENTER;
         assert!((out[0][1000] - expect).abs() < 1e-3, "{}", out[0][1000]);
         assert!((out[1][1000] - expect).abs() < 1e-3);
     }
@@ -2214,7 +2216,7 @@ mod tests {
         let (mut s, t) = session_with_dc(0.5, 4800);
         s.track_mut(t).unwrap().mixer.volume_db = -6.0;
         let out = render_range(&s, Range::new(0, 4800), 512);
-        let expect = 0.5 * std::f32::consts::FRAC_1_SQRT_2 * db_to_gain(-6.0);
+        let expect = 0.5 * CENTER * db_to_gain(-6.0);
         assert!((out[0][2000] - expect).abs() < 1e-3);
         s.track_mut(t).unwrap().mixer.mute = true;
         let out = render_range(&s, Range::new(0, 4800), 512);
@@ -2286,7 +2288,7 @@ mod tests {
             c.gain_db = -6.0;
         }
         let out = render_range(&s, Range::new(0, 2000), 512);
-        let g = std::f32::consts::FRAC_1_SQRT_2 * db_to_gain(-6.0);
+        let g = CENTER * db_to_gain(-6.0);
         assert!(out[0][0].abs() < 1e-3);
         assert!((out[0][500] - 0.5 * g).abs() < 0.02, "{}", out[0][500]);
         assert!((out[0][1500] - g).abs() < 1e-3);
@@ -2723,11 +2725,11 @@ mod tests {
         let cid = s.track(t).unwrap().clips()[0].id.0;
         s.edit.values.insert(format!("clip_fx.{cid}.gain"), -6.0);
         let out = render_range(&s, Range::new(0, 4800), 512);
-        let expect = 0.5 * std::f32::consts::FRAC_1_SQRT_2 * db_to_gain(-6.0);
+        let expect = 0.5 * CENTER * db_to_gain(-6.0);
         assert!((out[0][2000] - expect).abs() < 0.01, "{}", out[0][2000]);
         s.edit.set_flag(&format!("clip_fx.bypass.{cid}"), true);
         let out = render_range(&s, Range::new(0, 4800), 512);
-        assert!((out[0][2000] - 0.5 * std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01);
+        assert!((out[0][2000] - 0.5 * CENTER).abs() < 0.01);
         s.track_mut(t).unwrap().lane_mut(&AutoParam::Plugin { slot: u8::MAX, param: "trim".into() }).set_point(0, -12.0);
         let out = render_range(&s, Range::new(0, 4800), 512);
         assert!(out[0][2000] < 0.2, "{}", out[0][2000]);
@@ -2909,10 +2911,10 @@ mod tests {
         eng.input = vec![vec![0.25; 512]];
         let mut out = vec![vec![0.0; 512]; 2];
         eng.render(&s, 0, 512, &mut out);
-        assert!((out[0][100] - 0.5 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);
+        assert!((out[0][100] - 0.5 * CENTER).abs() < 1e-3);
         s.track_mut(t).unwrap().mixer.input_monitor = true;
         eng.render(&s, 512, 512, &mut out);
-        assert!((out[0][100] - 0.25 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "{}", out[0][100]);
+        assert!((out[0][100] - 0.25 * CENTER).abs() < 1e-3, "{}", out[0][100]);
         eng.monitor_only = true;
         eng.render(&s, 1024, 512, &mut out);
         assert!(out[0][100] > 0.1);
@@ -3051,7 +3053,7 @@ mod tests {
         s.outputs[0].format = ChannelFormat::Surround51;
         let out = render_range(&s, Range::new(0, 4800), 512);
         assert_eq!(out.len(), 6);
-        let h = 0.5 * gains(0.0, PanLaw::Minus3).0;
+        let h = 0.5 * gains(0.0, PanLaw::Minus2_5).0;
         assert!((out[0][100] - h).abs() < 1e-6 && (out[1][100] - h).abs() < 1e-6);
         assert!(out[2..].iter().all(|c| c[100].abs() < 1e-7));
         s.track_mut(t).unwrap().mixer.surround = Some(SurroundPan::default());
@@ -3092,7 +3094,7 @@ mod tests {
         s.track_mut(aux).unwrap().mixer.pan = vec![-1.0];
         s.track_mut(t).unwrap().mixer.output = Route::Bus(bus);
         let out = render_range(&s, Range::new(0, 4800), 512);
-        assert!((out[0][1000] - 0.5 * gains(0.0, PanLaw::Minus3).0).abs() < 1e-6, "{}", out[0][1000]);
+        assert!((out[0][1000] - 0.5 * gains(0.0, PanLaw::Minus2_5).0).abs() < 1e-6, "{}", out[0][1000]);
     }
 
     #[test]

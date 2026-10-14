@@ -463,6 +463,19 @@ mod tests {
     }
 
     #[test]
+    fn a_pro_tools_session_opens_with_its_tracks() {
+        let Some(path) = std::env::var("OPENPT_PTX_SAMPLE").ok().filter(|p| std::path::Path::new(p).is_file()) else { return };
+        let mut e = crate::Engine::default();
+        let r = e.execute("session.open", &json!({"path": path})).unwrap();
+        assert!(r["tracks"].as_u64().unwrap_or(0) > 1, "{r}");
+        assert!(e.path.is_none(), "saving asks for an OpenPT path");
+        let mut other = crate::Engine::default();
+        let n = other.session().tracks.len();
+        other.execute("file.import_session_data", &json!({"path": path})).unwrap();
+        assert!(other.session().tracks.len() > n);
+    }
+
+    #[test]
     fn session_open_reports_missing_media() {
         let mut e = crate::demo::demo_engine();
         let dir = std::env::temp_dir().join(format!("openpt-open-missing-{}", std::process::id()));

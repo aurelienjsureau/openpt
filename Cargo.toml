@@ -18,6 +18,7 @@ openpt-dsp = { path = "crates/dsp" }
 openpt-vst3-host = { path = "crates/vst3-host" }
 openpt-au-host = { path = "crates/au-host" }
 openpt-model = { path = "crates/model" }
+openpt-ptx = { path = "crates/ptx" }
 openpt-mix = { path = "crates/mix" }
 openpt-engine = { path = "crates/engine" }
 openpt-playback = { path = "crates/playback" }

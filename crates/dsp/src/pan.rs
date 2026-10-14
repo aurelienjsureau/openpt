@@ -3,6 +3,7 @@ use std::f32::consts::FRAC_PI_4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum PanLaw {
     #[default]
+    Minus2_5,
     Minus3,
     Minus4_5,
     Minus6,
@@ -12,6 +13,7 @@ pub enum PanLaw {
 impl PanLaw {
     pub fn center_db(self) -> f32 {
         match self {
+            PanLaw::Minus2_5 => -2.5,
             PanLaw::Minus3 => -3.0,
             PanLaw::Minus4_5 => -4.5,
             PanLaw::Minus6 => -6.0,
