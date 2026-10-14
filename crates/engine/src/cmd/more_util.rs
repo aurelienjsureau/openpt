@@ -117,6 +117,10 @@ pub fn set_clip_env(c: &mut Clip, mut pts: Vec<(Samples, f32)>) {
     }
 }
 
+pub(crate) fn max_render_samples(s: &Session) -> Samples {
+    max_render(s)
+}
+
 fn max_render(s: &Session) -> Samples {
     s.sample_rate.samples(3600.0).min(openpt_dsp::offline::MAX_OFFLINE_SAMPLES as Samples)
 }

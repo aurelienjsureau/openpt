@@ -112,6 +112,52 @@ pub struct Clip {
     pub group: Option<u64>,
     #[serde(default)]
     pub loop_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warp: Option<Warp>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WarpMarker {
+    pub src: Samples,
+    pub at: Samples,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Warp {
+    pub source: SourceId,
+    pub offset: Samples,
+    pub length: Samples,
+    #[serde(default)]
+    pub markers: Vec<WarpMarker>,
+    #[serde(default)]
+    pub rendered: Option<SourceId>,
+}
+
+impl Warp {
+    pub fn anchors(&self, clip_len: Samples) -> Vec<WarpMarker> {
+        let mut v = vec![WarpMarker { src: 0, at: 0 }];
+        v.extend(self.markers.iter().copied().filter(|m| m.src > 0 && m.src < self.length));
+        v.push(WarpMarker { src: self.length.max(1), at: clip_len.max(1) });
+        v
+    }
+
+    pub fn to_clip(&self, clip_len: Samples, src: Samples) -> Samples {
+        Self::map(&self.anchors(clip_len), src, |m| (m.src, m.at))
+    }
+
+    pub fn to_src(&self, clip_len: Samples, at: Samples) -> Samples {
+        Self::map(&self.anchors(clip_len), at, |m| (m.at, m.src))
+    }
+
+    fn map(anchors: &[WarpMarker], x: Samples, key: impl Fn(&WarpMarker) -> (Samples, Samples)) -> Samples {
+        let pts: Vec<(Samples, Samples)> = anchors.iter().map(key).collect();
+        let seg = pts.windows(2).find(|w| x <= w[1].0).or_else(|| pts.windows(2).last());
+        match seg {
+            Some([a, b]) if b.0 > a.0 => a.1 + ((x - a.0) as f64 * (b.1 - a.1) as f64 / (b.0 - a.0) as f64).round() as Samples,
+            Some([a, _]) => a.1,
+            _ => x,
+        }
+    }
 }
 
 fn one() -> f64 {
@@ -139,6 +185,7 @@ impl Clip {
             stretch: 1.0,
             group: None,
             loop_id: None,
+            warp: None,
         }
     }
 
@@ -308,6 +355,17 @@ pub(crate) fn db_to_gain(db: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warp_maps_both_ways_through_its_markers() {
+        let w = Warp { source: SourceId(1), offset: 0, length: 1000, markers: vec![WarpMarker { src: 500, at: 300 }], rendered: None };
+        assert_eq!(w.to_clip(1000, 250), 150);
+        assert_eq!(w.to_clip(1000, 500), 300);
+        assert_eq!(w.to_clip(1000, 750), 650);
+        assert_eq!(w.to_src(1000, 650), 750);
+        assert_eq!(w.to_src(1000, 0), 0);
+        assert_eq!(w.to_clip(2000, 1000), 2000);
+    }
 
     #[test]
     fn fade_shapes_hit_endpoints() {

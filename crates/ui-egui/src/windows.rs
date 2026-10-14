@@ -720,15 +720,18 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
                 });
                 if ui.button("New Bus…").clicked() {
                     let n = (1..1000).find(|k| app.engine.session().bus_by_name(&format!("Bus {k}")).is_none()).unwrap_or(1);
-                    runs.push(json!({"action": "create_bus", "name": format!("Bus {n}")}));
+                    runs.push(json!({"new_bus": format!("Bus {n}")}));
                 }
             }
         }
     });
     for p in runs {
-        let r = match p.get("main_format").and_then(Value::as_str) {
-            Some(f) => app.run("setup.main_format", json!({"format": f})),
-            None => app.run("setup.io", p),
+        let r = if let Some(f) = p.get("main_format").and_then(Value::as_str) {
+            app.run("setup.main_format", json!({"format": f}))
+        } else if let Some(name) = p.get("new_bus").and_then(Value::as_str) {
+            app.run("mix.new_bus", json!({"name": name}))
+        } else {
+            app.run("setup.io", p)
         };
         if let Err(e) = r {
             app.ui.status = e;

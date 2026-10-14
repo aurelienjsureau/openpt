@@ -714,7 +714,8 @@ fn view(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.view", p)?;
     let v = str_param(p, "view").ok_or_else(|| bad("track.view", "`view` required"))?.to_string();
     let ok =
-        matches!(v.as_str(), "waveform" | "blocks" | "notes" | "regions" | "clip_gain" | "playlists") || openpt_model::AutoParam::parse(&v).is_some();
+        matches!(v.as_str(), "waveform" | "warp" | "analysis" | "blocks" | "notes" | "regions" | "clip_gain" | "playlists")
+            || openpt_model::AutoParam::parse(&v).is_some();
     if !ok {
         return Err(bad("track.view", format!("unknown view `{v}`")));
     }

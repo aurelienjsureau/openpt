@@ -33,6 +33,7 @@ mod video;
 mod view;
 mod view_more;
 mod vst3;
+pub(crate) mod warp;
 mod zoom_toggle;
 
 pub use file::bounce_job;
@@ -102,6 +103,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(view::specs());
         v.extend(track::specs());
         v.extend(clip::specs());
+        v.extend(warp::specs());
         v.extend(event::specs());
         v.extend(mix::specs());
         v.extend(options::specs());

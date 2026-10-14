@@ -176,7 +176,9 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
     let items: Vec<(u64, String, bool, [u8; 3], bool)> = {
         let s = app.engine.session();
         let mut v = Vec::new();
-        for src in &s.sources {
+        let renders: Vec<openpt_model::SourceId> =
+            s.tracks.iter().flat_map(|t| t.playlists.iter()).flat_map(|p| &p.clips).filter_map(|c| c.warp.as_ref().and_then(|w| w.rendered)).collect();
+        for src in s.sources.iter().filter(|x| !renders.contains(&x.id)) {
             v.push((src.id.0, format!("{} ({}ch)", src.name, src.channels), true, [150, 150, 150], s.edit.selected_sources.contains(&src.id)));
         }
         for tr in &s.tracks {

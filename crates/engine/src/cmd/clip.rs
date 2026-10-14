@@ -191,6 +191,14 @@ fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut rendered = 0;
     for id in &ids {
         let Some((t, c)) = s.find_clip(*id).map(|(t, c)| (t, c.clone())) else { continue };
+        if let Some(algo) = s.track(t).and_then(|x| x.elastic.clone()).filter(|a| a != "none")
+            && c.is_audio()
+            && warp_original(s, *id).is_none()
+        {
+            super::warp::stretch(s, "clip.elastic_properties", *id, ratio, &algo)?;
+            rendered += 1;
+            continue;
+        }
         let elastic = s.track(t).and_then(|x| x.elastic.clone()).filter(|a| a != "varispeed");
         let key = |k: &str| format!("elastic.{}.{k}", id.0);
         let orig = warp_original(s, *id);
@@ -305,6 +313,10 @@ fn remove_warp(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let mut n = 0;
     for id in &ids {
+        if super::warp::unwarp(s, *id) {
+            n += 1;
+            continue;
+        }
         let key = |k: &str| format!("elastic.{}.{k}", id.0);
         let orig = warp_original(s, *id);
         if let Some(c) = s.find_clip_mut(*id) {

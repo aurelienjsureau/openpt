@@ -795,6 +795,9 @@ fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect, tl: Rect, 
     }
     draw_live_take(app, &painter, &s, track, tl, lane);
     crate::video_track::draw_lane(app, &painter, &s, track, tl, lane);
+    if crate::warp_view::is_warp_view(track) {
+        crate::warp_view::draw(app, ui.ctx(), &painter, &s, track, tl, lane);
+    }
     if s.edit.grid_lines {
         grid_lines(&painter, &s, tl, lane);
     }
@@ -1011,13 +1014,13 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
             }
         }
     }
-    if h >= 58.0 {
-        let vresp = header_selector(ui, at(17.0, 39.0, 105.0, 17.0), ui.id().with(("view", id.0)), &view_label(&track.view), t.text, true);
+    if h >= 55.0 {
+        let vresp = header_selector(ui, at(17.0, 37.0, 105.0, 16.0), ui.id().with(("view", id.0)), &view_label(&track.view), t.text, true);
         egui::Popup::menu(&vresp).show(|ui| view_menu(app, ui, track));
     }
-    if h >= 76.0 {
+    if h >= 72.0 {
         if matches!(track.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux) {
-            let r = at(17.0, 57.0, 13.0, 17.0);
+            let r = at(17.0, 54.0, 13.0, 16.0);
             let resp = ui.interact(r, ui.id().with(("freeze", id.0)), Sense::click());
             raised_key(ui.painter(), r, if track.frozen { t.slot_bypassed } else { t.slot_face }, resp.hovered());
             for a in [0.0f32, 60.0, 120.0] {
@@ -1030,7 +1033,7 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
         }
         if !matches!(track.kind, TrackKind::Master | TrackKind::Vca | TrackKind::Folder) {
             let (voice, color) = if track.inactive { ("off", t.text_dim) } else { ("dyn", t.text) };
-            let resp = header_selector(ui, at(31.0, 57.0, 31.0, 17.0), ui.id().with(("voice", id.0)), voice, color, false);
+            let resp = header_selector(ui, at(31.0, 54.0, 31.0, 16.0), ui.id().with(("voice", id.0)), voice, color, false);
             egui::Popup::menu(&resp.on_hover_text("Voice: dyn plays the track, off makes it inactive")).show(|ui| {
                 for (label, inactive) in [("dyn", false), ("off", true)] {
                     if ui.selectable_label(track.inactive == inactive, label).clicked() {
@@ -1047,7 +1050,7 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
             openpt_model::AutomationMode::Latch => t.auto_latch,
             _ => t.text_dim,
         };
-        let aresp = header_selector(ui, at(63.0, 57.0, 59.0, 17.0), ui.id().with(("auto_mode", id.0)), mode.label(), col, true);
+        let aresp = header_selector(ui, at(63.0, 54.0, 59.0, 16.0), ui.id().with(("auto_mode", id.0)), mode.label(), col, true);
         egui::Popup::menu(&aresp).show(|ui| {
             for m in openpt_model::AutomationMode::ALL {
                 if ui.selectable_label(m == mode, m.label()).clicked() {
@@ -1056,9 +1059,9 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
             }
         });
     }
-    if h >= 94.0 {
+    if h >= 88.0 {
         if track.kind.has_playlist() {
-            let r = at(17.0, 75.0, 13.0, 17.0);
+            let r = at(17.0, 71.0, 13.0, 16.0);
             let resp = ui.interact(r, ui.id().with(("timebase", id.0)), Sense::click());
             raised_key(ui.painter(), r, t.slot_face, resp.hovered());
             let c = r.center();
@@ -1084,7 +1087,7 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
                 }
             });
         }
-        let field = at(30.0, 75.0, 92.0, 17.0);
+        let field = at(30.0, 71.0, 92.0, 16.0);
         if matches!(track.kind, TrackKind::Audio | TrackKind::Instrument) {
             let resp = ui.interact(field, ui.id().with(("field", id.0)), Sense::click());
             ui.painter().rect_filled(field, 2.0, shade(head_bg, if resp.hovered() { -0.02 } else { -0.1 }));
@@ -1100,12 +1103,12 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
                 ui.painter().line_segment([c + vec2(0.0, -3.5), c + vec2(0.0, 1.0)], Stroke::new(1.0, t.text));
                 ui.painter().add(Shape::convex_polygon(vec![c + vec2(0.0, 0.5), c + vec2(3.0, 3.5), c + vec2(-3.0, 3.5)], t.text, Stroke::NONE));
                 if let Some(alg) = &track.elastic {
-                    ui.painter().with_clip_rect(field).text(pos2(field.min.x + 14.0, field.center().y), Align2::LEFT_CENTER, alg, bold(10.0), t.text);
+                    ui.painter().with_clip_rect(field).text(pos2(field.min.x + 14.0, field.center().y), Align2::LEFT_CENTER, elastic_label(alg), bold(10.0), t.text);
                 }
                 egui::Popup::menu(&resp.on_hover_text("Elastic Audio")).show(|ui| {
                     for alg in ["none", "polyphonic", "rhythmic", "monophonic", "varispeed", "x-form"] {
                         let current = track.elastic.as_deref().unwrap_or("none") == alg;
-                        if ui.selectable_label(current, alg).clicked() {
+                        if ui.selectable_label(current, elastic_label(alg)).clicked() {
                             let _ = app.run("track.elastic", json!({"tracks": [id.0], "algorithm": alg}));
                         }
                     }
@@ -1115,6 +1118,17 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
     }
     let md = app.meters.get(&id).copied().unwrap_or_default();
     header_meter(ui, Rect::from_min_max(pos2(head.max.x - 8.0, head.min.y + 1.0), pos2(head.max.x, head.max.y - 1.5)), &md, track.channels() >= 2);
+}
+
+fn elastic_label(alg: &str) -> &'static str {
+    match alg {
+        "polyphonic" => "Polyphonic",
+        "rhythmic" => "Rhythmic",
+        "monophonic" => "Monophonic",
+        "varispeed" => "Varispeed",
+        "x-form" => "X-Form",
+        _ => "None",
+    }
 }
 
 fn arrow(p: &egui::Painter, c: Pos2, down: bool, color: Color32) {
@@ -1316,6 +1330,9 @@ fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
         opts.extend(["notes", "regions", "blocks"]);
     } else if track.kind.has_playlist() {
         opts.extend(["waveform", "blocks", "clip_gain", "playlists"]);
+        if track.elastic.as_deref().is_some_and(|a| a != "none") {
+            opts.extend(["warp", "analysis"]);
+        }
     }
     opts.extend(["volume", "pan", "mute"]);
     for o in opts {
@@ -1918,6 +1935,9 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     }
     if track.kind == openpt_model::TrackKind::Instrument {
         crate::sampler_window::drop_target(app, ui.ctx(), lane, track.id);
+    }
+    if crate::warp_view::is_warp_view(track) && crate::warp_view::lane(app, ui, &resp, track, tl) {
+        return;
     }
     let s = app.engine.session_arc();
     let tool = s.edit.tool;

@@ -17,8 +17,6 @@ const KNOWN_UNREACHED: &[&str] = &[
     "mix.phase_invert",
     "mix.send_surround_pan",
     "mix.solo_safe",
-    "options.post_roll",
-    "options.pre_roll",
     "setup.hardware",
     "setup.playback_engine",
     "setup.reset_edit_state",
