@@ -792,7 +792,7 @@ pub(crate) fn click_mods(ui: &Ui) -> egui::Modifiers {
         let mut m = i.modifiers;
         for e in &i.events {
             if let egui::Event::PointerButton { modifiers, .. } = e {
-                m = m | *modifiers;
+                m |= *modifiers;
             }
         }
         m

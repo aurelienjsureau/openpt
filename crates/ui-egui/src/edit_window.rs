@@ -1297,42 +1297,59 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
         let (vol, pan) = (m.volume_db, m.pan.clone());
         let mid = vr.min.y + 14.5;
         for (i, hr) in [Rect::from_min_max(vr.min, pos2(vr.max.x, mid)), Rect::from_min_max(pos2(vr.min.x, mid), vr.max)].into_iter().enumerate() {
-            let tip = if i == 0 { "Volume: drag (Ctrl: fine) · Alt-click: 0 dB" } else { "Pan: drag (Ctrl: fine) · Alt-click: centre" };
+            let tip = if i == 0 { "Volume · Alt-click: 0 dB" } else { "Pan · Alt-click: centre" };
             let resp = ui.interact(hr, ui.id().with(("io_readout", id.0, i)), Sense::click_and_drag()).on_hover_text(tip);
-            if resp.hovered() || resp.dragged() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-            }
-            let fine = ui.input(|x| x.modifiers.command || x.modifiers.ctrl);
             let alt_click = resp.clicked() && crate::mix_window::click_mods(&ui).alt;
-            if resp.clicked() && !alt_click {
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("io_mini_fader"), (id.0, i, hr)));
+            if alt_click {
+                if i == 0 {
+                    let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": 0.0}), &format!("fader:{}", id.0));
+                } else {
+                    for k in 0..pan.len().min(2) {
+                        let v = if pan.len() == 2 { [-1.0, 1.0][k] } else { 0.0 };
+                        let _ = app.engine.execute_merged("mix.pan", &json!({"track": id.0, "pan": v, "index": k}), &format!("pan:{}:{k}", id.0));
+                    }
+                }
+                continue;
+            }
+            let press = if resp.drag_started() { ui.input(|x| x.pointer.press_origin()) } else if resp.clicked() { resp.interact_pointer_pos() } else { None };
+            if let Some(p) = press {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("io_mini_fader"), (id.0, i, p)));
                 let pass = ui.ctx().cumulative_pass_nr();
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("io_mini_fader_opened"), pass));
             }
-            let dy = resp.drag_delta().y;
-            if i == 0 && (alt_click || (resp.dragged() && dy != 0.0)) {
-                let db = if alt_click { 0.0 } else { crate::mix_window::dragged_send_db(vol, dy, fine) };
-                let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
-            }
-            if i == 1 && (alt_click || (resp.dragged() && dy != 0.0)) {
-                for (k, p0) in pan.iter().enumerate().take(if pan.len() == 2 { 2 } else { 1 }) {
-                    let v = if alt_click { if pan.len() == 2 { [-1.0, 1.0][k] } else { 0.0 } } else { (p0 - dy * if fine { 0.001 } else { 0.01 }).clamp(-1.0, 1.0) };
-                    let _ = app.engine.execute_merged("mix.pan", &json!({"track": id.0, "pan": v, "index": k}), &format!("pan:{}:{k}", id.0));
+            let dx = resp.drag_delta().x;
+            if resp.dragged() && dx != 0.0 {
+                let k = dx / MINI_FADER_TRAVEL * if ui.input(|x| x.modifiers.command || x.modifiers.ctrl) { 0.1 } else { 1.0 };
+                if i == 0 {
+                    let db = openpt_model::fader_pos_to_db((openpt_model::fader_db_to_pos(vol) + k).clamp(0.0, 1.0)).clamp(-144.0, 12.0);
+                    let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
+                } else {
+                    for (n, p0) in pan.iter().enumerate().take(2) {
+                        let v = (p0 + 2.0 * k).clamp(-1.0, 1.0);
+                        let _ = app.engine.execute_merged("mix.pan", &json!({"track": id.0, "pan": v, "index": n}), &format!("pan:{}:{n}", id.0));
+                    }
                 }
+            }
+            if resp.drag_stopped() {
+                ui.ctx().data_mut(|d| d.remove::<(u64, usize, Pos2)>(egui::Id::new("io_mini_fader")));
             }
         }
     }
 }
 
+const MINI_FADER_TRAVEL: f32 = 160.0;
+
 pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
     let key = egui::Id::new("io_mini_fader");
-    let Some((tid, which, anchor)) = ctx.data(|d| d.get_temp::<(u64, usize, Rect)>(key)) else { return };
+    let Some((tid, which, press)) = ctx.data(|d| d.get_temp::<(u64, usize, Pos2)>(key)) else { return };
     let Some(track) = app.engine.session().track(TrackId(tid)).cloned() else {
-        ctx.data_mut(|d| d.remove::<(u64, usize, Rect)>(key));
+        ctx.data_mut(|d| d.remove::<(u64, usize, Pos2)>(key));
         return;
     };
     let t = Tokens::current();
-    let area = egui::Area::new(key.with("area")).order(egui::Order::Foreground).fixed_pos(anchor.left_bottom() + vec2(0.0, 2.0)).show(ctx, |ui| {
+    let pos0 = if which == 0 { openpt_model::fader_db_to_pos(track.mixer.volume_db) } else { track.mixer.pan.first().map_or(0.5, |p| (p + 1.0) * 0.5) };
+    let at = press - vec2(6.0 + 5.0 + MINI_FADER_TRAVEL * pos0, 6.0 + 9.0);
+    let area = egui::Area::new(key.with("area")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::new().fill(t.dialog_bg).stroke(Stroke::new(1.0, t.border)).corner_radius(2).inner_margin(6).show(ui, |ui| {
             let pans: Vec<f32> = if which == 1 { track.mixer.pan.iter().copied().take(2).collect() } else { vec![] };
             let rows = if which == 0 { 1 } else { pans.len().max(1) };
@@ -1376,7 +1393,7 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
     let opened: u64 = ctx.data(|d| d.get_temp(egui::Id::new("io_mini_fader_opened"))).unwrap_or(0);
     let fresh = ctx.cumulative_pass_nr() <= opened + 1;
     if (!fresh && area.response.clicked_elsewhere()) || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        ctx.data_mut(|d| d.remove::<(u64, usize, Rect)>(key));
+        ctx.data_mut(|d| d.remove::<(u64, usize, Pos2)>(key));
     }
 }
 
