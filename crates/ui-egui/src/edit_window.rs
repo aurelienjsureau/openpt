@@ -1461,8 +1461,11 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
         };
         let ink = Tokens::DARK.counter_text;
         for (y, label, value) in [(7.5, "vol", crate::widgets::db_text(openpt_mix::volume_db_at(track, now))), (22.0, "pan", pan)] {
-            ui.painter().text(pos2(vr.min.x + 7.0, vr.min.y + y), Align2::LEFT_CENTER, label, bold(10.0), ink);
-            ui.painter().text(pos2(vr.max.x - 6.5, vr.min.y + y), Align2::RIGHT_CENTER, value, bold(10.0), ink);
+            let lr = ui.painter().text(pos2(vr.min.x + 7.0, vr.min.y + y), Align2::LEFT_CENTER, label, bold(10.0), ink);
+            let room = vr.max.x - 6.5 - (lr.max.x + 6.0);
+            let size =
+                [10.0f32, 9.0, 8.0].into_iter().find(|s| ui.painter().layout_no_wrap(value.clone(), bold(*s), ink).size().x <= room).unwrap_or(7.5);
+            ui.painter().text(pos2(vr.max.x - 6.5, vr.min.y + y), Align2::RIGHT_CENTER, value, bold(size), ink);
         }
         ui.painter().hline(vr.min.x + 7.0..=vr.max.x - 6.0, vr.min.y + 14.5, Stroke::new(1.0, Color32::from_gray(35)));
         let (vol, pan) = (m.volume_db, m.pan.clone());
@@ -1542,7 +1545,7 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
             let pans: Vec<f32> = if which == 1 { track.mixer.pan.iter().copied().take(2).collect() } else { vec![] };
             let rows = if which == 0 { 1 } else { pans.len().max(1) };
             for k in 0..rows {
-                let layout = if which == 0 { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Center) };
+                let layout = if which == 0 { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Min) };
                 ui.with_layout(layout, |ui| {
                     let (pos, label) = if which == 0 {
                         (openpt_model::fader_db_to_pos(track.mixer.volume_db), format!("{} dB", crate::widgets::db_text(track.mixer.volume_db)))
@@ -3194,12 +3197,26 @@ fn overlay(app: &mut SoundApp, ui: &mut Ui, tl: Rect, area: Rect) {
             if let Some((_, r)) = app.edit_layout.rows.iter().find(|(i, _)| *i == d.0) {
                 let x0 = x_of(s, tl, start);
                 let x1 = x_of(s, tl, start + len);
-                painter.rect_stroke(
-                    Rect::from_min_max(pos2(x0, r[1] + 1.0), pos2(x1, r[3] - 1.0)),
-                    2.0,
-                    Stroke::new(2.0, Color32::WHITE),
-                    StrokeKind::Inside,
-                );
+                let ghost = Rect::from_min_max(pos2(x0, r[1] + 1.0), pos2(x1, r[3] - 1.0));
+                let moved = s.track(t).and_then(|tr| tr.clips().iter().find(|c| clips.contains(&c.id) && c.length == len).map(|c| (tr, c)));
+                if let Some((tr, c)) = moved
+                    && let Some(audio) = c.source().and_then(|src| s.pool.get(src))
+                {
+                    painter.rect_filled(ghost, 2.0, Color32::from_rgba_unmultiplied(255, 255, 255, 28));
+                    let mut shown = c.clone();
+                    shown.start = start;
+                    crate::waveform::draw(
+                        &painter.with_clip_rect(ghost),
+                        s,
+                        tl,
+                        &shown,
+                        audio,
+                        tr.channels(),
+                        ghost.shrink2(vec2(0.0, 2.0)),
+                        Color32::from_rgba_unmultiplied(255, 255, 255, 170),
+                    );
+                }
+                painter.rect_stroke(ghost, 2.0, Stroke::new(2.0, Color32::WHITE), StrokeKind::Inside);
             }
         }
     }
