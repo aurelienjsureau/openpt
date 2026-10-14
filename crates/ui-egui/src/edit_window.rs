@@ -1426,10 +1426,14 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
         ui.painter().rect_filled(vr, 2.0, Color32::from_gray(15));
         ui.painter().rect_filled(vr.shrink(1.5), 1.5, Color32::BLACK);
         let m = &track.mixer;
-        let pan =
-            if m.pan.is_empty() { "-".into() } else { m.pan.iter().take(2).map(|p| crate::widgets::pan_text(*p)).collect::<Vec<_>>().join(" ") };
+        let now = app.position();
+        let pan = if m.pan.is_empty() {
+            "-".into()
+        } else {
+            (0..m.pan.len().min(2)).map(|i| crate::widgets::pan_text(openpt_mix::pan_at(track, i, now))).collect::<Vec<_>>().join(" ")
+        };
         let ink = Tokens::DARK.counter_text;
-        for (y, label, value) in [(7.5, "vol", crate::widgets::db_text(m.volume_db)), (22.0, "pan", pan)] {
+        for (y, label, value) in [(7.5, "vol", crate::widgets::db_text(openpt_mix::volume_db_at(track, now))), (22.0, "pan", pan)] {
             ui.painter().text(pos2(vr.min.x + 7.0, vr.min.y + y), Align2::LEFT_CENTER, label, bold(10.0), ink);
             ui.painter().text(pos2(vr.max.x - 6.5, vr.min.y + y), Align2::RIGHT_CENTER, value, bold(10.0), ink);
         }
@@ -2638,6 +2642,8 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
                     );
                 } else if track.kind.is_midi() && hit.is_none() {
                     new_midi_clip(app, &s, track.id, at, at);
+                } else if let Some(c) = hit.as_ref().filter(|c| matches!(c.content, ClipContent::Midi { .. })) {
+                    let _ = app.run("edit.select", json!({"clips": [c.id.0]}));
                 }
             }
             _ if !selector_press => place_insertion(app, ui, &s, track.id, at, mods.shift),

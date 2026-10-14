@@ -392,7 +392,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
             let cx = if n == 2 { x0 + inner_w * (0.25 + 0.5 * i as f32) } else { x0 + inner_w * 0.5 };
             let kr = Rect::from_center_size(pos2(cx, y + 17.0), vec2(ks, ks));
             let mut c = ui.new_child(egui::UiBuilder::new().max_rect(kr));
-            let mut v = track.mixer.pan.get(i).copied().unwrap_or(0.0);
+            let mut v = openpt_mix::pan_at(track, i, app.position());
             let before = v;
             let resp = pan_knob(&mut c, ks, &mut v, "Pan (drag; double-click centres)");
             if (v - before).abs() > f32::EPSILON {
@@ -447,7 +447,8 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     let thin_w = thin_bars * 6.0;
     let fader_w = if wide_meter { inner_w * 0.45 } else { inner_w - thin_w - if narrow { 4.0 } else { 20.0 } };
     let fr = Rect::from_min_size(pos2(x0, y), vec2(fader_w, fh));
-    if let Some(db) = crate::widgets::fader_with(ui, fr, track.mixer.volume_db, ui.id().with(("fader", id.0)), !narrow) {
+    let shown_db = openpt_mix::volume_db_at(track, app.position());
+    if let Some(db) = crate::widgets::fader_with(ui, fr, shown_db, ui.id().with(("fader", id.0)), !narrow) {
         app.gesture = Some(crate::Gesture::Fader { track: id, start_db: track.mixer.volume_db });
         let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
     }
@@ -478,15 +479,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     }
     let vr = Rect::from_min_size(pos2(x0 + 4.0, r.max.y - bottom_h + 4.0), vec2(inner_w - 8.0, 15.0));
     inset(ui.painter(), vr, t.counter_bg);
-    let (_, entered) = editable_readout(
-        ui,
-        vr,
-        ui.id().with(("volume-value", id.0)),
-        &db_text(track.mixer.volume_db),
-        &format!("{:.1}", track.mixer.volume_db),
-        parse_db,
-        0.0,
-    );
+    let (_, entered) = editable_readout(ui, vr, ui.id().with(("volume-value", id.0)), &db_text(shown_db), &format!("{:.1}", shown_db), parse_db, 0.0);
     if let Some(db) = entered {
         let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
     }

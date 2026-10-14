@@ -16,6 +16,7 @@ pub struct MidiEditorState {
     pub scroll: f32,
     pub clip: Option<ClipId>,
     pub band: Option<egui::Pos2>,
+    pub draw: Option<(u8, i64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +195,10 @@ pub fn show(app: &mut SoundApp, ui: &mut Ui) {
         }
         ui.data_mut(|d| d.insert_temp(pkid, current_pitch));
     }
+    if let Some(pp) = current_pitch {
+        let key = Rect::from_min_size(pos2(keys.min.x, y_of(i32::from(pp))), vec2(KEY_W - 2.0, ROW_H - 1.0));
+        painter.rect_filled(key, 1.0, Color32::from_rgb(120, 170, 255));
+    }
     let mut tick = 0;
     while tick <= len_ticks {
         let bar = tick % (TICKS_PER_QUARTER * 4) == 0;
@@ -251,8 +256,27 @@ pub fn show(app: &mut SoundApp, ui: &mut Ui) {
                 app.midi.selected = vec![i];
             }
             app.midi.drag = Some(NoteDrag { index: i, resize: edge, start: p, dx_ticks: 0, dy_semi: 0 });
+        } else if s.edit.tool == Tool::Pencil {
+            let start = (((p.x - roll.min.x) / px_per_tick) as i64 / grid_ticks) * grid_ticks;
+            app.midi.draw = Some((pitch_at(p.y).clamp(0, 127) as u8, start.max(0)));
         } else {
             app.midi.band = Some(p);
+        }
+    }
+    if let Some((pitch, start)) = app.midi.draw
+        && let Some(p) = ui.ctx().pointer_latest_pos()
+    {
+        let end = (snap((p.x - roll.min.x) / px_per_tick)).max(start + grid_ticks);
+        let r = Rect::from_min_max(pos2(x_of(start), y_of(i32::from(pitch))), pos2(x_of(end), y_of(i32::from(pitch)) + ROW_H));
+        painter.rect(r, 2.0, Color32::from_rgba_unmultiplied(255, 255, 255, 120), Stroke::new(1.0, Color32::WHITE), StrokeKind::Inside);
+        if resp.drag_stopped() {
+            app.midi.draw = None;
+            if let Some(pl) = &app.player {
+                pl.midi_input.push(openpt_midi::LiveMidiEvent::note_on(0, pitch, 100));
+                pl.midi_input.push(openpt_midi::LiveMidiEvent::note_off(0, pitch, 0));
+            }
+            let _ =
+                app.run("midi.note_add", json!({"clip": cid.0, "pitch": pitch, "start_ticks": start, "length_ticks": end - start, "velocity": 100}));
         }
     }
     if let (Some(a), Some(b)) = (app.midi.band, ui.ctx().pointer_latest_pos()) {

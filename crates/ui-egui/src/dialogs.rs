@@ -6,19 +6,31 @@ use openpt_model::{ClipId, Session, SourceId, TrackId};
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone)]
+pub struct NewTrackRow {
+    pub count: u32,
+    pub format: String,
+    pub kind: String,
+    pub timebase: String,
+    pub name: String,
+}
+
+impl Default for NewTrackRow {
+    fn default() -> Self {
+        NewTrackRow { count: 1, format: "Mono".into(), kind: "audio".into(), timebase: "samples".into(), name: "Audio".into() }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Dialog {
     NewTracks {
-        count: u32,
-        format: String,
-        kind: String,
-        timebase: String,
-        name: String,
+        rows: Vec<NewTrackRow>,
     },
     Bounce {
         path: String,
         format: String,
         bit_depth: String,
         normalize: bool,
+        dither: bool,
     },
     RenameTrack {
         id: TrackId,
@@ -146,9 +158,7 @@ impl Dialogs {
                 let ed = &e.session().edit;
                 return self.open_clear(e, ed.selected_clips.clone(), ed.selected_sources.clone());
             }
-            "track.new" => {
-                Dialog::NewTracks { count: 1, format: "Mono".into(), kind: "audio".into(), timebase: "samples".into(), name: "Audio".into() }
-            }
+            "track.new" => Dialog::NewTracks { rows: vec![NewTrackRow::default()] },
             "file.bounce_mix" => {
                 let dir = e
                     .path
@@ -156,7 +166,13 @@ impl Dialogs {
                     .and_then(|p| std::path::Path::new(p).parent())
                     .filter(|d| !d.as_os_str().is_empty())
                     .map_or(home.clone(), |d| d.display().to_string());
-                Dialog::Bounce { path: format!("{dir}/{name} Bounce.wav"), format: "wav".into(), bit_depth: "24".into(), normalize: false }
+                Dialog::Bounce {
+                    path: format!("{dir}/{name} Bounce.wav"),
+                    format: "wav".into(),
+                    bit_depth: "24".into(),
+                    normalize: false,
+                    dither: false,
+                }
             }
             "file.import_audio" => Dialog::PathPrompt { cmd: id.into(), title: "Import Audio".into(), path: home, key: "path".into() },
             "file.import_midi" => Dialog::PathPrompt { cmd: id.into(), title: "Import MIDI".into(), path: home, key: "path".into() },
@@ -362,9 +378,12 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
             match &mut d {
-                Dialog::NewTracks { count, format, kind, timebase, name } => {
-                    ui.set_min_width(860.0);
-                    ui.horizontal(|ui| {
+                Dialog::NewTracks { rows } => {
+                    ui.set_min_width(900.0);
+                    let (mut add, mut remove) = (None, None);
+                    let many = rows.len() > 1;
+                    for (i, NewTrackRow { count, format, kind, timebase, name }) in rows.iter_mut().enumerate() {
+                    ui.push_id(i, |ui| ui.horizontal(|ui| {
                         ui.label("Create");
                         crate::widgets::value_box(ui, |ui| ui.add_sized([46.0, 20.0], egui::DragValue::new(count).range(1..=128)));
                         ui.label("new");
@@ -394,13 +413,30 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                             });
                         ui.label("Name:");
                         ui.add(egui::TextEdit::singleline(name).desired_width(220.0));
-                    });
+                        if ui.small_button("+").on_hover_text("Add a row").clicked() {
+                            add = Some(i);
+                        }
+                        if many && ui.small_button("−").on_hover_text("Remove this row").clicked() {
+                            remove = Some(i);
+                        }
+                    }));
+                    }
+                    if let Some(i) = add {
+                        let copy = rows.get(i).cloned().unwrap_or_default();
+                        rows.insert(i + 1, copy);
+                    }
+                    if let Some(i) = remove {
+                        rows.remove(i);
+                    }
                     if buttons(ui, "Create", enter) {
-                        action =
-                            Some(("track.new".into(), json!({"count": count, "format": format, "kind": kind, "timebase": timebase, "name": name})));
+                        let list: Vec<Value> = rows
+                            .iter()
+                            .map(|r| json!({"count": r.count, "format": r.format, "kind": r.kind, "timebase": r.timebase, "name": r.name}))
+                            .collect();
+                        action = Some(("track.new".into(), json!({"rows": list})));
                     }
                 }
-                Dialog::Bounce { path, format, bit_depth, normalize } => {
+                Dialog::Bounce { path, format, bit_depth, normalize, dither } => {
                     ui.horizontal(|ui| {
                         ui.label("File");
                         ui.add(egui::TextEdit::singleline(path).desired_width(420.0));
@@ -430,6 +466,9 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         });
                     });
                     crate::widgets::checkbox(ui, normalize, "Normalize to -0.1 dBFS");
+                    if bit_depth != "32f" {
+                        crate::widgets::checkbox(ui, dither, "Dither (TPDF)");
+                    }
                     ui.label(
                         egui::RichText::new("Bounces the edit selection, or the whole session when nothing is selected.")
                             .small()
@@ -439,7 +478,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         let p = std::path::Path::new(path.as_str()).with_extension(if format == "aiff" { "aif" } else { format.as_str() });
                         crate::bounce::start(
                             app,
-                            &json!({"path": p.to_string_lossy(), "format": format, "bit_depth": bit_depth, "normalize": normalize}),
+                            &json!({"path": p.to_string_lossy(), "format": format, "bit_depth": bit_depth, "normalize": normalize, "dither": *dither && bit_depth != "32f"}),
                         );
                         keep = false;
                     }

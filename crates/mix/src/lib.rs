@@ -1616,7 +1616,7 @@ fn transport_at(s: &Session, pos: Samples, playing: bool, recording: bool) -> Tr
     }
 }
 
-fn volume_db_at(t: &Track, pos: Samples) -> f32 {
+pub fn volume_db_at(t: &Track, pos: Samples) -> f32 {
     if t.mixer.automation_mode.reads()
         && t.mixer.automation_mode != openpt_model::AutomationMode::Write
         && let Some(l) = t.lane(&AutoParam::Volume)
@@ -1627,7 +1627,7 @@ fn volume_db_at(t: &Track, pos: Samples) -> f32 {
     t.mixer.volume_db
 }
 
-fn pan_at(t: &Track, idx: usize, pos: Samples) -> f32 {
+pub fn pan_at(t: &Track, idx: usize, pos: Samples) -> f32 {
     let base = t.mixer.pan.get(idx).copied().unwrap_or(if idx == 0 { 0.0 } else { 1.0 });
     if t.mixer.automation_mode.reads()
         && let Some(l) = t.lane(&AutoParam::Pan(u8::try_from(idx).unwrap_or(0)))

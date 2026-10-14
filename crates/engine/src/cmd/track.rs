@@ -10,7 +10,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New...",
             ["Track"],
             Some("Cmd+Shift+N"),
-            "{count?: 1, format?: mono|stereo|5.1…, kind?: audio|aux|master|midi|instrument|vca|folder, name?, timebase?: samples|ticks, instrument?: plugin id}",
+            "{count?: 1, format?: mono|stereo|5.1…, kind?: audio|aux|master|midi|instrument|vca|folder, name?, timebase?: samples|ticks, instrument?: plugin id} or {rows: [those]}",
             always,
             new_track
         ),
@@ -307,6 +307,14 @@ fn midi_channel(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 fn new_track(e: &mut Engine, p: &Value) -> Result<Value> {
+    if let Some(rows) = p.get("rows").and_then(Value::as_array) {
+        let mut all = Vec::new();
+        for r in rows {
+            let v = new_track(e, r)?;
+            all.extend(v["tracks"].as_array().cloned().unwrap_or_default());
+        }
+        return Ok(json!({"tracks": all}));
+    }
     let count = i64_or(p, "count", 1).clamp(1, 128);
     let kind = match str_param(p, "kind") {
         Some(k) => TrackKind::from_id(k).ok_or_else(|| bad("track.new", format!("unknown kind `{k}`")))?,
