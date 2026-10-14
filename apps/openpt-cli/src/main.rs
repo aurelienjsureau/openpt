@@ -20,6 +20,26 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
 }
 
+fn check_args(args: &[String], positional: usize, with_value: &[&str], flags: &[&str]) -> Result<(), String> {
+    let mut i = positional;
+    while let Some(a) = args.get(i) {
+        if a.contains('=') && a.starts_with("--") {
+            return Err(format!("{a}: write the value after a space (`{}`)", a.replacen('=', " ", 1)));
+        }
+        if with_value.contains(&a.as_str()) {
+            match args.get(i + 1) {
+                Some(v) if !v.starts_with("--") => i += 2,
+                _ => return Err(format!("{a} needs a value")),
+            }
+        } else if flags.contains(&a.as_str()) {
+            i += 1;
+        } else {
+            return Err(format!("unknown option `{a}`"));
+        }
+    }
+    Ok(())
+}
+
 fn fail(msg: impl std::fmt::Display) -> ExitCode {
     eprintln!("openpt-cli: {msg}");
     ExitCode::FAILURE
@@ -135,6 +155,9 @@ fn info(args: &[String]) -> ExitCode {
 
 fn convert(args: &[String]) -> ExitCode {
     let (Some(input), Some(output)) = (args.first(), args.get(1)) else { return fail("convert IN OUT") };
+    if let Err(e) = check_args(args, 2, &["--rate", "--bit-depth"], &["--normalize", "--dither"]) {
+        return fail(e);
+    }
     let rate = match parse_rate(arg_value(args, "--rate").as_deref()) {
         Ok(r) => r,
         Err(e) => return fail(e),
@@ -163,7 +186,7 @@ fn convert(args: &[String]) -> ExitCode {
     let Some(format) = openpt_audio_io::encode_format_for(&out_ext) else {
         return fail(format!("{output}: cannot write `.{out_ext}` files (supported: {})", openpt_audio_io::ENCODE_EXTENSIONS));
     };
-    let opts = openpt_audio_io::EncodeOptions { format, bit_depth, dither: true, bwf: None };
+    let opts = openpt_audio_io::EncodeOptions { format, bit_depth, dither: args.iter().any(|a| a == "--dither"), bwf: None };
     match openpt_audio_io::encode(&buf, &opts).map_err(|e| e.to_string()).and_then(|b| std::fs::write(output, b).map_err(|e| e.to_string())) {
         Ok(()) => {
             outln!("wrote {output} ({} ch, {} Hz, {:.2} s)", buf.num_channels(), buf.sample_rate, buf.duration_secs());
@@ -253,6 +276,9 @@ fn parse_cmd_spec(spec: &str) -> Result<(String, Value), String> {
 }
 
 fn run(args: &[String]) -> ExitCode {
+    if let Err(err) = check_args(args, 0, &["--in", "--cmd", "--bounce", "--start", "--end", "--save"], &["--demo", "--sample"]) {
+        return fail(err);
+    }
     let mut e = match load_engine(args) {
         Ok(e) => e,
         Err(err) => return fail(err),

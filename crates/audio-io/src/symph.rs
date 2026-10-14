@@ -134,6 +134,7 @@ fn info_of(reader: &dyn FormatReader, detected: FileFormat) -> Result<(u32, Audi
 fn run(bytes: &[u8], detected: FileFormat, count_only: bool) -> Result<(AudioInfo, AudioBuffer)> {
     let mut reader = open(bytes)?;
     let (track_id, mut info) = info_of(reader.as_ref(), detected)?;
+    let declared = reader.tracks().iter().find(|t| t.id == track_id).and_then(|t| t.codec_params.n_frames);
     if let Some(n) = reader.tracks().iter().find(|t| t.id == track_id).and_then(|t| t.codec_params.n_frames) {
         let total = n.saturating_mul(u64::from(info.channels.max(1)));
         if !count_only && total > MAX_DECODE_SAMPLES {
@@ -176,7 +177,16 @@ fn run(bytes: &[u8], detected: FileFormat, count_only: bool) -> Result<(AudioInf
             Ok(d) => d,
             Err(SymError::DecodeError(m)) => {
                 errors += 1;
-                log::debug!("skipping corrupt packet: {m}");
+                let dur = usize::try_from(packet.dur()).unwrap_or(0).min(MAX_PACKET_FRAMES as usize);
+                if !planar.is_empty() {
+                    if !count_only {
+                        for dst in &mut planar {
+                            dst.resize(dst.len() + dur, 0.0);
+                        }
+                    }
+                    frames = frames.saturating_add(dur as u64);
+                }
+                log::warn!("corrupt packet replaced by {dur} frames of silence: {m}");
                 if errors > 1000 && frames == 0 {
                     return Err(AudioError::Malformed(format!("no decodable packets: {m}")));
                 }
@@ -219,6 +229,18 @@ fn run(bytes: &[u8], detected: FileFormat, count_only: bool) -> Result<(AudioInf
     }
     if planar.is_empty() {
         planar = (0..usize::from(info.channels)).map(|_| Vec::new()).collect();
+    }
+    if let Some(n) = declared
+        && !count_only
+        && let Ok(n) = usize::try_from(n)
+    {
+        let have = planar.iter().map(Vec::len).min().unwrap_or(0);
+        if have < n && n.saturating_mul(planar.len()) as u64 <= MAX_DECODE_SAMPLES {
+            log::warn!("audio file ends {} frames early; padded with silence", n - have);
+            for dst in &mut planar {
+                dst.resize(n, 0.0);
+            }
+        }
     }
     info.frames = if count_only { frames } else { planar.iter().map(Vec::len).min().unwrap_or(0) as u64 };
     let sample_rate = info.sample_rate;
