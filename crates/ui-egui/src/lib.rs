@@ -339,6 +339,7 @@ pub struct SoundApp {
     recent_checked: Option<(f64, Vec<String>, Vec<bool>)>,
     pub player: Option<Player>,
     pub(crate) surfaces: peripherals::Surfaces,
+    play_sel: Option<Range>,
     pub recorder: Option<openpt_playback::record::Recorder>,
     pub midi_recorder: Option<openpt_playback::midi::MidiRecorder>,
     pub midi_manager: Option<openpt_playback::midi::MidiManager>,
@@ -420,6 +421,7 @@ impl SoundApp {
             engine,
             player,
             surfaces: Default::default(),
+            play_sel: None,
             recorder: None,
             midi_recorder: None,
             record_start: 0,
@@ -1045,9 +1047,26 @@ impl SoundApp {
         }
     }
 
+    fn follow_selection_while_playing(&mut self, ctx: &egui::Context) {
+        let sel = self.engine.session().edit.selection;
+        if !self.engine.transport.playing || self.engine.transport.recording {
+            self.play_sel = None;
+            return;
+        }
+        if ctx.input(|i| i.pointer.any_down()) {
+            return;
+        }
+        match self.play_sel {
+            Some(was) if was != sel => self.play_from_selection(),
+            None => self.play_sel = Some(sel),
+            _ => {}
+        }
+    }
+
     pub fn play_from_selection(&mut self) {
         let s = self.engine.session();
         let sel = s.edit.selection;
+        self.play_sel = Some(sel);
         let preroll = if s.edit.pre_post_roll { s.edit.pre_roll } else { 0 };
         let postroll = if s.edit.pre_post_roll { s.edit.post_roll } else { 0 };
         if s.edit.loop_playback && !sel.is_empty() {
@@ -1214,6 +1233,7 @@ impl SoundApp {
         self.frame_ms = self.frame_ms * 0.9 + dt * 1000.0 * 0.1;
         control::drain(self, ctx);
         peripherals::run(self, ctx);
+        self.follow_selection_while_playing(ctx);
         self.note_recent_session();
         self.apply_editor_edits();
         bounce::step(self, ctx);
@@ -1613,6 +1633,24 @@ mod tests {
         assert!(maximizes(2400.0, 1));
         assert!(!maximizes(1600.0, 1));
         assert!(!maximizes(2400.0, 2));
+    }
+
+    #[test]
+    fn clicking_elsewhere_while_looping_plays_on_from_there() {
+        use serde_json::json;
+        let engine = openpt_engine::Engine::default();
+        let mut app = super::SoundApp::new(engine, None, super::Services::default());
+        let ctx = egui::Context::default();
+        app.engine.execute("edit.select", &json!({"start": 0, "end": 48000})).unwrap();
+        app.engine.execute("options.loop_playback", &json!({"value": true})).unwrap();
+        app.play_from_selection();
+        assert!(matches!(app.sim, Some((_, _, Some(_)))), "looping the selection");
+        app.engine.execute("edit.select", &json!({"start": 200_000})).unwrap();
+        app.follow_selection_while_playing(&ctx);
+        assert!(matches!(app.sim, Some((200_000, None, None))), "{:?}", app.sim);
+        app.engine.execute("edit.select", &json!({"start": 96_000, "end": 144_000})).unwrap();
+        app.follow_selection_while_playing(&ctx);
+        assert!(matches!(app.sim, Some((96_000, None, Some(r))) if r.start == 96_000 && r.end == 144_000), "{:?}", app.sim);
     }
 
     #[test]
