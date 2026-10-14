@@ -73,7 +73,7 @@ impl ThemeMode {
     pub const fn label(self) -> &'static str {
         match self {
             Self::System => "System",
-            Self::Light => "Light",
+            Self::Light => "Classic",
             Self::Dark => "Dark",
         }
     }
@@ -276,11 +276,11 @@ impl Tokens {
     };
 
     pub const LIGHT: Tokens = Tokens {
-        window_bg: Color32::from_rgb(184, 186, 190),
-        panel_bg: Color32::from_rgb(204, 206, 210),
-        panel_bg2: Color32::from_rgb(216, 218, 222),
-        toolbar_bg: Color32::from_rgb(194, 196, 200),
-        toolbar_group: Color32::from_rgb(208, 210, 214),
+        window_bg: Color32::from_rgb(133, 133, 133),
+        panel_bg: Color32::from_rgb(211, 211, 211),
+        panel_bg2: Color32::from_rgb(157, 157, 157),
+        toolbar_bg: Color32::from_rgb(203, 203, 203),
+        toolbar_group: Color32::from_rgb(214, 214, 214),
         border: Color32::from_rgb(100, 103, 109),
         border_light: Color32::from_rgb(150, 153, 159),
         edge_light: Color32::from_rgba_premultiplied(150, 150, 150, 150),
@@ -301,15 +301,15 @@ impl Tokens {
         button_border: Color32::from_rgb(108, 111, 117),
         name_field: Color32::from_rgb(236, 237, 239),
         name_field_sel: Color32::from_rgb(224, 232, 244),
-        ruler_bg: Color32::from_rgb(198, 200, 204),
-        ruler_label_bg: Color32::from_rgb(198, 200, 204),
-        ruler_text: Color32::from_rgb(48, 50, 56),
-        ruler_tick: Color32::from_rgb(108, 111, 118),
+        ruler_bg: Color32::from_rgb(67, 67, 67),
+        ruler_label_bg: Color32::from_rgb(190, 190, 190),
+        ruler_text: Color32::from_rgb(222, 222, 222),
+        ruler_tick: Color32::from_rgb(140, 140, 140),
         tempo_ruler: Color32::from_rgb(92, 156, 112),
         meter_ruler: Color32::from_rgb(80, 144, 172),
         marker_ruler: Color32::from_rgb(186, 189, 194),
-        playlist_bg: Color32::from_rgb(210, 212, 216),
-        playlist_alt: Color32::from_rgb(202, 204, 208),
+        playlist_bg: Color32::from_rgb(182, 182, 182),
+        playlist_alt: Color32::from_rgb(174, 174, 174),
         grid_line: Color32::from_rgb(188, 191, 196),
         bar_line: Color32::from_rgb(162, 166, 172),
         selection: Color32::from_rgba_premultiplied(100, 145, 205, 90),
@@ -344,7 +344,7 @@ impl Tokens {
         header_selected: Color32::from_rgb(184, 200, 224),
         strip_selected: Color32::from_rgb(184, 200, 224),
         marker_text: Color32::from_rgb(24, 25, 28),
-        playlist_lane: Color32::from_rgb(200, 202, 206),
+        playlist_lane: Color32::from_rgb(133, 133, 133),
         universe_bg: Color32::from_rgb(198, 200, 204),
         universe_view: Color32::from_rgb(40, 42, 48),
         meter_bg: Color32::from_rgb(52, 54, 58),
