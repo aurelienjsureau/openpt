@@ -3,6 +3,7 @@
 pub mod devices;
 pub mod midi;
 pub mod record;
+pub mod surface;
 
 pub use devices::AudioConfig;
 pub use midi::{LiveMidiEvent, MidiDeviceInfo, MidiInputRing, MidiManager};

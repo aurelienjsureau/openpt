@@ -16,6 +16,7 @@ pub mod mix_window;
 pub mod ops_windows;
 pub mod palette;
 pub mod panels;
+pub mod peripherals;
 pub mod preferences;
 mod recent;
 pub mod recovery;
@@ -115,6 +116,8 @@ pub struct UiState {
     pub dashboard_tab_recent: bool,
     pub session_dir: String,
     pub show_preferences: bool,
+    pub show_peripherals: bool,
+    pub peripherals: Vec<peripherals::Controller>,
     pub plugin_native_editor: bool,
     pub plugin_menu_org: String,
     pub dashboard_after_close: bool,
@@ -190,6 +193,8 @@ impl Default for UiState {
             dashboard_tab_recent: false,
             session_dir: String::new(),
             show_preferences: false,
+            show_peripherals: false,
+            peripherals: Vec::new(),
             plugin_native_editor: true,
             plugin_menu_org: "manufacturer".into(),
             dashboard_after_close: false,
@@ -333,6 +338,7 @@ pub struct SoundApp {
     pub(crate) focus_clip_find: bool,
     recent_checked: Option<(f64, Vec<String>, Vec<bool>)>,
     pub player: Option<Player>,
+    pub(crate) surfaces: peripherals::Surfaces,
     pub recorder: Option<openpt_playback::record::Recorder>,
     pub midi_recorder: Option<openpt_playback::midi::MidiRecorder>,
     pub midi_manager: Option<openpt_playback::midi::MidiManager>,
@@ -413,6 +419,7 @@ impl SoundApp {
             }),
             engine,
             player,
+            surfaces: Default::default(),
             recorder: None,
             midi_recorder: None,
             record_start: 0,
@@ -837,7 +844,8 @@ impl SoundApp {
     pub fn sync_midi_devices(&mut self) {
         if let Some(player) = &self.player {
             let flags = &self.engine.session().edit.flags;
-            let enabled: Vec<String> = flags.iter().filter_map(|f| f.strip_prefix("midi.input.").map(str::to_string)).collect();
+            let mut enabled: Vec<String> = flags.iter().filter_map(|f| f.strip_prefix("midi.input.").map(str::to_string)).collect();
+            enabled.retain(|n| !self.ui.peripherals.iter().any(|c| c.kind != "none" && &c.input == n));
             if let Some(mm) = &mut self.midi_manager {
                 mm.sync_enabled(&enabled);
             } else {
@@ -1205,6 +1213,7 @@ impl SoundApp {
         let dt = self.last_frame.replace(now).map_or(1.0 / 60.0, |t| (now - t) as f32).clamp(0.0, 0.25);
         self.frame_ms = self.frame_ms * 0.9 + dt * 1000.0 * 0.1;
         control::drain(self, ctx);
+        peripherals::run(self, ctx);
         self.note_recent_session();
         self.apply_editor_edits();
         bounce::step(self, ctx);
@@ -1302,6 +1311,7 @@ impl SoundApp {
         import_jobs::show(self, &ctx);
         dashboard::show(self, &ctx);
         preferences::show(self, &ctx);
+        peripherals::window(self, &ctx);
         dialogs::show(self, &ctx);
         if self.meters_live() {
             let hz = if self.ui.window == MainWindow::Mix { 60 } else { 30 };
