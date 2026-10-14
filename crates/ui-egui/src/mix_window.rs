@@ -607,12 +607,35 @@ fn level_icon(r: Rect) -> Rect {
     Rect::from_min_max(pos2(outer.max.x - 9.0, outer.min.y + 2.0), pos2(outer.max.x - 4.0, outer.max.y - 2.0))
 }
 
+#[derive(Debug, Clone, Copy)]
+struct InsertDrag {
+    track: TrackId,
+    slot: usize,
+}
+
 pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: usize, r: Rect) {
     let t = Tokens::current();
     let id = track.id;
     let ins = track.mixer.inserts.get(slot).cloned().flatten();
-    let resp = ui.interact(r, ui.id().with(("ins", id.0, slot)), Sense::click());
+    let resp = ui.interact(r, ui.id().with(("ins", id.0, slot)), if ins.is_some() { Sense::click_and_drag() } else { Sense::click() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Insert {}", (b'A' + slot as u8) as char)));
+    if ins.is_some() {
+        resp.dnd_set_drag_payload(InsertDrag { track: id, slot });
+    }
+    if let Some(src) = resp.dnd_release_payload::<InsertDrag>() {
+        let copy = click_mods(ui).alt || ui.input(|i| i.modifiers.alt);
+        app.capture_plugin_states();
+        let r = app.run(
+            "mix.insert_transfer",
+            json!({"from_track": src.track.0, "from": src.slot, "to_track": id.0, "to": slot, "copy": copy}),
+        );
+        if let Err(e) = r {
+            app.ui.status = e;
+        }
+    }
+    if resp.dnd_hover_payload::<InsertDrag>().is_some() {
+        ui.painter().rect_stroke(r, 2.0, Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+    }
     let info = ins.as_ref().and_then(|i| plugin_info(&i.plugin));
     let name = ins.as_ref().map(|i| info.map_or(i.plugin.as_str(), |p| p.short_name)).unwrap_or_default();
     match &ins {
@@ -623,15 +646,23 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
             used_slot(ui.painter(), r, faces, Mark::Dot, name, color, None);
         }
     }
+    let dot = Rect::from_min_max(r.min, pos2(r.min.x + 13.0, r.max.y));
+    if ins.is_some() {
+        let dot_resp = ui.interact(dot, ui.id().with(("ins_dot", id.0, slot)), Sense::click()).on_hover_text("Insert menu");
+        egui::Popup::menu(&dot_resp)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| plugin_menu(app, ui, id, slot, true));
+    }
     if resp.clicked() && ins.is_some() {
-        if ui.input(|i| i.modifiers.command) {
+        let m = click_mods(ui);
+        if m.command || m.ctrl {
             let _ = app.run("mix.insert_bypass", json!({"track": id.0, "slot": slot}));
         } else {
             open_plugin(app, id, slot);
         }
     }
     let cmd = if ui.ctx().os().is_mac() { "⌘" } else { "Ctrl+" };
-    let tip = format!("{name}: click to open · {cmd}click to bypass · right-click to change");
+    let tip = format!("{name}: click to open · {cmd}click to bypass · dot or right-click: menu · drag to move, Alt-drag to copy");
     let menu_resp = if ins.is_none() { resp.clone() } else { resp.clone().on_hover_text(tip) };
     let popup = if ins.is_none() { egui::Popup::menu(&menu_resp) } else { egui::Popup::context_menu(&menu_resp) };
     let popup = popup.close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);

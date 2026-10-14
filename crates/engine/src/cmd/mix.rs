@@ -126,6 +126,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("mix.insert_move", "Move Insert", [], None, "{track?, from, to}", has_selection, insert_move),
         cmd!(
+            "mix.insert_transfer",
+            "Move or Copy Insert",
+            [],
+            None,
+            "{from_track, from, to_track, to, copy?: false} — the insert (plugin, settings, state) into another slot, of any track; it replaces what was there",
+            always,
+            insert_transfer
+        ),
+        cmd!(
             "mix.send",
             "Assign Send",
             [],
@@ -419,6 +428,34 @@ fn insert_params(e: &mut Engine, p: &Value) -> Result<Value> {
         ins.preset = name;
     }
     Ok(json!({"set": n}))
+}
+
+fn insert_transfer(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "mix.insert_transfer";
+    let from_t = track_param(e, id, p, "from_track")?.ok_or_else(|| bad(id, "`from_track` required"))?;
+    let to_t = track_param(e, id, p, "to_track")?.ok_or_else(|| bad(id, "`to_track` required"))?;
+    let from = slot_of(p, "from", INSERT_SLOTS).ok_or_else(|| bad(id, "`from` slot"))?;
+    let to = slot_of(p, "to", INSERT_SLOTS).ok_or_else(|| bad(id, "`to` slot"))?;
+    let copy = bool_or(p, "copy", false);
+    if from_t == to_t && from == to {
+        return Ok(json!({}));
+    }
+    let s = e.session_mut();
+    let mut ins = s.track(from_t).and_then(|t| t.mixer.inserts.get(from).cloned().flatten()).ok_or_else(|| bad(id, "no insert in that slot"))?;
+    let dest = s.track(to_t).ok_or_else(|| bad(id, "no such track"))?;
+    if matches!(dest.kind, openpt_model::TrackKind::Midi | openpt_model::TrackKind::Vca | openpt_model::TrackKind::Folder | openpt_model::TrackKind::Video) {
+        return Err(bad(id, "that track has no inserts"));
+    }
+    if dest.format.channels() < 2 {
+        ins.multi_mono = false;
+    }
+    if !copy && let Some(slot) = s.track_mut(from_t).and_then(|t| t.mixer.inserts.get_mut(from)) {
+        *slot = None;
+    }
+    if let Some(slot) = s.track_mut(to_t).and_then(|t| t.mixer.inserts.get_mut(to)) {
+        *slot = Some(ins);
+    }
+    Ok(json!({}))
 }
 
 fn insert_move(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -727,6 +764,19 @@ mod tests {
     use openpt_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
     use openpt_time::Range;
     use std::sync::Arc;
+
+    #[test]
+    fn inserts_move_and_copy_across_tracks() {
+        let mut e = crate::demo::demo_engine();
+        let (kick, snare) = (e.session().track_by_name("Kick").unwrap().id, e.session().track_by_name("Snare").unwrap().id);
+        let first = e.session().track(kick).unwrap().mixer.inserts[0].clone().expect("the demo Kick has an insert");
+        e.execute("mix.insert_transfer", &json!({"from_track": kick.0, "from": 0, "to_track": snare.0, "to": 3, "copy": true})).unwrap();
+        assert_eq!(e.session().track(snare).unwrap().mixer.inserts[3].as_ref(), Some(&first));
+        assert!(e.session().track(kick).unwrap().mixer.inserts[0].is_some(), "a copy leaves the source");
+        e.execute("mix.insert_transfer", &json!({"from_track": kick.0, "from": 0, "to_track": kick.0, "to": 4})).unwrap();
+        let k = &e.session().track(kick).unwrap().mixer.inserts;
+        assert!(k[0].is_none() && k[4].as_ref() == Some(&first), "a move empties the source");
+    }
 
     fn rms_db(before: &[f32], after: &[f32]) -> f32 {
         let energy = |xs: &[f32]| xs.iter().map(|x| x * x).sum::<f32>() / xs.len().max(1) as f32;
