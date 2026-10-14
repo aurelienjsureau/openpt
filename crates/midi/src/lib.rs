@@ -8,7 +8,7 @@ mod sequence;
 mod smf;
 
 pub use live::{LiveMidiEvent, MidiTake, RecordedMidiEvent, parse_midi_message};
-pub use names::{gm_drum_name, gm_program_name, note_name};
+pub use names::{MiddleC, gm_drum_name, gm_program_name, note_name, set_middle_c};
 pub use rng::XorShift;
 pub use sequence::{CtrlEvent, CtrlKind, Note, Sequence};
 pub use smf::{MAX_EVENTS, MAX_TRACKS, Smf, SmfTrack, read_smf, write_smf};

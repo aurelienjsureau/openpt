@@ -598,18 +598,19 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, oc
         ui.separator();
     }
     let channels = app.engine.session().track(id).map_or(1, |t| t.format.channels());
+    let org = app.ui.plugin_menu_org.clone();
     let mut picked = None;
     if channels > 1 {
         ui.menu_button("multichannel plug-in", |ui| {
-            picked = effect_menus(ui).map(|p| (p, false));
+            picked = effect_menus(ui, &org).map(|p| (p, false));
         });
         ui.menu_button("multi-mono plug-in", |ui| {
-            if let Some(p) = effect_menus(ui) {
+            if let Some(p) = effect_menus(ui, &org) {
                 picked = Some((p, true));
             }
         });
     } else {
-        picked = effect_menus(ui).map(|p| (p, false));
+        picked = effect_menus(ui, &org).map(|p| (p, false));
     }
     if let Some((plugin, multi_mono)) = picked {
         run_pick(app, ui, "mix.insert", json!({"track": id.0, "slot": slot, "plugin": plugin, "multi_mono": multi_mono}));
@@ -619,24 +620,8 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, oc
     }
 }
 
-fn effect_menus(ui: &mut Ui) -> Option<String> {
-    let mut cats: Vec<openpt_dsp::Category> = Vec::new();
-    for p in openpt_dsp::plugins() {
-        if !p.is_instrument && !cats.contains(&p.category) {
-            cats.push(p.category);
-        }
-    }
-    let mut picked = None;
-    for c in cats {
-        ui.menu_button(format!("{c:?}"), |ui| {
-            for p in openpt_dsp::plugins().iter().filter(|p| p.category == c && !p.is_instrument) {
-                if ui.button(p.name).clicked() {
-                    picked = Some(p.id.to_string());
-                }
-            }
-        });
-    }
-    hosted_menus(ui, false).or(picked)
+fn effect_menus(ui: &mut Ui, org: &str) -> Option<String> {
+    plugin_menus(ui, false, org)
 }
 
 pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
@@ -675,14 +660,8 @@ pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
         ui.separator();
     }
     let mut picked = None;
-    ui.menu_button("Built-in", |ui| {
-        for p in openpt_dsp::plugins().iter().filter(|p| p.is_instrument) {
-            if ui.button(p.name).clicked() {
-                picked = Some(p.id.to_string());
-            }
-        }
-    });
-    if let Some(p) = hosted_menus(ui, true) {
+    let org = app.ui.plugin_menu_org.clone();
+    if let Some(p) = plugin_menus(ui, true, &org) {
         picked = Some(p);
     }
     if let Some(plugin) = picked {
@@ -780,10 +759,10 @@ fn plugin_search(ui: &mut Ui, search: &MenuSearch, instruments: bool) -> Option<
     let vst3 = openpt_vst3_host::cached();
     let mut hosted: Vec<(MenuPlugin, &str)> = Vec::new();
     for d in vst3.iter().flatten().filter(|d| d.is_instrument == instruments) {
-        hosted.push((MenuPlugin { id: d.id.clone(), name: d.name.clone(), vendor: d.vendor.clone() }, "VST3"));
+        hosted.push((MenuPlugin { id: d.id.clone(), name: d.name.clone(), vendor: d.vendor.clone(), category: category_label(d.category).into() }, "VST3"));
     }
     for d in openpt_au_host::scan().into_iter().filter(|d| d.is_instrument == instruments) {
-        hosted.push((MenuPlugin { id: d.id, name: d.name, vendor: d.vendor }, "AU"));
+        hosted.push((MenuPlugin { category: category_label(d.category).into(), id: d.id, name: d.name, vendor: d.vendor }, "AU"));
     }
     hosted.retain(|(p, _)| search.matches(&p.name) || search.matches(&p.vendor));
     hosted.sort_by_cached_key(|(p, format)| (p.name.to_lowercase(), *format));
@@ -881,26 +860,97 @@ struct MenuPlugin {
     id: String,
     name: String,
     vendor: String,
+    category: String,
 }
 
-fn hosted_menus(ui: &mut Ui, instruments: bool) -> Option<String> {
+fn category_label(c: openpt_dsp::Category) -> &'static str {
+    use openpt_dsp::Category as C;
+    match c {
+        C::Eq => "EQ",
+        C::Dynamics => "Dynamics",
+        C::PitchShift => "Pitch Shift",
+        C::Reverb => "Reverb",
+        C::Delay => "Delay",
+        C::Modulation => "Modulation",
+        C::Harmonic => "Harmonic",
+        C::Dither => "Dither",
+        C::Instrument => "Instrument",
+        C::Other => "Other",
+    }
+}
+
+fn plugin_menus(ui: &mut Ui, instruments: bool, org: &str) -> Option<String> {
+    let mut list: Vec<MenuPlugin> = openpt_dsp::plugins()
+        .iter()
+        .filter(|p| p.is_instrument == instruments)
+        .map(|p| MenuPlugin { id: p.id.to_string(), name: p.name.to_string(), vendor: "OpenPT".into(), category: category_label(p.category).into() })
+        .collect();
+    if let Some(all) = vst3_list(ui) {
+        list.extend(all.into_iter().filter(|d| d.is_instrument == instruments).map(|d| MenuPlugin {
+            category: category_label(d.category).into(),
+            id: d.id,
+            name: d.name,
+            vendor: d.vendor,
+        }));
+    }
+    if cfg!(target_os = "macos") {
+        list.extend(openpt_au_host::scan().into_iter().filter(|d| d.is_instrument == instruments).map(|d| MenuPlugin {
+            category: category_label(d.category).into(),
+            id: d.id,
+            name: d.name,
+            vendor: d.vendor,
+        }));
+    }
+    list.sort_by_cached_key(|p| p.name.to_lowercase());
+    let items: Vec<&MenuPlugin> = list.iter().collect();
+    let vendor = |p: &MenuPlugin| if p.vendor.is_empty() { "Unknown".to_string() } else { p.vendor.clone() };
+    let category = |p: &MenuPlugin| p.category.clone();
+    match org {
+        "flat" => plugin_rows(ui, &items),
+        "category" => plugin_groups(ui, &items, &category, &mut |ui, g| plugin_rows(ui, g)),
+        "category_manufacturer" => plugin_groups(ui, &items, &category, &mut |ui, g| plugin_groups(ui, g, &vendor, &mut |ui, g| plugin_rows(ui, g))),
+        _ => plugin_groups(ui, &items, &vendor, &mut |ui, g| plugin_rows(ui, g)),
+    }
+}
+
+fn plugin_groups(
+    ui: &mut Ui,
+    items: &[&MenuPlugin],
+    key: &dyn Fn(&MenuPlugin) -> String,
+    inner: &mut dyn FnMut(&mut Ui, &[&MenuPlugin]) -> Option<String>,
+) -> Option<String> {
+    let mut keys: Vec<String> = items.iter().map(|p| key(p)).collect();
+    keys.sort_by_key(|k| k.to_lowercase());
+    keys.dedup();
+    let max_h = (ui.ctx().content_rect().height() - 80.0).max(160.0);
     let mut picked = None;
-    ui.menu_button("VST3", |ui| {
-        let Some(all) = vst3_list(ui) else { return };
-        let list = all.into_iter().filter(|d| d.is_instrument == instruments);
-        if let Some(p) = vendor_menus(ui, list.map(|d| MenuPlugin { id: d.id, name: d.name, vendor: d.vendor }).collect(), "No VST3 plugins found") {
-            picked = Some(p);
+    egui::ScrollArea::vertical().id_salt(("plugin-groups", items.len())).max_height(max_h).show(ui, |ui| {
+        for k in &keys {
+            ui.menu_button(k.as_str(), |ui| {
+                let group: Vec<&MenuPlugin> = items.iter().copied().filter(|p| key(p) == *k).collect();
+                if let Some(p) = inner(ui, &group) {
+                    picked = Some(p);
+                }
+            });
         }
     });
-    if cfg!(target_os = "macos") {
-        ui.menu_button("Audio Units", |ui| {
-            let list = openpt_au_host::scan().into_iter().filter(|d| d.is_instrument == instruments);
-            if let Some(p) = vendor_menus(ui, list.map(|d| MenuPlugin { id: d.id, name: d.name, vendor: d.vendor }).collect(), "No Audio Units found")
-            {
-                picked = Some(p);
-            }
-        });
+    picked
+}
+
+fn plugin_rows(ui: &mut Ui, items: &[&MenuPlugin]) -> Option<String> {
+    if items.is_empty() {
+        ui.weak("No plug-ins");
+        return None;
     }
+    let max_h = (ui.ctx().content_rect().height() - 80.0).max(160.0);
+    let mut picked = None;
+    egui::ScrollArea::vertical().id_salt(("plugin-rows", items.len())).max_height(max_h).show(ui, |ui| {
+        for p in items {
+            if ui.button(&p.name).clicked() {
+                picked = Some(p.id.clone());
+            }
+        }
+    });
     picked
 }
 
@@ -921,31 +971,6 @@ fn scanning_label(ui: &mut Ui) {
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
 }
 
-fn vendor_menus(ui: &mut Ui, mut list: Vec<MenuPlugin>, none: &str) -> Option<String> {
-    if list.is_empty() {
-        ui.label(none);
-        return None;
-    }
-    list.sort_by_cached_key(|p| (p.vendor.to_lowercase(), p.name.to_lowercase()));
-    let mut vendors: Vec<&str> = list.iter().map(|p| p.vendor.as_str()).collect();
-    vendors.dedup();
-    let max_h = (ui.ctx().content_rect().height() - 80.0).max(160.0);
-    let mut picked = None;
-    egui::ScrollArea::vertical().id_salt("vendors").max_height(max_h).show(ui, |ui| {
-        for v in vendors {
-            ui.menu_button(if v.is_empty() { "Unknown vendor" } else { v }, |ui| {
-                egui::ScrollArea::vertical().id_salt("plugins").max_height(max_h).show(ui, |ui| {
-                    for p in list.iter().filter(|p| p.vendor == v) {
-                        if ui.button(&p.name).clicked() {
-                            picked = Some(p.id.clone());
-                        }
-                    }
-                });
-            });
-        }
-    });
-    picked
-}
 
 pub fn plugin_info(id: &str) -> Option<&'static openpt_dsp::PluginInfo> {
     openpt_dsp::plugin_info(id).or_else(|| openpt_vst3_host::plugin_info(id)).or_else(|| openpt_au_host::plugin_info(id))

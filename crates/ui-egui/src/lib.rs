@@ -115,6 +115,15 @@ pub struct UiState {
     pub session_dir: String,
     pub show_preferences: bool,
     pub plugin_native_editor: bool,
+    pub plugin_menu_org: String,
+    pub dashboard_after_close: bool,
+    pub autosave_enabled: bool,
+    pub autosave_minutes: u32,
+    pub undo_levels: usize,
+    pub meter_peak_hold: String,
+    pub meter_clip_hold: String,
+    pub meter_decay_db_s: f32,
+    pub note_names: String,
 }
 
 impl Default for UiState {
@@ -181,6 +190,15 @@ impl Default for UiState {
             session_dir: String::new(),
             show_preferences: false,
             plugin_native_editor: true,
+            plugin_menu_org: "manufacturer".into(),
+            dashboard_after_close: false,
+            autosave_enabled: true,
+            autosave_minutes: 2,
+            undo_levels: 200,
+            meter_peak_hold: "3s".into(),
+            meter_clip_hold: "infinite".into(),
+            meter_decay_db_s: 26.0,
+            note_names: "c3".into(),
         }
     }
 }
@@ -212,6 +230,7 @@ pub struct MeterDisplay {
     pub hold: [f32; 2],
     pub hold_age: f32,
     pub clip: bool,
+    pub clip_age: f32,
     pub gr: f32,
     pub plugin_failures: u32,
 }
@@ -397,6 +416,9 @@ impl SoundApp {
                 if id == "app.quit" {
                     self.quit_requested = true;
                 }
+                if id == "session.close" && self.ui.dashboard_after_close {
+                    self.ui.show_dashboard = true;
+                }
                 if id == "options.scrolling" {
                     self.edit_layout.follow_hold = false;
                 }
@@ -424,7 +446,7 @@ impl SoundApp {
     }
 
     pub(crate) fn modal_open(&self) -> bool {
-        self.dialogs.open.is_some() || self.ui.show_dashboard || self.import_job.is_some()
+        self.dialogs.open.is_some() || self.ui.show_dashboard || self.ui.show_preferences || self.import_job.is_some()
     }
 
     pub fn position(&self) -> Samples {
@@ -591,7 +613,8 @@ impl SoundApp {
     fn autosave(&mut self) {
         let Some(dir) = self.autosave_dir.clone() else { return };
         let last = *self.last_autosave.get_or_insert_with(std::time::Instant::now);
-        if last.elapsed().as_secs() < 120 || !self.engine.is_dirty() || self.engine.transport.recording {
+        let every = u64::from(self.ui.autosave_minutes.clamp(1, 120)) * 60;
+        if !self.ui.autosave_enabled || last.elapsed().as_secs() < every || !self.engine.is_dirty() || self.engine.transport.recording {
             return;
         }
         self.last_autosave = Some(std::time::Instant::now());
@@ -1030,9 +1053,10 @@ impl SoundApp {
                 self.last_meter_poll = now;
             }
             let snap = &self.meter_snapshot;
+            let b = Ballistics::from_prefs(&self.ui);
             for (id, m) in &snap.tracks {
                 let d = self.meters.entry(*id).or_default();
-                feed_meter(d, m.peak, m.gain_reduction_db, dt);
+                feed_meter(d, m.peak, m.gain_reduction_db, dt, &b);
                 if m.plugin_failures.count != d.plugin_failures {
                     d.plugin_failures = m.plugin_failures.count;
                     if let Some(msg) = failed_plugin_status(self.engine.session(), *id, m.plugin_failures.last) {
@@ -1041,7 +1065,7 @@ impl SoundApp {
                 }
             }
             let main = snap.main.peak;
-            feed_meter(&mut self.main_meter, main, 0.0, dt);
+            feed_meter(&mut self.main_meter, main, 0.0, dt, &b);
             if ended {
                 self.stop_play();
             }
@@ -1061,13 +1085,19 @@ impl SoundApp {
         }
         if !self.meters_live() {
             for d in self.meters.values_mut() {
-                feed_meter(d, [0.0, 0.0], 0.0, dt);
+                feed_meter(d, [0.0, 0.0], 0.0, dt, &Ballistics::from_prefs(&self.ui));
             }
-            feed_meter(&mut self.main_meter, [0.0, 0.0], 0.0, dt);
+            feed_meter(&mut self.main_meter, [0.0, 0.0], 0.0, dt, &Ballistics::from_prefs(&self.ui));
         }
     }
 
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.engine.history_limit = self.ui.undo_levels.clamp(1, 10_000);
+        openpt_midi::set_middle_c(match self.ui.note_names.as_str() {
+            "c4" => openpt_midi::MiddleC::C4,
+            "number" => openpt_midi::MiddleC::Number,
+            _ => openpt_midi::MiddleC::C3,
+        });
         if ctx.current_pass_index() > 0 {
             return;
         }
@@ -1211,8 +1241,25 @@ impl SoundApp {
     }
 }
 
-fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
-    let fall = 10f32.powf(-26.0 * dt / 20.0);
+struct Ballistics {
+    decay_db_s: f32,
+    hold: f32,
+    clip: f32,
+}
+
+impl Ballistics {
+    fn from_prefs(ui: &UiState) -> Self {
+        let secs = |s: &str| match s {
+            "infinite" => f32::INFINITY,
+            "none" => 0.0,
+            _ => 3.0,
+        };
+        Ballistics { decay_db_s: ui.meter_decay_db_s.clamp(1.0, 300.0), hold: secs(&ui.meter_peak_hold), clip: secs(&ui.meter_clip_hold) }
+    }
+}
+
+fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32, b: &Ballistics) {
+    let fall = 10f32.powf(-b.decay_db_s * dt / 20.0);
     for c in 0..2 {
         let v = peak.get(c).copied().unwrap_or(0.0);
         let lvl = d.level.get(c).copied().unwrap_or(0.0);
@@ -1226,13 +1273,18 @@ fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
             }
             d.hold_age = 0.0;
         }
-        if v >= 1.0 {
+        if v >= 1.0 && b.clip > 0.0 {
             d.clip = true;
+            d.clip_age = 0.0;
         }
     }
     d.hold_age += dt;
-    if d.hold_age > 2.0 {
+    if d.hold_age > b.hold {
         d.hold = d.level;
+    }
+    d.clip_age += dt;
+    if d.clip_age > b.clip {
+        d.clip = false;
     }
     d.gr = if gr > d.gr { gr } else { d.gr * fall };
 }

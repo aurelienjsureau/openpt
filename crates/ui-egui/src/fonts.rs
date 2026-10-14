@@ -4,6 +4,7 @@ use std::sync::Arc;
 const REGULAR: &[(&str, u32)] = &[
     ("/System/Library/Fonts/HelveticaNeue.ttc", 0),
     ("/System/Library/Fonts/Helvetica.ttc", 0),
+    ("C:\\Windows\\Fonts\\arial.ttf", 0),
     ("C:\\Windows\\Fonts\\segoeui.ttf", 0),
     ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0),
     ("/usr/share/fonts/TTF/DejaVuSans.ttf", 0),
@@ -14,6 +15,7 @@ const REGULAR: &[(&str, u32)] = &[
 const BOLD: &[(&str, u32)] = &[
     ("/System/Library/Fonts/HelveticaNeue.ttc", 1),
     ("/System/Library/Fonts/Helvetica.ttc", 1),
+    ("C:\\Windows\\Fonts\\arialbd.ttf", 0),
     ("C:\\Windows\\Fonts\\segoeuib.ttf", 0),
     ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
     ("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", 0),

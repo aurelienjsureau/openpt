@@ -1,8 +1,25 @@
 const PITCH_CLASSES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MiddleC {
+    C3,
+    C4,
+    Number,
+}
+
+static MIDDLE_C: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_middle_c(m: MiddleC) {
+    MIDDLE_C.store(m as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn note_name(pitch: u8) -> String {
+    let style = MIDDLE_C.load(std::sync::atomic::Ordering::Relaxed);
+    if style == MiddleC::Number as u8 {
+        return pitch.to_string();
+    }
     let class = PITCH_CLASSES.get(usize::from(pitch % 12)).copied().unwrap_or("?");
-    let octave = i32::from(pitch / 12) - 2;
+    let octave = i32::from(pitch / 12) - if style == MiddleC::C4 as u8 { 1 } else { 2 };
     format!("{class}{octave}")
 }
 

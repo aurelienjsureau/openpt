@@ -457,8 +457,28 @@ pub fn multi_meter(ui: &Ui, r: Rect, levels: &[f32], labels: &[String], clip: bo
 }
 
 pub fn checkbox(ui: &mut Ui, on: &mut bool, label: impl Into<egui::WidgetText>) -> Response {
-    let mut copy = *on;
-    let mut resp = ui.checkbox(&mut copy, label.into()).interact(Sense::drag());
+    let text: egui::WidgetText = label.into();
+    let side = 13.0;
+    let gap = ui.spacing().icon_spacing;
+    let galley = text.into_galley(ui, None, ui.available_width() - side - gap, egui::TextStyle::Button);
+    let size = egui::vec2(side + gap + galley.size().x, galley.size().y.max(side).max(ui.spacing().interact_size.y));
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    let label_text = galley.text().to_string();
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label_text.clone()));
+    if ui.is_rect_visible(rect) {
+        let t = Tokens::current();
+        let enabled = ui.is_enabled();
+        let b = egui::Rect::from_min_size(egui::pos2(rect.min.x, rect.center().y - side * 0.5), egui::vec2(side, side));
+        let rim = if resp.hovered() { t.text_dim } else { t.border_light };
+        ui.painter().rect(b, 1.5, t.field_bg, egui::Stroke::new(1.0, rim), egui::StrokeKind::Inside);
+        if *on {
+            let c = if enabled { t.check } else { t.text_dim };
+            let p = |x: f32, y: f32| egui::pos2(b.min.x + x * side, b.min.y + y * side);
+            ui.painter().line(vec![p(0.2, 0.52), p(0.42, 0.74), p(0.82, 0.24)], egui::Stroke::new(2.0, c));
+        }
+        let color = if enabled { t.text } else { t.text_dim };
+        ui.painter().galley(egui::pos2(b.max.x + gap, rect.center().y - galley.size().y * 0.5), galley, color);
+    }
     if drag_toggle(ui, &resp, on) {
         resp.mark_changed();
     }

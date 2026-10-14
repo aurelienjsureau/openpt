@@ -175,6 +175,12 @@ pub struct Tokens {
     pub slot_face: [Color32; 2],
     pub slot_bypassed: [Color32; 2],
     pub slot_mark: Color32,
+    pub dialog_bg: Color32,
+    pub group_bg: Color32,
+    pub group_header: Color32,
+    pub field_bg: Color32,
+    pub field_text: Color32,
+    pub check: Color32,
 }
 
 impl Tokens {
@@ -261,6 +267,12 @@ impl Tokens {
         slot_face: [Color32::from_rgb(92, 92, 92), Color32::from_rgb(75, 75, 75)],
         slot_bypassed: [Color32::from_rgb(66, 96, 146), Color32::from_rgb(50, 76, 120)],
         slot_mark: Color32::from_rgb(159, 159, 159),
+        dialog_bg: Color32::from_rgb(64, 64, 64),
+        group_bg: Color32::from_rgb(72, 72, 72),
+        group_header: Color32::from_rgb(56, 56, 56),
+        field_bg: Color32::from_rgb(10, 10, 10),
+        field_text: Color32::from_rgb(92, 214, 108),
+        check: Color32::from_rgb(92, 214, 108),
     };
 
     pub const LIGHT: Tokens = Tokens {
@@ -346,6 +358,12 @@ impl Tokens {
         slot_face: [Color32::from_rgb(244, 245, 247), Color32::from_rgb(214, 216, 220)],
         slot_bypassed: [Color32::from_rgb(190, 210, 240), Color32::from_rgb(160, 186, 228)],
         slot_mark: Color32::from_rgb(92, 95, 102),
+        dialog_bg: Color32::from_rgb(214, 216, 220),
+        group_bg: Color32::from_rgb(224, 226, 230),
+        group_header: Color32::from_rgb(196, 199, 204),
+        field_bg: Color32::from_rgb(250, 250, 250),
+        field_text: Color32::from_rgb(18, 108, 40),
+        check: Color32::from_rgb(30, 130, 50),
     };
 
     pub fn current() -> Tokens {
@@ -408,27 +426,66 @@ pub fn mono(size: f32) -> FontId {
     FontId::new(size, FontFamily::Monospace)
 }
 
+pub fn control_colors(light: bool) -> [Color32; 5] {
+    let t = if light { Tokens::LIGHT } else { Tokens::DARK };
+    if light {
+        [t.button, t.button_hi, t.slot_bg, t.button_border, t.border]
+    } else {
+        [Color32::from_rgb(34, 34, 34), Color32::from_rgb(48, 48, 48), Color32::from_rgb(22, 22, 22), Color32::from_rgb(104, 104, 104), Color32::from_rgb(170, 170, 170)]
+    }
+}
+
 pub fn apply(ctx: &egui::Context, light: bool) {
     LIGHT_THEME.store(light, Ordering::Relaxed);
     let t = Tokens::current();
     let mut v = if light { egui::Visuals::light() } else { egui::Visuals::dark() };
+    let stroke = |c: Color32| egui::Stroke::new(1.0, c);
+    let r2 = egui::CornerRadius::same(2);
     v.panel_fill = t.panel_bg;
-    v.window_fill = t.panel_bg2;
-    v.extreme_bg_color = t.slot_bg;
+    v.window_fill = t.dialog_bg;
+    v.window_stroke = stroke(t.border);
+    v.window_shadow = egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: Color32::from_black_alpha(140) };
+    v.popup_shadow = egui::Shadow { offset: [0, 3], blur: 8, spread: 0, color: Color32::from_black_alpha(120) };
+    v.extreme_bg_color = t.field_bg;
+    v.text_edit_bg_color = Some(t.field_bg);
     v.faint_bg_color = t.panel_bg2;
     v.selection.bg_fill = t.accent;
-    v.widgets.inactive.weak_bg_fill = t.button;
-    v.widgets.inactive.bg_fill = t.button;
-    v.widgets.hovered.weak_bg_fill = t.button_hi;
-    v.widgets.noninteractive.fg_stroke.color = t.text;
-    v.widgets.inactive.fg_stroke.color = t.text;
-    v.window_corner_radius = egui::CornerRadius::same(6);
-    v.menu_corner_radius = egui::CornerRadius::same(4);
+    v.selection.stroke = stroke(Color32::WHITE);
+    v.hyperlink_color = t.accent;
+    let [rest, hover, press, rim, rim_hi] = control_colors(light);
+    for (w, fill, rim) in [(&mut v.widgets.inactive, rest, rim), (&mut v.widgets.hovered, hover, rim_hi), (&mut v.widgets.active, press, rim_hi), (&mut v.widgets.open, press, rim_hi)] {
+        w.bg_fill = fill;
+        w.weak_bg_fill = fill;
+        w.bg_stroke = stroke(rim);
+        w.corner_radius = r2;
+        w.fg_stroke = stroke(t.text);
+        w.expansion = 0.0;
+    }
+    v.widgets.noninteractive.bg_fill = t.group_bg;
+    v.widgets.noninteractive.weak_bg_fill = t.group_bg;
+    v.widgets.noninteractive.bg_stroke = stroke(t.border);
+    v.widgets.noninteractive.fg_stroke = stroke(t.text);
+    v.widgets.noninteractive.corner_radius = r2;
+    v.window_corner_radius = egui::CornerRadius::same(3);
+    v.menu_corner_radius = egui::CornerRadius::same(2);
+    v.striped = false;
+    v.slider_trailing_fill = true;
     ctx.set_theme(egui::ThemePreference::System);
     ctx.all_styles_mut(|s| {
         s.visuals = v.clone();
-        s.spacing.item_spacing = egui::vec2(6.0, 4.0);
-        s.spacing.button_padding = egui::vec2(6.0, 2.0);
+        s.spacing.item_spacing = egui::vec2(6.0, 5.0);
+        s.spacing.button_padding = egui::vec2(8.0, 2.0);
+        s.spacing.interact_size.y = 20.0;
+        s.spacing.icon_width = 13.0;
+        s.spacing.icon_width_inner = 9.0;
+        s.spacing.combo_width = 160.0;
+        s.spacing.window_margin = egui::Margin::same(10);
+        s.spacing.menu_margin = egui::Margin::same(4);
+        s.text_styles.insert(egui::TextStyle::Body, regular(12.5));
+        s.text_styles.insert(egui::TextStyle::Button, regular(12.5));
+        s.text_styles.insert(egui::TextStyle::Small, regular(10.5));
+        s.text_styles.insert(egui::TextStyle::Heading, bold(15.0));
+        s.text_styles.insert(egui::TextStyle::Monospace, mono(12.0));
         s.interaction.tooltip_delay = 0.4;
     });
 }
@@ -521,13 +578,13 @@ mod tests {
                     let style = ctx.style_of(theme);
                     assert_eq!(style.visuals.dark_mode, !light);
                     assert_eq!(style.visuals.panel_fill, tokens.panel_bg);
-                    assert_eq!(style.visuals.widgets.inactive.bg_fill, tokens.button);
+                    assert_eq!(style.visuals.widgets.inactive.bg_fill, control_colors(light)[0]);
                     assert_eq!(style.visuals.widgets.inactive.fg_stroke.color, tokens.text);
-                    assert_eq!(style.spacing.button_padding, egui::vec2(6.0, 2.0));
+                    assert_eq!(style.spacing.button_padding, egui::vec2(8.0, 2.0));
                 }
                 app.ui(ui);
                 assert_eq!(ui.visuals().panel_fill, tokens.panel_bg);
-                assert_eq!(ui.visuals().widgets.inactive.bg_fill, tokens.button);
+                assert_eq!(ui.visuals().widgets.inactive.bg_fill, control_colors(light)[0]);
             });
             output.textures_delta.clear();
             assert_eq!(app.ui.theme, mode);
