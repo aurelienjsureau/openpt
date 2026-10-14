@@ -35,6 +35,7 @@ pub fn show(app: &mut SoundApp, ui: &mut Ui) {
                 counters(app, ui);
                 grid_nudge(app, ui);
                 transport(app, ui);
+                solo_mute_indicators(app, ui);
                 tempo_meter(app, ui);
                 output_meter(app, ui);
             });
@@ -353,6 +354,28 @@ fn transport(app: &mut SoundApp, ui: &mut Ui) {
                     }
                 }
             });
+        });
+    });
+}
+
+fn solo_mute_indicators(app: &mut SoundApp, ui: &mut Ui) {
+    let t = Tokens::current();
+    let s = app.engine.session();
+    let (soloed, muted) = (s.tracks.iter().any(|x| x.mixer.solo), s.tracks.iter().any(|x| x.mixer.mute));
+    group(ui, 30.0, 64.0, |ui, _| {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 4.0);
+            for (label, on, color, cmd, tip) in [
+                ("S", soloed, t.solo, "mix.clear_solos", "Solo: lit while any track is soloed. Click to clear every solo."),
+                ("M", muted, t.mute, "mix.clear_mutes", "Mute: lit while any track is muted. Click to clear every mute."),
+            ] {
+                let (r, resp) = ui.allocate_exact_size(vec2(24.0, 28.0), Sense::click());
+                key(ui.painter(), r, &resp, if on { color } else { key_fill(&resp) });
+                ui.painter().text(r.center(), Align2::CENTER_CENTER, label, bold(12.0), if on { t.text_dark } else { t.text_dim });
+                if resp.on_hover_text(tip).clicked() && on {
+                    let _ = app.run(cmd, json!({}));
+                }
+            }
         });
     });
 }

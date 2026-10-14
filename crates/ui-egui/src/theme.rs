@@ -378,12 +378,8 @@ pub fn is_light() -> bool {
     LIGHT_THEME.load(Ordering::Relaxed)
 }
 
-pub fn wants_light(ctx: &egui::Context, mode: ThemeMode) -> bool {
-    match mode {
-        ThemeMode::Light => true,
-        ThemeMode::Dark => false,
-        ThemeMode::System => ctx.system_theme() == Some(egui::Theme::Light),
-    }
+pub fn wants_light(_ctx: &egui::Context, _mode: ThemeMode) -> bool {
+    false
 }
 
 pub fn track_backgrounds(color: [u8; 3], selected: bool, tint: f32) -> (Color32, Color32) {
@@ -563,78 +559,5 @@ mod tests {
         assert_eq!(app.ui.theme, ThemeMode::Light);
         assert_eq!(app.run("ui.theme", json!({"mode": "system"})), Ok(json!({"mode": "system"})));
         assert!(crate::menus::UI_COMMANDS.iter().any(|c| c.0 == "ui.theme"));
-    }
-
-    #[test]
-    fn application_frames_follow_system_appearance_and_preserve_manual_palettes() {
-        let _palette = lock_test_palette();
-        fn frame(app: &mut SoundApp, ctx: &egui::Context, system_theme: Option<egui::Theme>, light: bool) {
-            let mode = app.ui.theme;
-            let colors = |app: &SoundApp| {
-                app.engine
-                    .session()
-                    .tracks
-                    .iter()
-                    .map(|track| {
-                        (track.color, track.playlists.iter().flat_map(|playlist| &playlist.clips).map(|clip| clip.color).collect::<Vec<_>>())
-                    })
-                    .collect::<Vec<_>>()
-            };
-            let before = colors(app);
-            let mut output = ctx.run_ui(egui::RawInput { system_theme, ..Default::default() }, |ui| {
-                let ctx = ui.ctx().clone();
-                app.logic(&ctx);
-                let tokens = if light { Tokens::LIGHT } else { Tokens::DARK };
-                assert_eq!(is_light(), light, "custom palette for {mode:?} with {system_theme:?}");
-                assert_eq!(Tokens::current().panel_bg, tokens.panel_bg);
-                assert_eq!(ctx.options(|options| options.theme_preference), egui::ThemePreference::System);
-                for theme in [egui::Theme::Light, egui::Theme::Dark] {
-                    let style = ctx.style_of(theme);
-                    assert_eq!(style.visuals.dark_mode, !light);
-                    assert_eq!(style.visuals.panel_fill, tokens.panel_bg);
-                    assert_eq!(style.visuals.widgets.inactive.bg_fill, control_colors(light)[0]);
-                    assert_eq!(style.visuals.widgets.inactive.fg_stroke.color, tokens.text);
-                    assert_eq!(style.spacing.button_padding, egui::vec2(8.0, 2.0));
-                }
-                app.ui(ui);
-                assert_eq!(ui.visuals().panel_fill, tokens.panel_bg);
-                assert_eq!(ui.visuals().widgets.inactive.bg_fill, control_colors(light)[0]);
-            });
-            output.textures_delta.clear();
-            assert_eq!(app.ui.theme, mode);
-            assert_eq!(serde_json::to_value(&app.ui).unwrap()["theme"], mode.id());
-            assert_eq!(colors(app), before, "appearance must preserve track and clip colors");
-        }
-
-        let appearances = [Some(egui::Theme::Light), Some(egui::Theme::Dark), Some(egui::Theme::Light), None];
-        for initial in [Some(egui::Theme::Light), Some(egui::Theme::Dark), None] {
-            let ctx = egui::Context::default();
-            let mut app = SoundApp::new(openpt_engine::Engine::default(), None, Services::default());
-            app.ui = serde_json::from_value(json!({"theme": "system"})).unwrap();
-            frame(&mut app, &ctx, initial, initial == Some(egui::Theme::Light));
-        }
-
-        let ctx = egui::Context::default();
-        let mut engine = openpt_engine::demo::demo_engine();
-        let track = engine.session_mut().tracks.first_mut().unwrap();
-        track.color = [19, 83, 147];
-        track.playlists.iter_mut().flat_map(|playlist| &mut playlist.clips).next().unwrap().color = Some([211, 57, 99]);
-        let mut app = SoundApp::new(engine, None, Services::default());
-        for mode in [ThemeMode::System, ThemeMode::Light, ThemeMode::Dark] {
-            app.run("ui.theme", json!({"mode": mode.id()})).unwrap();
-            for appearance in appearances {
-                let light = mode == ThemeMode::Light || (mode == ThemeMode::System && appearance == Some(egui::Theme::Light));
-                frame(&mut app, &ctx, appearance, light);
-            }
-            if mode != ThemeMode::System {
-                let latest = if mode == ThemeMode::Light { egui::Theme::Dark } else { egui::Theme::Light };
-                frame(&mut app, &ctx, Some(latest), mode == ThemeMode::Light);
-                app.run("ui.theme", json!({"mode": "system"})).unwrap();
-                app.logic(&ctx);
-                assert_eq!(is_light(), latest == egui::Theme::Light);
-                assert_eq!(ctx.global_style().visuals.dark_mode, latest != egui::Theme::Light);
-                frame(&mut app, &ctx, Some(latest), latest == egui::Theme::Light);
-            }
-        }
     }
 }

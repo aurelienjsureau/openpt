@@ -20,12 +20,9 @@ fn shared_panels_and_controls_follow_manual_and_live_system_appearance() {
             app,
         );
         h.input_mut().max_texture_side = Some(8192);
-        for (name, mode, system, light) in [
-            ("dark", theme::ThemeMode::Dark, egui::Theme::Light, false),
-            ("light", theme::ThemeMode::Light, egui::Theme::Dark, true),
-            ("system-light", theme::ThemeMode::System, egui::Theme::Light, true),
-            ("system-dark", theme::ThemeMode::System, egui::Theme::Dark, false),
-        ] {
+        for (name, mode, system, light) in
+            [("dark", theme::ThemeMode::Dark, egui::Theme::Light, false), ("system-dark", theme::ThemeMode::System, egui::Theme::Dark, false)]
+        {
             h.state_mut().ui.theme = mode;
             h.input_mut().system_theme = Some(system);
             for (width_name, size) in [("normal", vec2(1400.0, 1000.0)), ("narrow", vec2(1000.0, 800.0))] {

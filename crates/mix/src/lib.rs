@@ -98,7 +98,8 @@ pub fn create_instance_on(
         log::warn!("{id}: the plugin did not accept its stored state");
     }
     if let Some(t) = ara {
-        plugin.ara_bind(t);
+        let bound = plugin.ara_bind(t);
+        log::info!("{id}: ARA {} ({} clips)", if bound { "bound" } else { "not bound" }, t.clips.len());
     }
     plugin.prepare(sample_rate, max_block, ch);
     Some(NewInstance { plugin, refused_state })

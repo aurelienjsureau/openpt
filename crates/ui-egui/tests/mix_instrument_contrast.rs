@@ -101,12 +101,9 @@ fn populated_mix_instrument_uses_readable_palette_in_real_frames() {
     );
     harness.input_mut().max_texture_side = Some(8192);
     let mut failures = Vec::new();
-    for (name, mode, system, light) in [
-        ("light", ThemeMode::Light, Some(egui::Theme::Dark), true),
-        ("dark", ThemeMode::Dark, Some(egui::Theme::Light), false),
-        ("system-light", ThemeMode::System, Some(egui::Theme::Light), true),
-        ("system-dark", ThemeMode::System, Some(egui::Theme::Dark), false),
-    ] {
+    for (name, mode, system, light) in
+        [("dark", ThemeMode::Dark, Some(egui::Theme::Light), false), ("system-dark", ThemeMode::System, Some(egui::Theme::Dark), false)]
+    {
         harness.state_mut().run("ui.theme", json!({"mode": mode.id()})).unwrap();
         harness.input_mut().system_theme = system;
         harness.input_mut().events.push(Event::PointerMoved(pos2(1550.0, 950.0)));

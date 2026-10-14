@@ -399,7 +399,6 @@ fn params_for(path: &str, id: &str) -> Value {
 }
 
 const MENU_WINDOWS: &[(&str, &str)] = &[
-    ("Setup > Appearance", "window.ui_customization"),
     ("Setup > Hardware...", "window.playback_engine"),
     ("Setup > Playback Engine...", "window.playback_engine"),
     ("Setup > I/O...", "window.io_setup"),

@@ -318,7 +318,7 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
         let [left, right] = cols else { return };
         match page {
             Page::Display => {
-                group(left, q, "Basics", &["Organize Plugin Menus By", "UI Theme", "Interface Scale", "Track Color Tint"], |ui| {
+                group(left, q, "Basics", &["Organize Plugin Menus By", "Interface Scale", "Track Color Tint"], |ui| {
                     row(ui, q, "Organize Plugin Menus By", |ui| {
                         combo(
                             ui,
@@ -331,13 +331,6 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                                 ("category_manufacturer", "Category and Manufacturer"),
                             ],
                         )
-                    });
-                    row(ui, q, "UI Theme", |ui| {
-                        egui::ComboBox::from_id_salt("pref_theme").width(200.0).selected_text(a.theme.label()).show_ui(ui, |ui| {
-                            for m in ThemeMode::ALL {
-                                ui.selectable_value(&mut a.theme, m, m.label());
-                            }
-                        });
                     });
                     row(ui, q, "Interface Scale", |ui| {
                         ui.add(egui::Slider::new(&mut a.ui_scale, 0.75..=1.5).step_by(0.05).custom_formatter(|v, _| format!("{:.0} %", v * 100.0)));

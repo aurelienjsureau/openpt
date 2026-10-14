@@ -579,7 +579,10 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
         let vt = unsafe { &**(component as *const *const UnknownVtbl) };
         (unsafe { (vt.query_interface)(component, &iid, &mut out) } == 0 && !out.is_null()).then_some(out)
     };
-    let entry = query(iid(0x1281_4E54, 0xA1CE_4076, 0x82B9_6813, 0x1695_0BD6))?;
+    let Some(entry) = query(iid(0x1281_4E54, 0xA1CE_4076, 0x82B9_6813, 0x1695_0BD6)) else {
+        log::info!("ARA: no IPlugInEntryPoint on this component");
+        return None;
+    };
     let evt = unsafe { &**(entry as *const *const EntryPointVtbl) };
     let factory = unsafe { (evt.get_factory)(entry).as_ref() };
     let Some(factory) = factory else {
@@ -587,7 +590,9 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
         return None;
     };
     let mut docs = DOCS.lock().unwrap_or_else(PoisonError::into_inner);
+    log::info!("ARA: factory {} ({} clips on track {})", factory_key(factory), track.clips.len(), track.track);
     let Some(doc) = document(&mut docs, factory) else {
+        log::warn!("ARA: no document for {}", factory_key(factory));
         unsafe { (evt.base.release)(entry) };
         return None;
     };
@@ -603,7 +608,11 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
         None => unsafe { (evt.bind_to_document_controller)(entry, doc.ctrl) },
     };
     unsafe { (evt.base.release)(entry) };
-    let ext = unsafe { ext.as_ref() }?;
+    let Some(ext) = (unsafe { ext.as_ref() }) else {
+        log::warn!("ARA: the plug-in refused the binding");
+        return None;
+    };
+    log::info!("ARA: bound to track {}", track.track);
     let rd =
         Renderer { playback: (ext.playbackRendererRef, ext.playbackRendererInterface), editor: (ext.editorRendererRef, ext.editorRendererInterface) };
     if let Some(seq) = doc.tracks.get_mut(&track.track) {

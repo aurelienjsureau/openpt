@@ -53,7 +53,7 @@ fn contrast(a: Color32, b: Color32) -> f64 {
 #[test]
 fn fader_scale_numbers_are_readable_and_clear_of_their_ticks() {
     let _palette = PALETTE.lock().unwrap_or_else(|e| e.into_inner());
-    for (mode, palette) in [(ThemeMode::Dark, Tokens::DARK), (ThemeMode::Light, Tokens::LIGHT)] {
+    for (mode, palette) in [(ThemeMode::Dark, Tokens::DARK)] {
         let harness = mix(mode);
         let output = harness.output();
         let numbers: Vec<_> =

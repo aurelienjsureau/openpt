@@ -1538,6 +1538,7 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
     });
     let area = egui::Area::new(key.with("area")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::new().fill(t.dialog_bg).stroke(Stroke::new(1.0, t.border)).corner_radius(2).inner_margin(6).show(ui, |ui| {
+            ui.set_max_width(if which == 0 { 70.0 } else { MINI_FADER_TRAVEL + 10.0 + 8.0 + 62.0 });
             let pans: Vec<f32> = if which == 1 { track.mixer.pan.iter().copied().take(2).collect() } else { vec![] };
             let rows = if which == 0 { 1 } else { pans.len().max(1) };
             for k in 0..rows {

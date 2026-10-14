@@ -1371,6 +1371,7 @@ impl Instance {
     #[cfg(target_arch = "x86_64")]
     pub fn ara_bind(&self, track: &openpt_dsp::AraTrack) -> Option<crate::ara::Binding> {
         if self.active {
+            log::info!("ARA: the instance is already active");
             return None;
         }
         unsafe { crate::ara::bind(self.component.as_ptr().cast(), track) }
