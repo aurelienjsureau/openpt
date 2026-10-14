@@ -221,8 +221,8 @@ pub fn fit_window_to_screen(ctx: &egui::Context) {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct DragSource(pub u64);
+#[derive(Debug, Clone)]
+pub struct DragSource(pub Vec<u64>);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MeterDisplay {

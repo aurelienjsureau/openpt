@@ -192,6 +192,9 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
     ui.ctx().memory_mut(|m| m.data.insert_temp(fkey, filter.clone()));
     let needle = filter.to_lowercase();
     let items: Vec<_> = items.into_iter().filter(|(_, n, _, _, _)| needle.is_empty() || n.to_lowercase().contains(&needle)).collect();
+    let files: Vec<u64> = items.iter().filter(|i| i.2).map(|i| i.0).collect();
+    let chosen: Vec<u64> = items.iter().filter(|i| i.2 && i.4).map(|i| i.0).collect();
+    let anchor_id = egui::Id::new("clip_list_anchor");
     egui::ScrollArea::vertical().id_salt("clips_scroll").auto_shrink([false, false]).show(ui, |ui| {
         for (id, name, whole, color, selected) in items {
             let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), if whole { Sense::click_and_drag() } else { Sense::click() });
@@ -217,7 +220,7 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
                 }
             });
             if whole {
-                resp.dnd_set_drag_payload(crate::DragSource(id));
+                resp.dnd_set_drag_payload(crate::DragSource(if selected { chosen.clone() } else { vec![id] }));
                 if resp.dragged() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 }
@@ -234,7 +237,21 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
                 t.text,
             );
             if resp.clicked() {
-                let _ = app.run("edit.select", if whole { json!({"sources": [id]}) } else { json!({"clips": [id]}) });
+                let m = ui.input(|i| i.modifiers);
+                let anchor: Option<u64> = ui.data(|d| d.get_temp(anchor_id));
+                let sources: Vec<u64> = match (whole, anchor.and_then(|a| files.iter().position(|f| *f == a)), files.iter().position(|f| *f == id)) {
+                    (true, Some(a), Some(b)) if m.shift => files[a.min(b)..=a.max(b)].to_vec(),
+                    (true, _, _) if m.command => {
+                        let mut s = chosen.clone();
+                        if selected { s.retain(|x| *x != id) } else { s.push(id) }
+                        s
+                    }
+                    _ => vec![id],
+                };
+                if !m.shift {
+                    ui.data_mut(|d| d.insert_temp(anchor_id, id));
+                }
+                let _ = app.run("edit.select", if whole { json!({"sources": sources}) } else { json!({"clips": [id]}) });
             }
         }
     });

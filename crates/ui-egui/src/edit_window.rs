@@ -1900,8 +1900,18 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     {
         let s = app.engine.session();
         let at = drag_snap(s, sample_at(s, tl, p.x).max(0), ui.input(|i| i.modifiers.command));
-        let spot = Spot::source(s, openpt_model::SourceId(src.0), track.id, at);
-        spot_or_run(app, spot);
+        let width = |id: u64| s.source(openpt_model::SourceId(id)).map_or(0, |x| usize::from(x.channels));
+        match src.0.as_slice() {
+            [one] if width(*one) == track.format.channels() => {
+                let spot = Spot::source(s, openpt_model::SourceId(*one), track.id, at);
+                spot_or_run(app, spot);
+            }
+            ids => {
+                if let Err(e) = app.run("clip.place_sources", json!({"sources": ids, "track": track.id.0, "at": at})) {
+                    app.ui.status = e;
+                }
+            }
+        }
     }
     if resp.dnd_hover_payload::<crate::DragSource>().is_some() {
         ui.painter().rect_stroke(lane, 0.0, Stroke::new(2.0, Tokens::current().accent), StrokeKind::Inside);

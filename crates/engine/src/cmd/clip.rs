@@ -161,6 +161,15 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"clip": id, "track": t}))
             }
         ),
+        cmd!(
+            "clip.place_sources",
+            "Place Audio Files",
+            [],
+            None,
+            "{sources: [id], track: id|name, at?: position} — as many mono files as the track has channels become one multichannel file; a multichannel file on a mono track is split over it and the mono tracks below; otherwise one file per track from `track` down",
+            always,
+            place_sources
+        ),
         cmd!("clip.capture", "Capture...", ["Clip"], Some("Cmd+R"), "{name?}", has_range, |e, p| {
             let name = str_param(p, "name").unwrap_or("Captured").to_string();
             let ids = clip_ids_param(e, p);
@@ -215,6 +224,80 @@ fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
         rendered += 1;
     }
     Ok(json!({"ratio": ratio, "rendered": rendered}))
+}
+
+fn common_stem(names: &[String]) -> String {
+    let first = names.first().map(String::as_str).unwrap_or("Audio");
+    let prefix_len = names.iter().skip(1).fold(first.len(), |n, other| first.bytes().zip(other.bytes()).take(n).take_while(|(a, b)| a == b).count());
+    let stem = first.get(..prefix_len).unwrap_or(first).trim_end_matches(['.', '_', '-', ' ']);
+    if stem.is_empty() { first.to_string() } else { stem.to_string() }
+}
+
+fn place_on(s: &mut openpt_model::Session, t: TrackId, src: openpt_model::SourceId, name: String, frames: Samples, at: Samples) -> Result<openpt_model::ClipId> {
+    let (sh, len) = (s.edit.edit_mode == openpt_model::EditMode::Shuffle, frames.max(1));
+    let at = if sh { crate::edit::shuffle_slot(s, t, at, &[]) } else { at };
+    if sh {
+        crate::edit::make_room(s, t, at, len).map_err(|why| bad("clip.place_sources", why))?;
+    }
+    let id = s.new_clip_id();
+    crate::edit::place_clip(s, t, openpt_model::Clip::audio(id, name, src, 0, at, len));
+    Ok(id)
+}
+
+fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.place_sources";
+    let ids: Vec<openpt_model::SourceId> =
+        p.get("sources").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(openpt_model::SourceId).collect()).unwrap_or_default();
+    if ids.is_empty() {
+        return Err(bad(id, "`sources` required"));
+    }
+    let at = position_param(e, id, p, "at")?.unwrap_or(e.session().edit.selection.start).max(0);
+    let track = track_param(e, id, p, "track")?.ok_or_else(|| bad(id, "`track` required"))?;
+    let s = e.session_mut();
+    let mut files = Vec::new();
+    for sid in &ids {
+        let src = s.source(*sid).ok_or_else(|| bad(id, "no such audio file"))?;
+        let audio = s.pool.get(*sid).cloned().ok_or_else(|| bad(id, format!("{} is not loaded", src.name)))?;
+        files.push((src.name.clone(), src.format, audio));
+    }
+    let audio_tracks: Vec<TrackId> = s.tracks.iter().filter(|t| t.kind == openpt_model::TrackKind::Audio).map(|t| t.id).collect();
+    let from = audio_tracks.iter().position(|t| *t == track).ok_or_else(|| bad(id, "audio files go on audio tracks"))?;
+    let widths: Vec<usize> = audio_tracks.iter().map(|t| s.track(*t).map_or(0, |x| x.format.channels())).collect();
+    let width = |i: usize| widths.get(i).copied().unwrap_or(0);
+    let mut placed = Vec::new();
+    let all_mono = files.iter().all(|f| f.2.buffer.num_channels() == 1);
+    if files.len() > 1 && all_mono && width(from) == files.len() {
+        let frames = files.iter().map(|f| f.2.frames()).max().unwrap_or(0);
+        let channels = files.iter().map(|f| f.2.buffer.channels.first().map(|c| { let mut c = c.clone(); c.resize(frames, 0.0); c }).unwrap_or_else(|| vec![0.0; frames])).collect();
+        let name = common_stem(&files.iter().map(|f| f.0.clone()).collect::<Vec<_>>());
+        let buf = openpt_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels };
+        let src = crate::io::add_source(s, &name, buf, None, files[0].1);
+        placed.push(place_on(s, track, src, name, i64::try_from(frames).unwrap_or(i64::MAX), at)?);
+    } else if files.len() == 1 && files[0].2.buffer.num_channels() > 1 && width(from) == 1 {
+        let (name, format, audio) = &files[0];
+        let n = audio.buffer.num_channels();
+        let targets: Vec<TrackId> = (from..audio_tracks.len()).take_while(|i| width(*i) == 1).take(n).filter_map(|i| audio_tracks.get(i).copied()).collect();
+        if targets.len() < n {
+            return Err(bad(id, format!("{name} has {n} channels: it needs {n} mono tracks from here down")));
+        }
+        let fmt = openpt_model::ChannelFormat::for_channels(n);
+        for (k, t) in targets.into_iter().enumerate() {
+            let ch_name = format!("{name}.{}", fmt.channel_label(k));
+            let buf = openpt_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels: vec![audio.buffer.channels.get(k).cloned().unwrap_or_default()] };
+            let src = crate::io::add_source(s, &ch_name, buf, None, *format);
+            placed.push(place_on(s, t, src, ch_name, i64::try_from(audio.frames()).unwrap_or(i64::MAX), at)?);
+        }
+    } else {
+        for (k, (name, _, audio)) in files.iter().enumerate() {
+            let t = match audio_tracks.get(from + k) {
+                Some(t) => *t,
+                None => s.add_track(openpt_model::TrackKind::Audio, openpt_model::ChannelFormat::for_channels(audio.buffer.num_channels().min(2)), Some(name)),
+            };
+            let src = ids[k];
+            placed.push(place_on(s, t, src, name.clone(), i64::try_from(audio.frames()).unwrap_or(i64::MAX), at)?);
+        }
+    }
+    Ok(json!({"clips": placed}))
 }
 
 fn remove_warp(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -359,6 +442,35 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn mono_pairs_join_on_stereo_tracks_and_stereo_files_split_over_mono_tracks() {
+        use openpt_audio_io::{AudioBuffer, FileFormat};
+        let mut e = crate::Engine::default();
+        let rate = e.session().sample_rate.hz();
+        let s = e.session_mut();
+        let l = crate::io::add_source(s, "Gtr.L", AudioBuffer { sample_rate: rate, channels: vec![vec![0.5; 100]] }, None, FileFormat::Wav);
+        let r = crate::io::add_source(s, "Gtr.R", AudioBuffer { sample_rate: rate, channels: vec![vec![-0.5; 80]] }, None, FileFormat::Wav);
+        let st = e.execute("track.new", &json!({"format": "stereo"})).unwrap()["tracks"][0].as_u64().unwrap();
+        e.execute("clip.place_sources", &json!({"sources": [l.0, r.0], "track": st, "at": 0})).unwrap();
+        let clip = e.session().track(TrackId(st)).unwrap().clips()[0].clone();
+        assert_eq!(clip.name, "Gtr");
+        let openpt_model::ClipContent::Audio { source, .. } = clip.content else { panic!("audio clip") };
+        let joined = e.session().pool.get(source).unwrap().clone();
+        assert_eq!(joined.buffer.num_channels(), 2);
+        assert_eq!(joined.frames(), 100, "the shorter file is padded");
+        assert_eq!(joined.buffer.channels[1][0], -0.5);
+        assert_eq!(joined.buffer.channels[1][90], 0.0);
+        let monos = e.execute("track.new", &json!({"format": "mono", "count": 2})).unwrap()["tracks"].clone();
+        let (a, b) = (monos[0].as_u64().unwrap(), monos[1].as_u64().unwrap());
+        e.execute("clip.place_sources", &json!({"sources": [source.0], "track": a, "at": 0})).unwrap();
+        let names = |e: &crate::Engine, t: u64| e.session().track(TrackId(t)).unwrap().clips().iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&e, a), ["Gtr.L"]);
+        assert_eq!(names(&e, b), ["Gtr.R"]);
+        assert!(e.execute("clip.place_sources", &json!({"sources": [source.0], "track": b, "at": 0})).is_err(), "one mono track is not enough");
+        e.execute("edit.undo", &json!({})).unwrap();
+        assert!(names(&e, a).is_empty() && names(&e, b).is_empty(), "one undo step");
+    }
+
+    #[test]
     fn elastic_warp_renders_and_remove_warp_restores() {
         let mut e = crate::demo::demo_engine();
         let pad = e.session().track_by_name("Pad").map(|t| t.id.0).unwrap();
@@ -378,9 +490,9 @@ mod tests {
     }
 
     fn elastic_clip(source_len: usize, tone_at: usize, clip_len: i64) -> (crate::Engine, TrackId, ClipId) {
-        use openpt_model::{ChannelFormat, Clip, Session, TrackKind};
+        use openpt_model::{ChannelFormat, Clip, Session};
         let mut s = Session::default();
-        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Elastic"));
+        let t = s.add_track(openpt_model::TrackKind::Audio, ChannelFormat::Mono, Some("Elastic"));
         let samples = (0..source_len).map(|i| if i >= tone_at { (i as f32 * 0.2).sin() * 0.4 } else { 0.0 }).collect();
         let buf = openpt_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![samples] };
         let src = crate::io::add_source(&mut s, "Tone", buf, None, openpt_audio_io::FileFormat::Wav);
