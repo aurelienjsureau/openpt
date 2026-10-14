@@ -311,13 +311,42 @@ pub(crate) fn click_track(app: &mut SoundApp, id: TrackId, mods: egui::Modifiers
 }
 
 fn scroll_and_zoom(app: &mut SoundApp, ui: &Ui, area: Rect, tl: Rect) {
-    let (delta, zoom, pointer, scrolling) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos(), i.is_scrolling()));
+    let (delta, zoom, pointer, scrolling) = ui.input(|i| {
+        let pinch = i.events.iter().any(|e| matches!(e, egui::Event::Zoom(_)));
+        (i.smooth_scroll_delta, if pinch { i.zoom_delta() } else { 1.0 }, i.pointer.hover_pos(), i.is_scrolling())
+    });
     let mut swipe = if scrolling { app.edit_layout.swipe } else { egui::Vec2::ZERO };
     if swipe.max_elem() < 6.0 {
         swipe += delta.abs();
     }
     app.edit_layout.swipe = swipe;
     let Some(p) = pointer.filter(|_| tl.is_positive() && ui.rect_contains_pointer(area)) else { return };
+    let (mods, wheel) = ui.input(|i| {
+        let (mut mods, mut wheel) = (i.modifiers, 0.0f32);
+        for e in &i.events {
+            if let egui::Event::MouseWheel { unit, delta, modifiers, .. } = e {
+                mods |= *modifiers;
+                wheel += match unit {
+                    egui::MouseWheelUnit::Point => delta.y / 40.0,
+                    egui::MouseWheelUnit::Line => delta.y,
+                    egui::MouseWheelUnit::Page => delta.y * 10.0,
+                };
+            }
+        }
+        (mods, wheel)
+    });
+    if mods.alt && (mods.ctrl || mods.command) {
+        if wheel != 0.0 {
+            let _ = app.engine.execute("view.waveform_zoom", &json!({"factor": 1.25f32.powf(wheel)}));
+        }
+        return;
+    }
+    if (mods.alt || mods.ctrl || mods.command) && !mods.shift {
+        if wheel != 0.0 {
+            let _ = app.engine.execute("view.zoom_by", &json!({"factor": 1.2f32.powf(wheel), "x": p.x.clamp(tl.min.x, tl.max.x) - tl.min.x}));
+        }
+        return;
+    }
     if zoom != 1.0 {
         let _ = app.engine.execute("view.zoom_by", &json!({"factor": zoom, "x": p.x.clamp(tl.min.x, tl.max.x) - tl.min.x}));
     }
