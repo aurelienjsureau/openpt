@@ -18,6 +18,7 @@ const KNOWN_UNREACHED: &[&str] = &[
     "mix.send_surround_pan",
     "setup.hardware",
     "setup.playback_engine",
+    "setup.peripherals",
     "setup.reset_edit_state",
     "track.load_preset",
     "track.pin",

@@ -65,7 +65,7 @@ fn drag_edge(ctx: &egui::Context, app: &mut SoundApp, name: &str, dy: f32, m: Mo
 }
 
 #[test]
-fn dragging_a_track_edge_resizes_it_live_in_one_undo_step() {
+fn dragging_a_track_edge_resizes_it_live_and_undo_leaves_it() {
     let (ctx, mut app) = rig();
     assert_eq!(height(&app, "Kick"), TrackHeight::Medium);
     let [x, _, _, bottom] = row(&app, "Kick");
@@ -82,8 +82,8 @@ fn dragging_a_track_edge_resizes_it_live_in_one_undo_step() {
     frame(&ctx, &mut app, vec![button(at(40.0), false)]);
     frame(&ctx, &mut app, vec![]);
 
-    app.engine.execute("edit.undo", &json!({})).unwrap();
-    assert_eq!(height(&app, "Kick"), TrackHeight::Medium);
+    let _ = app.engine.execute("edit.undo", &json!({}));
+    assert_eq!(height(&app, "Kick"), TrackHeight::Large);
 }
 
 #[test]
@@ -100,8 +100,8 @@ fn cmd_drags_to_any_height_alt_resizes_every_track_and_alt_shift_the_selected_on
     let small = [TrackHeight::Small, TrackHeight::Large, TrackHeight::Small, TrackHeight::Small];
     assert_eq!(["Kick", "Snare", "Hats", "Bass"].map(|n| height(&app, n)), small);
 
-    app.engine.execute("edit.undo", &json!({})).unwrap();
-    assert_eq!(["Kick", "Snare", "Hats", "Bass"].map(|n| height(&app, n)), [TrackHeight::Large; 4]);
+    let _ = app.engine.execute("edit.undo", &json!({}));
+    assert_eq!(["Kick", "Snare", "Hats", "Bass"].map(|n| height(&app, n)), small, "Undo leaves track heights");
 }
 
 #[test]

@@ -495,7 +495,10 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                     crate::plugin_ui::header(app, ui, tid, slot, info, &ins, |app, ui| preset_menu(app, ui, tid, slot, info, &ins));
                     ui.add_space(4.0);
                     let mut changes: Vec<(String, f32)> = Vec::new();
-                    crate::plugin_ui::panel(ui, info, &ins, |id, v| changes.push((id.to_string(), v)));
+                    let room = (ui.ctx().content_rect().height() - 160.0).max(120.0);
+                    egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+                        crate::plugin_ui::panel(ui, info, &ins, |id, v| changes.push((id.to_string(), v)));
+                    });
                     for (id, v) in changes {
                         let _ = app.engine.execute_merged(
                             "mix.insert_param",

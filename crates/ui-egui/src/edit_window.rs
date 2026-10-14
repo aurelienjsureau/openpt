@@ -569,7 +569,7 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                             Align2::LEFT_CENTER,
                             format!("{}", (ev.bpm * 100.0).round() / 100.0),
                             bold(11.0),
-                            Color32::from_rgb(230, 240, 230),
+                            Color32::from_rgb(94, 177, 142),
                         );
                     }
                 }
@@ -583,7 +583,7 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                         Align2::LEFT_CENTER,
                         format!("{}/{}", ev.numerator, ev.denominator),
                         bold(11.0),
-                        Color32::from_rgb(230, 236, 240),
+                        Color32::from_rgb(120, 186, 201),
                     );
                 }
             }
@@ -591,14 +591,14 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                 tempo_editor(app, ui, &painter, &s, tl, row);
             }
             "key" => {
-                painter.rect_filled(row, 0.0, Color32::from_rgb(64, 52, 88));
+                painter.rect_filled(row, 0.0, Color32::from_rgb(112, 77, 17));
                 if s.key_signatures.is_empty() {
-                    painter.text(pos2(tl.min.x + 6.0, row.center().y), Align2::LEFT_CENTER, "C major", bold(11.0), Color32::from_rgb(220, 214, 236));
+                    painter.text(pos2(tl.min.x + 6.0, row.center().y), Align2::LEFT_CENTER, "C major", bold(11.0), Color32::from_rgb(194, 162, 107));
                 }
                 for (at, k) in &s.key_signatures {
                     let x = x_of(&s, tl, *at);
                     painter.line_segment([pos2(x, row.min.y + 2.0), pos2(x, row.max.y - 2.0)], Stroke::new(2.0, Color32::from_rgb(200, 180, 240)));
-                    painter.text(pos2(x + 5.0, row.center().y), Align2::LEFT_CENTER, k, bold(11.0), Color32::from_rgb(236, 230, 250));
+                    painter.text(pos2(x + 5.0, row.center().y), Align2::LEFT_CENTER, k, bold(11.0), Color32::from_rgb(194, 162, 107));
                 }
                 let resp = ui.interact(row, ui.id().with("key_ruler"), Sense::click());
                 if resp.double_clicked()
@@ -620,7 +620,7 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                     "markers5" => 5,
                     _ => 1,
                 };
-                painter.rect_filled(row, 0.0, if id == "chords" { Color32::from_rgb(40, 56, 60) } else { t.marker_ruler });
+                painter.rect_filled(row, 0.0, if id == "chords" { Color32::from_rgb(70, 98, 22) } else { t.marker_ruler });
                 for m in s.markers.iter().filter(|m| m.ruler == lane || (lane == 1 && m.ruler == 0)) {
                     let x = x_of(&s, tl, m.start);
                     let col = m.color.map_or(Color32::from_rgb(232, 200, 64), rgb);
@@ -1856,13 +1856,15 @@ fn draw_live_take(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &
 }
 
 fn grid_veil(line: Color32, bg: Color32) -> Color32 {
-    let level = |c: Color32| (f32::from(c.r()) + f32::from(c.g()) + f32::from(c.b())) / 3.0;
-    let (l, b) = (level(line), level(bg));
-    if l > b {
-        Color32::from_white_alpha(((l - b) / (255.0 - b) * 255.0).round() as u8)
-    } else {
-        Color32::from_black_alpha(((b - l) / b.max(1.0) * 255.0).round() as u8)
+    let ch = |c: Color32| [f32::from(c.r()), f32::from(c.g()), f32::from(c.b())];
+    let (l, b) = (ch(line), ch(bg));
+    let level = |c: [f32; 3]| (c[0] + c[1] + c[2]) / 3.0;
+    if level(l) <= level(b) {
+        return Color32::from_black_alpha(((level(b) - level(l)) / level(b).max(1.0) * 255.0).round() as u8);
     }
+    let a = (0..3).map(|i| (l[i] - b[i]).max(0.0) / (255.0 - b[i]).max(1.0)).fold(0.0f32, f32::max).max(1e-3);
+    let top = |i: usize| (b[i] + (l[i] - b[i]) / a).clamp(0.0, 255.0).round() as u8;
+    Color32::from_rgba_unmultiplied(top(0), top(1), top(2), (a * 255.0).round() as u8)
 }
 
 fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track, clip: &Clip, tl: Rect, lane: Rect, dim: bool) {
