@@ -258,7 +258,16 @@ impl Default for EditState {
             delay_compensation: true,
             keyboard_focus: "commands".into(),
             timeline_selection: Range::default(),
-            flags: ["view.clip.name", "view.clip.gain_line", "waveform.peak", "view.clip.overlap_shadows", "view.marker.ruler_lines"]
+            flags: [
+                "view.clip.name",
+                "view.clip.gain_line",
+                "waveform.peak",
+                "view.clip.overlap_shadows",
+                "view.marker.ruler_lines",
+                "edit_view.inserts_ae",
+                "edit_view.sends_ae",
+                "edit_view.io",
+            ]
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),

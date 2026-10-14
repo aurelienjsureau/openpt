@@ -282,7 +282,7 @@ pub fn clip_gain_to_pos(db: f32) -> f32 {
     if db >= -36.0 { 0.25 + (db + 36.0) / 72.0 * 0.75 } else { (1.0 - ((-36.0 - db) / 108.0).powf(1.0 / 1.5)) * 0.25 }
 }
 
-const FADER_CAP_H: f32 = 40.0;
+const FADER_CAP_H: f32 = 28.0;
 
 pub fn fader_slot(r: Rect) -> Rect {
     Rect::from_center_size(r.center(), vec2(4.0, r.height() - FADER_CAP_H))
@@ -293,7 +293,7 @@ pub fn fader(ui: &mut Ui, r: Rect, db: f32, id: egui::Id) -> Option<f32> {
     let resp = ui.interact(r, id, Sense::click_and_drag());
     let p = ui.painter();
     let slot = fader_slot(r);
-    let cap_w = (r.width() * 0.4).clamp(16.0, 18.0);
+    let cap_w = (r.width() * 0.4).clamp(13.0, 15.0);
     p.rect_filled(slot, 2.0, t.fader_track);
     p.vline(slot.min.x + 0.5, slot.min.y + 1.0..=slot.max.y - 1.0, Stroke::new(1.0, Color32::from_black_alpha(120)));
     p.vline(slot.max.x + 0.5, slot.min.y + 2.0..=slot.max.y - 2.0, Stroke::new(1.0, Color32::from_white_alpha(18)));

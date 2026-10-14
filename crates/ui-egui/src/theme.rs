@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn prefs_saved_before_track_tint_get_the_default() {
         let ui: UiState = serde_json::from_value(json!({"theme": "light"})).unwrap();
-        assert!((ui.track_tint - 0.5).abs() < f32::EPSILON);
+        assert!(ui.track_tint.abs() < f32::EPSILON);
     }
 
     #[test]

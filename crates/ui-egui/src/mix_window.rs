@@ -10,7 +10,7 @@ use openpt_playback::MeterSnapshot;
 use serde_json::json;
 
 pub fn strip_width(narrow: bool) -> f32 {
-    if narrow { 64.0 } else { 98.0 }
+    if narrow { 64.0 } else { 88.0 }
 }
 
 pub fn show(app: &mut SoundApp, ui: &mut Ui) {
@@ -383,14 +383,18 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     let bottom_h = 64.0;
     let fh = (r.max.y - bottom_h - y).max(120.0);
     let wide_meter = (if track.kind == TrackKind::Master { app.engine.session().main_format() } else { track.format }).channels() > 2;
-    let fr = Rect::from_min_size(pos2(x0, y), vec2(inner_w * if wide_meter { 0.45 } else { 0.6 }, fh));
+    let thin_bars = if track.kind == TrackKind::Master { 2.0 } else { track.channels().clamp(1, 2) as f32 };
+    let thin_w = thin_bars * 6.0;
+    let fader_w = if wide_meter { inner_w * 0.45 } else { inner_w - thin_w - if narrow { 4.0 } else { 20.0 } };
+    let fr = Rect::from_min_size(pos2(x0, y), vec2(fader_w, fh));
     if let Some(db) = fader(ui, fr, track.mixer.volume_db, ui.id().with(("fader", id.0))) {
         app.gesture = Some(crate::Gesture::Fader { track: id, start_db: track.mixer.volume_db });
         let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
     }
     let md = app.meters.get(&id).copied().unwrap_or_default();
     let slot = fader_slot(fr);
-    let mr = Rect::from_min_max(pos2(fr.max.x + 4.0, slot.min.y - 5.0), pos2(x0 + inner_w - 2.0, slot.max.y + if wide_meter { 17.0 } else { 1.0 }));
+    let meter_left = if wide_meter { fr.max.x + 4.0 } else { x0 + inner_w - 1.0 - thin_w };
+    let mr = Rect::from_min_max(pos2(meter_left, slot.min.y - 5.0), pos2(x0 + inner_w - 1.0, slot.max.y + if wide_meter { 17.0 } else { 1.0 }));
     if !narrow && !wide_meter {
         meter_scale(ui.painter(), mr, mr.min.x - 1.0);
     }
