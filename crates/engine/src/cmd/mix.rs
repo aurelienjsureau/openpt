@@ -15,6 +15,20 @@ pub fn specs() -> Vec<CommandSpec> {
             |tr| tr.mixer.mute
         )),
         cmd!("mix.solo", "Solo", [], Some("Shift+S"), "{tracks?, value?: bool, exclusive?: bool}", has_selection, solo),
+        cmd!("mix.record_safe", "Record Safe", [], None, "{tracks?, value?: bool}", has_selection, |e, p| toggle(
+            e,
+            p,
+            "mix.record_safe",
+            |s, t, v| {
+                if let Some(tr) = s.track_mut(t) {
+                    tr.mixer.record_safe = v;
+                    if v {
+                        tr.mixer.record_arm = false;
+                    }
+                }
+            },
+            |tr| tr.mixer.record_safe
+        )),
         cmd!("mix.solo_safe", "Solo Safe", [], None, "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
             p,
@@ -42,7 +56,7 @@ pub fn specs() -> Vec<CommandSpec> {
             e,
             p,
             "mix.record_arm",
-            |s, t, v| set_grouped(s, t, "record", |tr| if tr.kind.has_playlist() {
+            |s, t, v| set_grouped(s, t, "record", |tr| if tr.kind.has_playlist() && !(v && tr.mixer.record_safe) {
                 tr.mixer.record_arm = v
             }),
             |tr| tr.mixer.record_arm

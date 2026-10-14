@@ -1009,8 +1009,19 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
             (HeaderKey::Mute, m.mute, implied, "mix.mute", mixes),
         ];
         for (i, (key, lit, implied, cmd, shown)) in keys.into_iter().enumerate() {
-            if shown && header_toggle(ui, at(23.0 + i as f32 * 26.0, 20.0, 16.0, 16.0), id, key, lit, implied).clicked() {
-                let _ = app.run(cmd, json!({"track": id.0}));
+            if !shown {
+                continue;
+            }
+            let r = at(23.0 + i as f32 * 26.0, 20.0, 16.0, 16.0);
+            let resp = header_toggle(ui, r, id, key, lit, implied);
+            let safe = match cmd {
+                "mix.solo" => m.solo_safe,
+                "mix.record_arm" => m.record_safe,
+                _ => false,
+            };
+            crate::mix_window::safe_mark(ui, r, safe);
+            if resp.clicked() {
+                crate::mix_window::track_button(app, ui, cmd, id);
             }
         }
     }
@@ -1283,6 +1294,89 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
             ui.painter().text(pos2(vr.max.x - 6.5, vr.min.y + y), Align2::RIGHT_CENTER, value, bold(10.0), ink);
         }
         ui.painter().hline(vr.min.x + 7.0..=vr.max.x - 6.0, vr.min.y + 14.5, Stroke::new(1.0, Color32::from_gray(35)));
+        let (vol, pan) = (m.volume_db, m.pan.clone());
+        let mid = vr.min.y + 14.5;
+        for (i, hr) in [Rect::from_min_max(vr.min, pos2(vr.max.x, mid)), Rect::from_min_max(pos2(vr.min.x, mid), vr.max)].into_iter().enumerate() {
+            let tip = if i == 0 { "Volume: drag (Ctrl: fine) · Alt-click: 0 dB" } else { "Pan: drag (Ctrl: fine) · Alt-click: centre" };
+            let resp = ui.interact(hr, ui.id().with(("io_readout", id.0, i)), Sense::click_and_drag()).on_hover_text(tip);
+            if resp.hovered() || resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+            }
+            let fine = ui.input(|x| x.modifiers.command || x.modifiers.ctrl);
+            let alt_click = resp.clicked() && crate::mix_window::click_mods(&ui).alt;
+            if resp.clicked() && !alt_click {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("io_mini_fader"), (id.0, i, hr)));
+                let pass = ui.ctx().cumulative_pass_nr();
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("io_mini_fader_opened"), pass));
+            }
+            let dy = resp.drag_delta().y;
+            if i == 0 && (alt_click || (resp.dragged() && dy != 0.0)) {
+                let db = if alt_click { 0.0 } else { crate::mix_window::dragged_send_db(vol, dy, fine) };
+                let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
+            }
+            if i == 1 && (alt_click || (resp.dragged() && dy != 0.0)) {
+                for (k, p0) in pan.iter().enumerate().take(if pan.len() == 2 { 2 } else { 1 }) {
+                    let v = if alt_click { if pan.len() == 2 { [-1.0, 1.0][k] } else { 0.0 } } else { (p0 - dy * if fine { 0.001 } else { 0.01 }).clamp(-1.0, 1.0) };
+                    let _ = app.engine.execute_merged("mix.pan", &json!({"track": id.0, "pan": v, "index": k}), &format!("pan:{}:{k}", id.0));
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
+    let key = egui::Id::new("io_mini_fader");
+    let Some((tid, which, anchor)) = ctx.data(|d| d.get_temp::<(u64, usize, Rect)>(key)) else { return };
+    let Some(track) = app.engine.session().track(TrackId(tid)).cloned() else {
+        ctx.data_mut(|d| d.remove::<(u64, usize, Rect)>(key));
+        return;
+    };
+    let t = Tokens::current();
+    let area = egui::Area::new(key.with("area")).order(egui::Order::Foreground).fixed_pos(anchor.left_bottom() + vec2(0.0, 2.0)).show(ctx, |ui| {
+        egui::Frame::new().fill(t.dialog_bg).stroke(Stroke::new(1.0, t.border)).corner_radius(2).inner_margin(6).show(ui, |ui| {
+            let pans: Vec<f32> = if which == 1 { track.mixer.pan.iter().copied().take(2).collect() } else { vec![] };
+            let rows = if which == 0 { 1 } else { pans.len().max(1) };
+            for k in 0..rows {
+                ui.horizontal(|ui| {
+                    let (pos, label) = if which == 0 {
+                        (openpt_model::fader_db_to_pos(track.mixer.volume_db), format!("{} dB", crate::widgets::db_text(track.mixer.volume_db)))
+                    } else {
+                        let p = pans.get(k).copied().unwrap_or(0.0);
+                        ((p + 1.0) * 0.5, crate::widgets::pan_text(p))
+                    };
+                    let (r, resp) = ui.allocate_exact_size(vec2(170.0, 18.0), Sense::click_and_drag());
+                    ui.painter().rect_filled(Rect::from_center_size(r.center(), vec2(r.width() - 10.0, 4.0)), 2.0, t.fader_track);
+                    let x = r.min.x + 5.0 + (r.width() - 10.0) * pos;
+                    ui.painter().rect(Rect::from_center_size(pos2(x, r.center().y), vec2(9.0, 16.0)), 2.0, Color32::from_gray(200), Stroke::new(1.0, Color32::from_gray(40)), StrokeKind::Inside);
+                    ui.painter().vline(x, r.center().y - 5.0..=r.center().y + 5.0, Stroke::new(1.0, Color32::from_gray(40)));
+                    let alt = resp.clicked() && crate::mix_window::click_mods(ui).alt;
+                    let fine = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                    let new_pos = if alt {
+                        Some(if which == 0 { openpt_model::fader_db_to_pos(0.0) } else if rows == 2 { k as f32 } else { 0.5 })
+                    } else if resp.dragged() {
+                        Some((pos + resp.drag_delta().x / (r.width() - 10.0) * if fine { 0.1 } else { 1.0 }).clamp(0.0, 1.0))
+                    } else if resp.clicked() {
+                        resp.interact_pointer_pos().map(|p| ((p.x - r.min.x - 5.0) / (r.width() - 10.0)).clamp(0.0, 1.0))
+                    } else {
+                        None
+                    };
+                    if let Some(np) = new_pos {
+                        if which == 0 {
+                            let db = openpt_model::fader_pos_to_db(np).clamp(-144.0, 12.0);
+                            let _ = app.engine.execute_merged("mix.volume", &json!({"track": tid, "db": db}), &format!("fader:{tid}"));
+                        } else {
+                            let _ = app.engine.execute_merged("mix.pan", &json!({"track": tid, "pan": np * 2.0 - 1.0, "index": k}), &format!("pan:{tid}:{k}"));
+                        }
+                    }
+                    crate::widgets::value_box(ui, |ui| ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(label).color(t.field_text).font(bold(10.5)))));
+                });
+            }
+        });
+    });
+    let opened: u64 = ctx.data(|d| d.get_temp(egui::Id::new("io_mini_fader_opened"))).unwrap_or(0);
+    let fresh = ctx.cumulative_pass_nr() <= opened + 1;
+    if (!fresh && area.response.clicked_elsewhere()) || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        ctx.data_mut(|d| d.remove::<(u64, usize, Rect)>(key));
     }
 }
 

@@ -482,6 +482,8 @@ pub struct Mixer {
     #[serde(default)]
     pub solo_safe: bool,
     #[serde(default)]
+    pub record_safe: bool,
+    #[serde(default)]
     pub record_arm: bool,
     #[serde(default)]
     pub input_monitor: bool,
@@ -517,6 +519,7 @@ impl Mixer {
             mute: false,
             solo: false,
             solo_safe: false,
+            record_safe: false,
             record_arm: false,
             input_monitor: false,
             phase_invert: false,

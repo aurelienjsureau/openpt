@@ -414,10 +414,12 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     row.spacing_mut().item_spacing.x = 6.0;
     if track.kind.has_playlist() {
         if text_toggle(&mut row, vec2(bw, 18.0), "I", track.mixer.input_monitor, t.input, "Input monitoring").clicked() {
-            let _ = app.run("mix.input_monitor", json!({"track": id.0}));
+            track_button(app, &row, "mix.input_monitor", id);
         }
-        if rec_toggle(&mut row, vec2(bw, 18.0), track.mixer.record_arm, "Record enable").clicked() {
-            let _ = app.run("mix.record_arm", json!({"track": id.0}));
+        let rr = rec_toggle(&mut row, vec2(bw, 18.0), track.mixer.record_arm, "Record enable · Ctrl-click: Record Safe");
+        safe_mark(&row, rr.rect, track.mixer.record_safe);
+        if rr.clicked() {
+            track_button(app, &row, "mix.record_arm", id);
         }
     }
     y += 22.0;
@@ -426,11 +428,13 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     );
     row.spacing_mut().item_spacing.x = 6.0;
     if track.kind != TrackKind::Master {
-        if text_toggle(&mut row, vec2(bw, 18.0), "S", track.mixer.solo, t.solo, "Solo").clicked() {
-            let _ = app.run("mix.solo", json!({"track": id.0}));
+        let sr = text_toggle(&mut row, vec2(bw, 18.0), "S", track.mixer.solo, t.solo, "Solo · Ctrl-click: Solo Safe · Alt-click: all tracks");
+        safe_mark(&row, sr.rect, track.mixer.solo_safe);
+        if sr.clicked() {
+            track_button(app, &row, "mix.solo", id);
         }
-        if text_toggle(&mut row, vec2(bw, 18.0), "M", track.mixer.mute, t.mute, "Mute").clicked() {
-            let _ = app.run("mix.mute", json!({"track": id.0}));
+        if text_toggle(&mut row, vec2(bw, 18.0), "M", track.mixer.mute, t.mute, "Mute · Alt-click: all tracks").clicked() {
+            track_button(app, &row, "mix.mute", id);
         }
     }
     y += 26.0;
@@ -776,8 +780,50 @@ fn run_pick(app: &mut SoundApp, ui: &Ui, cmd: &str, params: serde_json::Value) {
     ui.close();
 }
 
+pub(crate) fn safe_mark(ui: &Ui, r: Rect, on: bool) {
+    if on {
+        ui.painter().rect_filled(r.shrink(1.0), 2.0, egui::Color32::from_black_alpha(120));
+        ui.painter().line_segment([r.left_bottom() + vec2(2.0, -2.0), r.right_top() + vec2(-2.0, 2.0)], Stroke::new(1.5, egui::Color32::from_white_alpha(170)));
+    }
+}
+
+pub(crate) fn click_mods(ui: &Ui) -> egui::Modifiers {
+    ui.input(|i| {
+        let mut m = i.modifiers;
+        for e in &i.events {
+            if let egui::Event::PointerButton { modifiers, .. } = e {
+                m = m | *modifiers;
+            }
+        }
+        m
+    })
+}
+
+pub(crate) fn track_button(app: &mut SoundApp, ui: &Ui, cmd: &str, id: TrackId) {
+    let m = click_mods(ui);
+    let Some(mx) = app.engine.session().track(id).map(|t| t.mixer.clone()) else { return };
+    let (cmd, on) = match cmd {
+        "mix.solo" if m.command || m.ctrl => ("mix.solo_safe", mx.solo_safe),
+        "mix.record_arm" if m.command || m.ctrl => ("mix.record_safe", mx.record_safe),
+        "mix.solo" => (cmd, mx.solo),
+        "mix.mute" => (cmd, mx.mute),
+        "mix.record_arm" => (cmd, mx.record_arm),
+        "mix.input_monitor" => (cmd, mx.input_monitor),
+        _ => (cmd, false),
+    };
+    let tracks = scoped_tracks(app, ui, id);
+    let r = if tracks.len() > 1 {
+        app.run(cmd, json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "value": !on}))
+    } else {
+        app.run(cmd, json!({"track": id.0}))
+    };
+    if let Err(e) = r {
+        app.ui.status = e;
+    }
+}
+
 pub(crate) fn scoped_tracks(app: &SoundApp, ui: &Ui, id: TrackId) -> Vec<TrackId> {
-    let m = ui.input(|i| i.modifiers);
+    let m = click_mods(ui);
     let s = app.engine.session();
     if m.alt && m.shift && s.edit.selected_tracks.contains(&id) {
         return s.edit.selected_tracks.clone();
@@ -1222,7 +1268,7 @@ fn send_options_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, 
     }
 }
 
-fn dragged_send_db(db: f32, dy: f32, fine: bool) -> f32 {
+pub(crate) fn dragged_send_db(db: f32, dy: f32, fine: bool) -> f32 {
     let per_point = if fine { 0.0004 } else { 0.003 };
     openpt_model::fader_pos_to_db(openpt_model::fader_db_to_pos(db) - dy * per_point)
 }

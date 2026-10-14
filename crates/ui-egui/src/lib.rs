@@ -1213,6 +1213,7 @@ impl SoundApp {
         score_editor::show(self, &ctx);
         palette::show(self, &ctx);
         mix_window::pending_editor(self, &ctx);
+        edit_window::io_mini_fader(self, &ctx);
         import_jobs::show(self, &ctx);
         dashboard::show(self, &ctx);
         preferences::show(self, &ctx);
