@@ -1023,7 +1023,7 @@ pub(crate) fn send_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: us
 
 pub(crate) fn send_window(app: &mut SoundApp, ctx: &egui::Context) {
     let busy_id = egui::Id::new("send_window_escape");
-    let busy = ctx.data(|d| d.get_temp(busy_id)).unwrap_or(false) || app.dialogs.open.is_some() || app.ui.show_search;
+    let busy = ctx.data(|d| d.get_temp(busy_id)).unwrap_or(false) || app.modal_open() || app.ui.show_search;
     if !busy && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.ui.send_window = None;
     }

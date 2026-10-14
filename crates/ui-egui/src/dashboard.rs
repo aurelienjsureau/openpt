@@ -1,6 +1,6 @@
 use crate::SoundApp;
 use crate::theme::{Tokens, bold};
-use egui::{Align2, vec2};
+use egui::vec2;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -68,7 +68,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     }
     let mut d = ctx.data(|d| d.get_temp::<Draft>(draft_id())).unwrap_or_else(|| Draft {
         tab: if app.engine.path.is_none() && !app.ui.recent_sessions.is_empty() && app.ui.dashboard_tab_recent { Tab::Recent } else { Tab::Create },
-        name: "Untitled".into(),
+        name: free_name(&default_dir(app)),
         demo: false,
         sample_rate: 48_000,
         bit_depth: "24".into(),
@@ -84,14 +84,12 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     }
     let now = ctx.input(|i| i.time);
     let exists = app.recent_exists(now);
-    egui::Window::new(egui::RichText::new("Dashboard").font(bold(13.0)))
-        .collapsible(false)
-        .resizable(false)
-        .fixed_size(vec2(620.0, 360.0))
-        .anchor(Align2::CENTER_CENTER, vec2(0.0, -40.0))
-        .show(ctx, |ui| {
+    egui::Modal::new(egui::Id::new("dashboard")).show(ctx, |ui| {
+            ui.set_width(640.0);
             let t = Tokens::current();
-            ui.horizontal_top(|ui| {
+            ui.label(egui::RichText::new("Dashboard").font(bold(14.0)));
+            ui.separator();
+            ui.allocate_ui(vec2(640.0, 300.0), |ui| ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
                     ui.set_width(110.0);
                     ui.add_space(4.0);
@@ -183,11 +181,11 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         ui.colored_label(t.rec, d.error.as_str());
                     }
                 });
-            });
+            }));
             ui.separator();
             ui.horizontal(|ui| {
                 crate::widgets::checkbox(ui, &mut app.ui.dashboard_at_startup, "Show on startup");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.allocate_ui_with_layout(vec2(ui.available_width(), 28.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let ok = if d.tab == Tab::Create { "Create" } else { "Open" };
                     let enabled = d.tab == Tab::Create || d.picked.is_some();
                     if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(ok).strong()).fill(t.accent)).clicked() || (enter && enabled) {
@@ -215,6 +213,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     app.ui.session_dir = d.dir.trim().to_string();
                 }
                 app.ui.dashboard_tab_recent = d.tab == Tab::Recent;
+                app.ui.window = crate::MainWindow::Edit;
                 close = true;
             }
             Err(e) => d.error = e,
@@ -226,6 +225,13 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     } else {
         ctx.data_mut(|m| m.insert_temp(draft_id(), d));
     }
+}
+
+fn free_name(dir: &str) -> String {
+    (1..1000)
+        .map(|n| if n == 1 { "Untitled".to_string() } else { format!("Untitled {n}") })
+        .find(|n| dir.is_empty() || !Path::new(dir).join(n).exists())
+        .unwrap_or_else(|| "Untitled".into())
 }
 
 fn bits_label(b: &str) -> &'static str {

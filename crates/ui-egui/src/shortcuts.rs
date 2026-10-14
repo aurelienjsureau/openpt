@@ -48,7 +48,7 @@ fn search_chord(m: Modifiers, mac: bool) -> bool {
 
 pub fn handle(app: &mut SoundApp, ctx: &egui::Context) {
     ctx.options_mut(|o| o.zoom_with_keyboard = false);
-    if ctx.egui_wants_keyboard_input() || app.dialogs.open.is_some() {
+    if ctx.egui_wants_keyboard_input() || app.modal_open() {
         return;
     }
     let events: Vec<(Key, Modifiers)> = ctx.input(|i| {

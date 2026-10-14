@@ -423,6 +423,10 @@ impl SoundApp {
         (fresh && !self.engine.session().tracks.iter().any(|t| t.mixer.record_arm)).then_some(why)
     }
 
+    pub(crate) fn modal_open(&self) -> bool {
+        self.dialogs.open.is_some() || self.ui.show_dashboard || self.import_job.is_some()
+    }
+
     pub fn position(&self) -> Samples {
         if self.engine.transport.playing { self.engine.transport.position } else { self.engine.session().edit.selection.start }
     }
