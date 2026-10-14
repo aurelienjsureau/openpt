@@ -517,6 +517,8 @@ mod tests {
         let r = e.execute("session.open", &json!({"path": path})).unwrap();
         assert!(r["tracks"].as_u64().unwrap_or(0) > 1, "{r}");
         assert!(e.path.is_none(), "saving asks for an OpenPT path");
+        let inserts = e.session().tracks.iter().flat_map(|t| t.mixer.inserts.iter().flatten()).count();
+        assert!(inserts > 0, "the session's plug-ins come along");
         let mut other = crate::Engine::default();
         let n = other.session().tracks.len();
         other.execute("file.import_session_data", &json!({"path": path})).unwrap();

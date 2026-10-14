@@ -2067,6 +2067,11 @@ pub fn ptx_session(path: &str) -> Result<Session> {
     let rate = p.sample_rate.and_then(|r| openpt_time::SampleRate::new(r).ok()).unwrap_or(openpt_time::SampleRate::HZ_48000);
     let mut s = Session::new(name, rate);
     s.tracks.retain(|t| t.kind != openpt_model::TrackKind::Master);
+    #[cfg(not(target_arch = "wasm32"))]
+    let vst3 = openpt_vst3_host::cached().unwrap_or_default();
+    #[cfg(target_arch = "wasm32")]
+    let vst3: Vec<openpt_vst3_host::Vst3Descriptor> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
     for t in &p.tracks {
         use openpt_model::TrackKind as K;
         let kind = match t.kind {
@@ -2078,14 +2083,57 @@ pub fn ptx_session(path: &str) -> Result<Session> {
             openpt_ptx::TrackKind::Other(_) => K::Audio,
         };
         let format = if t.stereo { openpt_model::ChannelFormat::Stereo } else { openpt_model::ChannelFormat::Mono };
-        s.add_track(kind, format, Some(&t.name));
+        let id = s.add_track(kind, format, Some(&t.name));
+        let mut slot = 0;
+        for ins in &t.inserts {
+            let found = ptx_plugin(ins, t.stereo, &vst3);
+            if found.is_none() {
+                missing.push(ins.name.clone().unwrap_or_else(|| format!("{}{}", ins.manufacturer, ins.product)));
+            }
+            if let (Some(plugin), Some(tr)) = (found, s.track_mut(id))
+                && let Some(cell) = tr.mixer.inserts.get_mut(slot)
+            {
+                *cell = Some(openpt_model::Insert::new(plugin));
+                slot += 1;
+            }
+        }
     }
     if p.bit_depth == Some(16) {
         s.bit_depth = openpt_model::BitDepthSetting::Int16;
+    }
+    missing.sort();
+    missing.dedup();
+    if !missing.is_empty() {
+        log::warn!("Pro Tools session: no VST3 found for {}", missing.join(", "));
     }
     Ok(s)
 }
 
 pub fn is_ptx_path(path: &str) -> bool {
     Path::new(path).extension().is_some_and(|x| x.eq_ignore_ascii_case("ptx") || x.eq_ignore_ascii_case("ptxt"))
+}
+
+fn ptx_plugin(ins: &openpt_ptx::Insert, stereo: bool, vst3: &[openpt_vst3_host::Vst3Descriptor]) -> Option<String> {
+    match (ins.manufacturer.as_str(), ins.product.as_str()) {
+        ("Digi" | "Avid", "Trim") => return Some("trim".into()),
+        ("Digi" | "Avid", "mdl3") => return Some("mod_delay".into()),
+        _ => {}
+    }
+    let width_ok = |d: &&openpt_vst3_host::Vst3Descriptor| {
+        let n = d.name.to_ascii_lowercase();
+        if stereo { !n.ends_with(" mono") } else { !n.ends_with(" stereo") }
+    };
+    let pick =
+        |c: Vec<&openpt_vst3_host::Vst3Descriptor>| -> Option<String> { c.iter().find(|d| width_ok(d)).or_else(|| c.first()).map(|d| d.id.clone()) };
+    let code: String = format!("{}{}", ins.manufacturer, ins.product).bytes().map(|b| format!("{b:02X}")).collect();
+    let by_code: Vec<&openpt_vst3_host::Vst3Descriptor> = vst3.iter().filter(|d| !d.is_instrument && d.class_id.contains(&code)).collect();
+    if let Some(id) = pick(by_code) {
+        return Some(id);
+    }
+    let norm = |s: &str| s.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_lowercase();
+    let name = norm(ins.name.as_deref()?);
+    let base =
+        |d: &openpt_vst3_host::Vst3Descriptor| norm(d.name.trim_end_matches(" Stereo").trim_end_matches(" Mono").trim_end_matches(" Mono/Stereo"));
+    let exact: Vec<&openpt_vst3_host::Vst3Descriptor> = vst3.iter().filter(|d| base(d) == name).collect();
+    pick(exact)
 }

@@ -18,10 +18,19 @@ pub enum TrackKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Insert {
+    pub manufacturer: String,
+    pub product: String,
+    pub name: Option<String>,
+    pub state: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Track {
     pub name: String,
     pub kind: TrackKind,
     pub stereo: bool,
+    pub inserts: Vec<Insert>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -113,9 +122,28 @@ fn walk<'a>(list: &'a [Block], out: &mut Vec<&'a Block>) {
     }
 }
 
+fn insert_at(d: &[u8], b: &Block) -> Option<Insert> {
+    let code = d.get(b.start + 16..b.start + 24)?;
+    if !code.iter().all(|c| c.is_ascii_graphic() || *c == b' ') {
+        return None;
+    }
+    let state = d.get(b.start + 28..b.end).unwrap_or_default().to_vec();
+    let text = String::from_utf8_lossy(&state);
+    let name = text.find("<PluginName>").and_then(|i| {
+        let rest = text.get(i + 12..)?;
+        rest.find("</PluginName>").and_then(|j| rest.get(..j)).map(str::to_string)
+    });
+    Some(Insert {
+        manufacturer: String::from_utf8_lossy(code.get(..4)?).into_owned(),
+        product: String::from_utf8_lossy(code.get(4..8)?).into_owned(),
+        name,
+        state,
+    })
+}
+
 pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
     let d = decrypt(bytes)?;
-    let tree = blocks(&d, HEADER, d.len(), 6);
+    let tree = blocks(&d, HEADER, d.len(), 14);
     let mut all = Vec::new();
     walk(&tree, &mut all);
     let mut s = PtxSession::default();
@@ -142,7 +170,16 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
             0x0B => TrackKind::Folder,
             c => TrackKind::Other(c),
         };
-        s.tracks.push(Track { name, kind, stereo: d.get(after).copied() == Some(1) });
+        s.tracks.push(Track { name, kind, stereo: d.get(after).copied() == Some(1), inserts: Vec::new() });
+    }
+    for ch in all.iter().filter(|b| b.content_type == 0x261B) {
+        let mut inner = Vec::new();
+        walk(&ch.children, &mut inner);
+        let Some((name, _)) = inner.iter().find(|b| b.content_type == 0x2619).and_then(|b| string_at(&d, b.start)) else { continue };
+        let inserts: Vec<Insert> = inner.iter().filter(|b| b.content_type == 0x1038).filter_map(|b| insert_at(&d, b)).collect();
+        if let Some(t) = s.tracks.iter_mut().find(|t| t.name == name && t.inserts.is_empty()) {
+            t.inserts = inserts;
+        }
     }
     for b in all.iter().filter(|b| b.content_type == 0x103A) {
         let mut at = b.start;

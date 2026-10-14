@@ -6,6 +6,9 @@ fn main() {
             println!("{} · {:?} Hz · {:?} bit", s.app, s.sample_rate, s.bit_depth);
             for t in &s.tracks {
                 println!("  {:?} {} {}", t.kind, if t.stereo { "stereo" } else { "mono" }, t.name);
+                for i in &t.inserts {
+                    println!("      {}{} {:?} ({} bytes)", i.manufacturer, i.product, i.name, i.state.len());
+                }
             }
             println!("{} audio files", s.audio_files.len());
         }
