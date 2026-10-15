@@ -1,29 +1,35 @@
-SoundCraft
+OpenPT
+Copyright (c) 2026 BourrinAudio and the OpenPT contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+OpenPT is a digital audio workstation written in Rust by BourrinAudio. Pro Tools is a trademark
+of Avid Technology, Inc.; OpenPT is not affiliated with or endorsed by Avid.
+
+Origins
+
+OpenPT started from the SoundCraft code base, which made it possible:
 Copyright (c) 2026 ArtCraft Team and the SoundCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option
 (LICENSE-MIT, LICENSE-APACHE).
 
-The ArtCraft name, wordmark and logos in docs/brand/ are trademarks of the ArtCraft Team. They are
-not open source and are not covered by the license above; their terms are in
-docs/brand/LICENSE-brand.txt.
-
-Third-party material
-
-This product bundles third-party material under its own licenses, listed below. The per-file
-list (author, source, license) is in ATTRIBUTION.md.
-
-None: every bundled asset is original to SoundCraft. Icons are drawn in code; demo audio is
-synthesised in code. The egui default fonts (Ubuntu-Light, Hack, Noto Emoji, Emoji Icon Font) ship
-inside the egui crate under their own open licenses (see ATTRIBUTION.md).
-
 crates/ui-kit is derived from craft-libs:
 Copyright (c) 2026 ArtCraft Team and the craft-libs contributors.
-Licensed under the MIT License or the Apache License, Version 2.0, at your option
-(LICENSE-MIT, LICENSE-APACHE).
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 
 crates/video (bitstream, isobmff, h264, prores modules) is derived from filmcraft:
 Copyright (c) 2026 ArtCraft Team and the filmcraft contributors.
-Licensed under the MIT License or the Apache License, Version 2.0, at your option
-(LICENSE-MIT, LICENSE-APACHE).
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 
-MP3 export uses LAME (https://lame.sourceforge.io), LGPL-2.0, through the mp3lame-sys and mp3lame-encoder crates.
+The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team and are not covered by
+the licenses above. OpenPT does not use them.
+
+Third-party material
+
+This product bundles third-party material under its own licenses; the per-file list (author,
+source, license) is in ATTRIBUTION.md. Icons are drawn in code and the app icon is original;
+demo audio is synthesised in code. The egui default fonts (Ubuntu-Light, Hack, Noto Emoji, Emoji
+Icon Font) ship inside the egui crate under their own open licenses (see ATTRIBUTION.md).
+
+MP3 export uses LAME (https://lame.sourceforge.io), LGPL-2.0, through the mp3lame-sys and
+mp3lame-encoder crates.
