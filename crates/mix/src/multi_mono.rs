@@ -69,6 +69,20 @@ impl Plugin for MultiMono {
         }
     }
 
+    fn accepts_key(&self) -> bool {
+        self.inner.first().is_some_and(|p| p.accepts_key())
+    }
+
+    fn process_keyed(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
+        if key.is_empty() {
+            return self.process(io, frames);
+        }
+        for (c, (p, ch)) in self.inner.iter_mut().zip(io.chunks_mut(1)).enumerate() {
+            let k = c % key.len();
+            p.process_keyed(ch, key.get(k..=k).unwrap_or(&[]), frames);
+        }
+    }
+
     fn latency(&self) -> usize {
         self.inner.iter().map(|p| p.latency()).max().unwrap_or(0)
     }

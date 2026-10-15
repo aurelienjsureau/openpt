@@ -609,9 +609,10 @@ impl MixEngine {
                 st.scratch.resize(self.max_block, 0.0);
             }
         }
+        let n_free = order_keyed(s, &mut work);
         let busses = std::mem::take(&mut self.busses);
         let live_in = LiveInput { input: &self.input, midi_input: &self.midi_input, monitor_only: self.monitor_only, recording: self.recording };
-        run_strips(&mut work, |(i, st)| {
+        run_strips(work.get_mut(..n_free).unwrap_or(&mut []), |(i, st)| {
             if let Some(t) = s.tracks.get(*i) {
                 process_strip(s, t, st, &busses, &live_in, pos, frames, any_solo);
             }
@@ -619,6 +620,11 @@ impl MixEngine {
         self.busses = busses;
         let pdc = s.edit.delay_compensation;
         if pdc {
+            for (i, st) in work.iter_mut().skip(n_free) {
+                if let Some(t) = s.tracks.get(*i) {
+                    note_insert_latency(t, st, pos);
+                }
+            }
             for t in s.tracks.iter().filter(|t| is_aux(t) && !t.inactive) {
                 if let Some(st) = self.strips.get_mut(&t.id) {
                     note_insert_latency(t, st, pos);
@@ -650,8 +656,7 @@ impl MixEngine {
                 }
             }
         }
-        for (i, st) in work.iter_mut() {
-            let Some(t) = s.tracks.get(*i) else { continue };
+        let align = |t: &Track, st: &mut Strip, aux_fed: &[BusId]| {
             let ch = st.buf.len();
             let is_monitored = t.mixer.record_arm || t.mixer.input_monitor;
             let align_delay = if pdc && !is_monitored { lmax_t.saturating_sub(st.latency) } else { 0 };
@@ -663,15 +668,23 @@ impl MixEngine {
             }
             let waits = match &t.mixer.output {
                 Route::Main => !is_monitored,
-                Route::Bus(b) => !is_monitored && self.aux_fed.contains(b),
+                Route::Bus(b) => !is_monitored && aux_fed.contains(b),
                 _ => false,
             };
             st.out_extra.set(if waits { lmax_a } else { 0 }, ch);
-        }
-        for (i, st) in work.iter_mut() {
+        };
+        for (i, st) in work.iter_mut().take(n_free) {
             if let Some(t) = s.tracks.get(*i) {
+                align(t, st, &self.aux_fed);
                 self.route_strip(t, st, pos, frames);
             }
+        }
+        for (i, st) in work.iter_mut().skip(n_free) {
+            let Some(t) = s.tracks.get(*i) else { continue };
+            let live_in = LiveInput { input: &self.input, midi_input: &self.midi_input, monitor_only: self.monitor_only, recording: self.recording };
+            process_strip(s, t, st, &self.busses, &live_in, pos, frames, any_solo);
+            align(t, st, &self.aux_fed);
+            self.route_strip(t, st, pos, frames);
         }
         for (i, st) in work.drain(..) {
             if let Some(t) = s.tracks.get(i) {
@@ -1014,10 +1027,24 @@ fn process_strip(
         }
         apply_params(slot, ins, t, i, pos);
         slot.plugin.set_transport(&transport);
-        slot.plugin.process(&mut strip.buf, frames);
+        let key = ins.keyed_bus().and_then(|b| busses.get(&b)).map(|k| k.buf.as_slice());
+        match key {
+            Some(k) if slot.plugin.accepts_key() => slot.plugin.process_keyed(&mut strip.buf, k, frames),
+            _ => slot.plugin.process(&mut strip.buf, frames),
+        }
         if contain_failure(slot, &mut strip.buf, frames) {
             strip.failures.record(i);
             continue;
+        }
+        if ins.key_listen
+            && let Some(k) = key.filter(|k| !k.is_empty())
+        {
+            for (c, d) in strip.buf.iter_mut().enumerate() {
+                let src = k.get(c % k.len()).map(Vec::as_slice).unwrap_or(&[]);
+                for (n, x) in d.iter_mut().take(frames).enumerate() {
+                    *x = src.get(n).copied().filter(|v| v.is_finite()).unwrap_or(0.0);
+                }
+            }
         }
         latency = latency.saturating_add(slot.plugin.latency());
         if gr == 0.0 {
@@ -1264,6 +1291,34 @@ fn strip_format(t: &Track, n: usize) -> ChannelFormat {
     if t.format.channels().min(MAX_CHANNELS) == n { t.format } else { ChannelFormat::for_channels(n) }
 }
 
+fn key_busses(t: &Track) -> impl Iterator<Item = BusId> + '_ {
+    t.mixer.inserts.iter().flatten().filter_map(openpt_model::Insert::keyed_bus)
+}
+
+fn feeds_bus(t: &Track, b: BusId) -> bool {
+    let r = Route::Bus(b);
+    t.mixer.output == r || t.mixer.sends.iter().flatten().any(|sn| sn.target == r)
+}
+
+fn order_keyed<T>(s: &Session, work: &mut [(usize, T)]) -> usize {
+    let keyed = |i: usize| s.tracks.get(i).is_some_and(|t| key_busses(t).next().is_some());
+    work.sort_by_key(|(i, _)| keyed(*i));
+    let n_free = work.iter().take_while(|(i, _)| !keyed(*i)).count();
+    let n = work.len();
+    for k in n_free..n {
+        let waits_on_later = |at: usize| {
+            let Some(t) = work.get(at).and_then(|(i, _)| s.tracks.get(*i)) else { return false };
+            key_busses(t).any(|b| work.iter().skip(k).filter(|(j, _)| s.tracks.get(*j).is_some_and(|u| u.id != t.id)).any(|(j, _)| s.tracks.get(*j).is_some_and(|u| feeds_bus(u, b))))
+        };
+        if let Some(ready) = (k..n).find(|&at| !waits_on_later(at))
+            && let Some(w) = work.get_mut(k..=ready)
+        {
+            w.rotate_right(1);
+        }
+    }
+    n_free
+}
+
 fn processing_order(s: &Session) -> Vec<usize> {
     let mut order: Vec<usize> =
         (0..s.tracks.len()).filter(|&i| s.tracks.get(i).is_some_and(|t| !matches!(t.kind, TrackKind::Aux | TrackKind::Folder))).collect();
@@ -1273,7 +1328,8 @@ fn processing_order(s: &Session) -> Vec<usize> {
         let mut d = 0;
         let mut cur = vec![i];
         for _ in 0..8 {
-            let inputs: Vec<&Route> = cur.iter().filter_map(|&k| s.tracks.get(k)).map(|t| &t.mixer.input).collect();
+            let keys: Vec<Route> = cur.iter().filter_map(|&k| s.tracks.get(k)).flat_map(key_busses).map(Route::Bus).collect();
+            let inputs: Vec<&Route> = cur.iter().filter_map(|&k| s.tracks.get(k)).map(|t| &t.mixer.input).chain(keys.iter()).collect();
             let feeders: Vec<usize> = auxes_feeding(s, &inputs);
             if feeders.is_empty() {
                 break;

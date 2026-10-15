@@ -359,6 +359,7 @@ pub struct SoundApp {
     pub leftovers: Vec<openpt_engine::autosave::Leftover>,
     panic_rev: u64,
     pub preset_dir: Option<std::path::PathBuf>,
+    preset_cache: HashMap<String, (std::time::Instant, Vec<String>)>,
     last_autosave: Option<std::time::Instant>,
     pub dialogs: dialogs::Dialogs,
     pub meters: HashMap<TrackId, MeterDisplay>,
@@ -440,6 +441,7 @@ impl SoundApp {
             leftovers: Vec::new(),
             panic_rev: 0,
             preset_dir: None,
+            preset_cache: HashMap::new(),
             last_autosave: None,
             dialogs: dialogs::Dialogs::default(),
             meters: HashMap::new(),
@@ -698,6 +700,97 @@ impl SoundApp {
             }
             let key = format!("param:{}:{slot}:{param}", t.0);
             let _ = self.engine.execute_merged("mix.insert_param", &json!({"track": t.0, "slot": slot, "param": param, "value": value}), &key);
+        }
+    }
+
+    fn cached_presets(&mut self, plugin: &str) -> Vec<String> {
+        if let Some((at, names)) = self.preset_cache.get(plugin)
+            && at.elapsed().as_secs() < 3
+        {
+            return names.clone();
+        }
+        let names = panels::preset_names(self, plugin);
+        self.preset_cache.insert(plugin.to_string(), (std::time::Instant::now(), names.clone()));
+        names
+    }
+
+    fn sync_editor_headers(&mut self) {
+        if !self.player.as_ref().is_some_and(Player::any_editor_open) {
+            return;
+        }
+        let busses: Vec<(u64, String)> = self.engine.session().busses.iter().map(|b| (b.id.0, b.name.clone())).collect();
+        let open: Vec<(TrackId, usize, String, openpt_model::Insert)> = self
+            .engine
+            .session()
+            .tracks
+            .iter()
+            .flat_map(|t| t.mixer.inserts.iter().enumerate().filter_map(move |(i, ins)| Some((t.id, i, t.name.clone(), ins.clone()?))))
+            .filter(|(t, i, _, ins)| openpt_mix::is_third_party(&ins.plugin) && self.player.as_ref().is_some_and(|p| p.editor_open(*t, *i)))
+            .collect();
+        for (tid, slot, track, ins) in open {
+            let Some(info) = mix_window::plugin_info(&ins.plugin) else { continue };
+            let presets = self.cached_presets(info.id);
+            let header = openpt_dsp::EditorHeader {
+                track,
+                slot: char::from(b'a'.saturating_add(slot as u8)).to_string(),
+                preset: ins.preset.clone(),
+                presets: presets.clone(),
+                bypass: ins.bypass,
+                takes_key: true,
+                busses: busses.iter().map(|(_, n)| n.clone()).collect(),
+                key: ins.key.and_then(|k| busses.iter().position(|(id, _)| *id == k.0)),
+                key_on: ins.key_on,
+                key_listen: ins.key_listen,
+            };
+            let Some(p) = &self.player else { return };
+            p.set_editor_header(tid, slot, &header);
+        }
+        let actions = self.player.as_ref().map(Player::header_actions).unwrap_or_default();
+        for (tid, slot, a) in actions {
+            let Some(ins) = self.engine.session().track(tid).and_then(|t| t.mixer.inserts.get(slot).cloned().flatten()) else { continue };
+            let Some(info) = mix_window::plugin_info(&ins.plugin) else { continue };
+            let presets = self.cached_presets(info.id);
+            let at = presets.iter().position(|n| *n == ins.preset);
+            let step = |d: isize| -> Option<usize> {
+                let n = presets.len() as isize;
+                (n > 0).then(|| match at {
+                    Some(i) => (i as isize + d).rem_euclid(n) as usize,
+                    None if d > 0 => 0,
+                    None => (n - 1) as usize,
+                })
+            };
+            use openpt_dsp::HeaderAction as A;
+            match a {
+                A::Bypass => {
+                    let _ = self.run("mix.insert_bypass", json!({"track": tid.0, "slot": slot}));
+                }
+                A::Preset(None) => panels::recall_preset(self, tid, slot, info, None),
+                A::Preset(Some(_)) | A::PrevPreset | A::NextPreset => {
+                    let i = match a {
+                        A::Preset(i) => i,
+                        A::PrevPreset => step(-1),
+                        _ => step(1),
+                    };
+                    if let Some(name) = i.and_then(|i| presets.get(i)) {
+                        panels::recall_preset(self, tid, slot, info, Some(name));
+                    }
+                }
+                A::SavePreset => {
+                    let name = (1..).map(|n| format!("{} {n}", info.name)).find(|n| !presets.contains(n)).unwrap_or_default();
+                    panels::save_preset(self, tid, slot, info, &ins, &name);
+                    self.preset_cache.remove(info.id);
+                }
+                A::Key(k) => {
+                    let bus = k.and_then(|i| busses.get(i)).map(|(id, _)| *id);
+                    let _ = self.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "bus": bus}));
+                }
+                A::ExternalKey => {
+                    let _ = self.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "on": !ins.key_on}));
+                }
+                A::KeyListen => {
+                    let _ = self.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "listen": !ins.key_listen}));
+                }
+            }
         }
     }
 
@@ -1252,6 +1345,7 @@ impl SoundApp {
         self.ara_requests();
         self.note_recent_session();
         self.apply_editor_edits();
+        self.sync_editor_headers();
         bounce::step(self, ctx);
         if !ctx.input(|i| i.pointer.any_down()) {
             if matches!(self.gesture, Some(Gesture::Fader { .. })) {

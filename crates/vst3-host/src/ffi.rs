@@ -1094,6 +1094,7 @@ pub(crate) struct Layout {
     pub inputs: Vec<u32>,
     pub outputs: Vec<u32>,
     pub event_input: bool,
+    pub key: bool,
 }
 
 fn apply_transport(c: &mut sv::ProcessContext, t: &Transport) {
@@ -1279,6 +1280,12 @@ impl Instance {
         ok(unsafe { p.getBusArrangement(dir as sv::BusDirection, index, &mut arr) }).then_some(arr)
     }
 
+    fn bus_type(&self, dir: sv::BusDirections, index: i32) -> Option<i32> {
+        let mut info: sv::BusInfo = unsafe { std::mem::zeroed() };
+        ok(unsafe { self.component.getBusInfo(sv::MediaTypes_::kAudio as sv::MediaType, dir as sv::BusDirection, index, &mut info) })
+            .then_some(info.busType)
+    }
+
     fn bus_channels(&self, dir: sv::BusDirections, index: i32) -> u32 {
         if let Some(arr) = self.arrangement(dir, index) {
             return arr.count_ones().min(MAX_BUS_CHANNELS);
@@ -1324,14 +1331,17 @@ impl Instance {
         if !tried_ok {
             log::debug!("vst3: plugin refused mono/stereo bus arrangements; using its own");
         }
+        let key = nin > 1 && self.bus_type(din, 1) == Some(sv::BusTypes_::kAux as i32) && self.bus_channels(din, 1) > 0;
         let layout = Layout {
             inputs: (0..nin).map(|i| self.bus_channels(din, i)).collect(),
             outputs: (0..nout).map(|i| self.bus_channels(dout, i)).collect(),
             event_input: self.bus_count(event, din) > 0,
+            key,
         };
         for (dir, n) in [(din, nin), (dout, nout)] {
             for i in 0..n {
-                unsafe { self.component.activateBus(audio as sv::MediaType, dir as sv::BusDirection, i, u8::from(i == 0)) };
+                let on = i == 0 || (key && dir == din && i == 1);
+                unsafe { self.component.activateBus(audio as sv::MediaType, dir as sv::BusDirection, i, u8::from(on)) };
             }
         }
         if layout.event_input {
@@ -1540,6 +1550,7 @@ struct EditorInner {
     view: Option<ComPtr<sb::IPlugView>>,
     frame: Option<ComWrapper<PlugFrame>>,
     window: Option<window::HostWindow>,
+    header: openpt_dsp::EditorHeader,
 }
 
 #[derive(Default)]
@@ -1628,6 +1639,7 @@ impl EditorLink {
         win.raise();
         g.view = Some(view);
         g.frame = Some(frame);
+        win.set_header(&g.header);
         g.window = Some(win);
         Ok(())
     }
@@ -1690,6 +1702,48 @@ impl EditorLink {
         }
     }
 
+    pub fn set_header(&self, header: &openpt_dsp::EditorHeader) {
+        if !window::on_main_thread() {
+            return;
+        }
+        let mut g = self.lock();
+        if g.header != *header {
+            g.header = header.clone();
+        }
+        if let Some(w) = &g.window {
+            w.set_header(header);
+        }
+    }
+
+    pub fn header_actions(&self) -> Vec<openpt_dsp::HeaderAction> {
+        if !window::on_main_thread() {
+            return Vec::new();
+        }
+        self.lock().window.as_ref().map(window::HostWindow::take_actions).unwrap_or_default()
+    }
+
+    pub fn load_state(&self, data: &[u8]) -> bool {
+        let Some((comp, ctrl)) = split_state(data) else { return false };
+        let g = self.lock();
+        let Some(component) = &g.component else { return false };
+        let stream = MemoryStream::new(comp.to_vec());
+        let Some(s) = stream.as_com_ref::<sb::IBStream>() else { return false };
+        if !ok(unsafe { component.setState(s.as_ptr()) }) {
+            return false;
+        }
+        if let Some(c) = &g.controller {
+            stream.lock().1 = 0;
+            unsafe { c.setComponentState(s.as_ptr()) };
+            if !ctrl.is_empty() {
+                let cs = MemoryStream::new(ctrl.to_vec());
+                if let Some(r) = cs.as_com_ref::<sb::IBStream>() {
+                    unsafe { c.setState(r.as_ptr()) };
+                }
+            }
+        }
+        true
+    }
+
     pub fn idle(&self) {
         if !window::on_main_thread() {
             return;
@@ -1698,6 +1752,13 @@ impl EditorLink {
         if g.window.as_ref().is_some_and(|w| !w.is_visible()) {
             EditorLink::teardown(&mut g);
         }
+    }
+
+    pub fn normalized(&self, id: u32) -> Option<f64> {
+        let g = self.lock();
+        let c = g.controller.as_ref()?;
+        let v = unsafe { c.getParamNormalized(id) };
+        v.is_finite().then(|| v.clamp(0.0, 1.0))
     }
 
     pub fn to_plain(&self, id: u32, n: f64) -> Option<f64> {
@@ -1815,6 +1876,12 @@ mod window {
             }
         }
 
+        pub fn set_header(&self, _header: &openpt_dsp::EditorHeader) {}
+
+        pub fn take_actions(&self) -> Vec<openpt_dsp::HeaderAction> {
+            Vec::new()
+        }
+
         pub fn is_visible(&self) -> bool {
             self.get().is_some_and(|w| w.isVisible())
         }
@@ -1842,19 +1909,27 @@ mod window {
 
 #[cfg(windows)]
 mod window {
+    use openpt_dsp::{EditorHeader, HeaderAction};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::ffi::{c_char, c_void};
     use std::sync::OnceLock;
     use vst3::Steinberg::{self as sb, IPlugViewTrait};
-    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+    use windows_sys::Win32::Graphics::Gdi::{
+        BeginPaint, ClientToScreen, CreateFontW, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteObject,
+        DrawTextW, EndPaint, FillRect, HDC, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
+    };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AdjustWindowRectEx, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, GWL_EXSTYLE, GWL_STYLE,
-        GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW, RegisterClassExW, SW_HIDE, SW_SHOW,
-        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_CLOSE,
-        WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN,
-        WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME,
+        AdjustWindowRectEx, AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
+        DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW,
+        MF_CHECKED, MF_SEPARATOR, MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu,
+        WM_CLOSE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT, WNDCLASSEXW,
+        WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
     };
 
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeHWND);
@@ -1868,13 +1943,34 @@ mod window {
     }
 
     const STYLE: u32 = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+    const HEADER: f64 = 46.0;
+
+    struct State {
+        header: EditorHeader,
+        actions: Vec<HeaderAction>,
+        content: HWND,
+    }
 
     thread_local! {
         static PLUGIN_RESIZING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        static STATES: RefCell<HashMap<usize, State>> = RefCell::new(HashMap::new());
+    }
+
+    fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut State) -> R) -> Option<R> {
+        STATES.with(|s| s.borrow_mut().get_mut(&(hwnd as usize)).map(f))
     }
 
     fn view_of(hwnd: HWND) -> Option<vst3::ComRef<'static, sb::IPlugView>> {
         unsafe { vst3::ComRef::from_raw(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut sb::IPlugView) }
+    }
+
+    fn dpi_scale(hwnd: HWND) -> f64 {
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        if dpi > 0 { f64::from(dpi) / 96.0 } else { 1.0 }
+    }
+
+    fn header_px(hwnd: HWND) -> i32 {
+        (HEADER * dpi_scale(hwnd)).round() as i32
     }
 
     fn frame_insets(hwnd: HWND) -> RECT {
@@ -1884,20 +1980,252 @@ mod window {
         r
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Item {
+        Track,
+        Preset,
+        Prev,
+        Next,
+        Key,
+        ExtKey,
+        Listen,
+        Bypass,
+    }
+
+    fn layout(h: &EditorHeader, width: i32, k: f64) -> Vec<(Item, RECT, &'static str)> {
+        let px = |v: f64| (v * k).round() as i32;
+        let (top, bottom) = (px(19.0), px(40.0));
+        let r = |x0: f64, x1: f64| RECT { left: px(x0), top, right: px(x1), bottom };
+        let mut out = vec![
+            (Item::Track, r(8.0, 140.0), "Track"),
+            (Item::Preset, r(148.0, 318.0), "Preset"),
+            (Item::Prev, r(322.0, 342.0), ""),
+            (Item::Next, r(344.0, 364.0), ""),
+        ];
+        if h.takes_key {
+            out.push((Item::Key, r(378.0, 490.0), "Key Input"));
+            out.push((Item::ExtKey, r(494.0, 572.0), ""));
+            out.push((Item::Listen, r(576.0, 646.0), ""));
+        }
+        let right = width - px(8.0);
+        out.push((Item::Bypass, RECT { left: right - px(64.0), top, right, bottom }, ""));
+        out
+    }
+
+    fn min_width(hwnd: HWND) -> i32 {
+        let key = with_state(hwnd, |s| s.header.takes_key).unwrap_or(false);
+        (if key { 730.0 } else { 448.0 } * dpi_scale(hwnd)).round() as i32
+    }
+
+    fn rgb(r: u8, g: u8, b: u8) -> u32 {
+        u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16)
+    }
+
+    fn fill(hdc: HDC, r: &RECT, color: u32) {
+        unsafe {
+            let b = CreateSolidBrush(color);
+            FillRect(hdc, r, b);
+            DeleteObject(b);
+        }
+    }
+
+    fn text(hdc: HDC, s: &str, r: &RECT, color: u32, flags: u32) {
+        if s.is_empty() {
+            return;
+        }
+        let w = wide(s);
+        let mut r = *r;
+        unsafe {
+            SetTextColor(hdc, color);
+            DrawTextW(hdc, w.as_ptr(), -1, &mut r, flags | DT_SINGLELINE | DT_VCENTER);
+        }
+    }
+
+    fn paint(hwnd: HWND) {
+        let Some(h) = with_state(hwnd, |s| s.header.clone()) else { return };
+        let k = dpi_scale(hwnd);
+        let px = |v: f64| (v * k).round() as i32;
+        let mut ps: PAINTSTRUCT = unsafe { std::mem::zeroed() };
+        let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
+        if hdc.is_null() {
+            return;
+        }
+        let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { GetClientRect(hwnd, &mut client) };
+        let strip = RECT { left: 0, top: 0, right: client.right, bottom: header_px(hwnd) };
+        fill(hdc, &strip, rgb(52, 54, 58));
+        fill(hdc, &RECT { top: strip.bottom - 1, ..strip }, rgb(20, 21, 23));
+        let face = wide("Segoe UI");
+        let (font, small) = unsafe {
+            (CreateFontW(-px(12.0), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()), CreateFontW(-px(10.0), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()))
+        };
+        let old = unsafe {
+            SetBkMode(hdc, TRANSPARENT as i32);
+            SelectObject(hdc, small)
+        };
+        let dim = rgb(160, 165, 170);
+        let bright = rgb(228, 230, 232);
+        let lit_key = rgb(232, 160, 40);
+        let items = layout(&h, client.right, k);
+        for (_, r, label) in &items {
+            if !label.is_empty() {
+                text(hdc, label, &RECT { left: r.left, top: px(3.0), right: r.right, bottom: px(17.0) }, dim, DT_LEFT);
+            }
+        }
+        unsafe { SelectObject(hdc, font) };
+        for (item, r, _) in &items {
+            let inner = RECT { left: r.left + px(6.0), right: r.right - px(6.0), ..*r };
+            match item {
+                Item::Track => {
+                    fill(hdc, r, rgb(14, 16, 16));
+                    text(hdc, &h.track, &inner, bright, DT_LEFT | DT_END_ELLIPSIS);
+                }
+                Item::Preset => {
+                    fill(hdc, r, rgb(14, 16, 16));
+                    let name = if h.preset.is_empty() { "<factory default>" } else { h.preset.as_str() };
+                    text(hdc, name, &RECT { right: inner.right - px(12.0), ..inner }, bright, DT_LEFT | DT_END_ELLIPSIS);
+                    text(hdc, "▾", &inner, dim, DT_RIGHT);
+                }
+                Item::Prev | Item::Next => {
+                    fill(hdc, r, rgb(70, 72, 76));
+                    text(hdc, if *item == Item::Prev { "◀" } else { "▶" }, r, bright, DT_CENTER);
+                }
+                Item::Key => {
+                    fill(hdc, r, rgb(14, 16, 16));
+                    let name = h.key.and_then(|i| h.busses.get(i)).map_or("no key input", String::as_str);
+                    text(hdc, name, &RECT { right: inner.right - px(12.0), ..inner }, if h.key.is_some() { bright } else { dim }, DT_LEFT | DT_END_ELLIPSIS);
+                    text(hdc, "▾", &inner, dim, DT_RIGHT);
+                }
+                Item::ExtKey | Item::Listen => {
+                    let on = if *item == Item::ExtKey { h.key_on } else { h.key_listen };
+                    let enabled = if *item == Item::ExtKey { h.key.is_some() } else { h.key_on };
+                    fill(hdc, r, if on { lit_key } else { rgb(70, 72, 76) });
+                    let label = if *item == Item::ExtKey { "External Key" } else { "Key Listen" };
+                    text(hdc, label, r, if on { rgb(20, 20, 20) } else if enabled { bright } else { rgb(110, 112, 116) }, DT_CENTER);
+                }
+                Item::Bypass => {
+                    fill(hdc, r, if h.bypass { rgb(40, 110, 200) } else { rgb(70, 72, 76) });
+                    text(hdc, "Bypass", r, if h.bypass { rgb(255, 255, 255) } else { bright }, DT_CENTER);
+                }
+            }
+        }
+        unsafe {
+            SelectObject(hdc, old);
+            DeleteObject(font);
+            DeleteObject(small);
+            EndPaint(hwnd, &ps);
+        }
+    }
+
+    fn popup(hwnd: HWND, r: &RECT, entries: &[(usize, String, bool)]) -> usize {
+        unsafe {
+            let m = CreatePopupMenu();
+            if m.is_null() {
+                return 0;
+            }
+            for (id, label, checked) in entries {
+                if *id == 0 {
+                    AppendMenuW(m, MF_SEPARATOR, 0, std::ptr::null());
+                } else {
+                    let w = wide(label);
+                    AppendMenuW(m, MF_STRING | if *checked { MF_CHECKED } else { 0 }, *id, w.as_ptr());
+                }
+            }
+            let mut p = POINT { x: r.left, y: r.bottom };
+            ClientToScreen(hwnd, &mut p);
+            let picked = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, p.x, p.y, 0, hwnd, std::ptr::null());
+            DestroyMenu(m);
+            usize::try_from(picked).unwrap_or(0)
+        }
+    }
+
+    fn click(hwnd: HWND, x: i32, y: i32) {
+        let Some(h) = with_state(hwnd, |s| s.header.clone()) else { return };
+        let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { GetClientRect(hwnd, &mut client) };
+        let hit = layout(&h, client.right, dpi_scale(hwnd)).into_iter().find(|(_, r, _)| x >= r.left && x < r.right && y >= r.top && y < r.bottom);
+        let Some((item, r, _)) = hit else { return };
+        let action = match item {
+            Item::Track => None,
+            Item::Preset => {
+                let mut e = vec![(1, "<factory default>".to_string(), h.preset == "<factory default>")];
+                if !h.presets.is_empty() {
+                    e.push((0, String::new(), false));
+                }
+                e.extend(h.presets.iter().enumerate().map(|(i, n)| (i + 10, n.clone(), *n == h.preset)));
+                e.push((0, String::new(), false));
+                e.push((2, "Save Preset".to_string(), false));
+                match popup(hwnd, &r, &e) {
+                    0 => None,
+                    1 => Some(HeaderAction::Preset(None)),
+                    2 => Some(HeaderAction::SavePreset),
+                    n => Some(HeaderAction::Preset(Some(n - 10))),
+                }
+            }
+            Item::Prev => Some(HeaderAction::PrevPreset),
+            Item::Next => Some(HeaderAction::NextPreset),
+            Item::Key => {
+                let mut e = vec![(1, "no key input".to_string(), h.key.is_none()), (0, String::new(), false)];
+                e.extend(h.busses.iter().enumerate().map(|(i, n)| (i + 10, n.clone(), h.key == Some(i))));
+                match popup(hwnd, &r, &e) {
+                    0 => None,
+                    1 => Some(HeaderAction::Key(None)),
+                    n => Some(HeaderAction::Key(Some(n - 10))),
+                }
+            }
+            Item::ExtKey => h.key.is_some().then_some(HeaderAction::ExternalKey),
+            Item::Listen => h.key_on.then_some(HeaderAction::KeyListen),
+            Item::Bypass => Some(HeaderAction::Bypass),
+        };
+        if let Some(a) = action {
+            with_state(hwnd, |s| s.actions.push(a));
+        }
+    }
+
+    fn place_content(hwnd: HWND, w: i32, h: i32) -> (i32, i32) {
+        let top = header_px(hwnd);
+        let ch = (h - top).max(1);
+        if let Some(c) = with_state(hwnd, |s| s.content) {
+            unsafe { MoveWindow(c, 0, top, w, ch, 1) };
+        }
+        (w, ch)
+    }
+
     unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-        if msg == WM_CLOSE {
+        let ours = with_state(hwnd, |_| ()).is_some();
+        if !ours && msg == WM_ERASEBKGND {
+            let mut c = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            unsafe { GetClientRect(hwnd, &mut c) };
+            fill(wparam as HDC, &c, rgb(36, 38, 41));
+            return 1;
+        }
+        if ours && msg == WM_CLOSE {
             unsafe { ShowWindow(hwnd, SW_HIDE) };
             return 0;
         }
-        if msg == WM_SIZING
+        if ours && msg == WM_PAINT {
+            paint(hwnd);
+            return 0;
+        }
+        if ours && msg == WM_LBUTTONDOWN {
+            click(hwnd, i32::from((lparam & 0xFFFF) as u16 as i16), i32::from(((lparam >> 16) & 0xFFFF) as u16 as i16));
+            return 0;
+        }
+        if ours
+            && msg == WM_SIZING
             && let Some(v) = view_of(hwnd)
         {
             let Some(w) = (unsafe { (lparam as *mut RECT).as_mut() }) else { return 1 };
             let f = frame_insets(hwnd);
-            let mut r =
-                sb::ViewRect { left: 0, top: 0, right: (w.right - f.right) - (w.left - f.left), bottom: (w.bottom - f.bottom) - (w.top - f.top) };
+            let top = header_px(hwnd);
+            let mut r = sb::ViewRect {
+                left: 0,
+                top: 0,
+                right: (w.right - f.right) - (w.left - f.left),
+                bottom: ((w.bottom - f.bottom) - (w.top - f.top) - top).max(1),
+            };
             if unsafe { v.checkSizeConstraint(&mut r) } == sb::kResultTrue {
-                let (cw, ch) = (r.right - r.left, r.bottom - r.top);
+                let (cw, ch) = ((r.right - r.left).max(min_width(hwnd)), r.bottom - r.top + top);
                 let (ow, oh) = (cw + f.right - f.left, ch + f.bottom - f.top);
                 if matches!(wparam as u32, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT) {
                     w.left = w.right - ow;
@@ -1912,13 +2240,16 @@ mod window {
             }
             return 1;
         }
-        if msg == WM_SIZE
-            && !PLUGIN_RESIZING.with(std::cell::Cell::get)
-            && let Some(v) = view_of(hwnd)
-        {
-            let mut r = sb::ViewRect { left: 0, top: 0, right: (lparam & 0xFFFF) as i32, bottom: ((lparam >> 16) & 0xFFFF) as i32 };
-            if r.right > 0 && r.bottom > 0 {
-                unsafe { v.onSize(&mut r) };
+        if ours && msg == WM_SIZE {
+            let (cw, ch) = place_content(hwnd, (lparam & 0xFFFF) as i32, ((lparam >> 16) & 0xFFFF) as i32);
+            unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
+            if !PLUGIN_RESIZING.with(std::cell::Cell::get)
+                && let Some(v) = view_of(hwnd)
+            {
+                let mut r = sb::ViewRect { left: 0, top: 0, right: cw, bottom: ch };
+                if r.right > 0 && r.bottom > 0 {
+                    unsafe { v.onSize(&mut r) };
+                }
             }
         }
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
@@ -1972,7 +2303,7 @@ mod window {
             }
             let class = class_name().ok_or_else(|| "cannot register the editor window class".to_string())?;
             let title = wide(title);
-            let (ow, oh) = outer_size(STYLE, 0, w, h);
+            let (ow, oh) = outer_size(STYLE, 0, w, h + HEADER);
             let owner = unsafe { GetActiveWindow() };
             let hwnd = unsafe {
                 CreateWindowExW(
@@ -1993,6 +2324,28 @@ mod window {
             if hwnd.is_null() {
                 return Err("cannot create the editor window".into());
             }
+            let top = header_px(hwnd);
+            let content = unsafe {
+                CreateWindowExW(
+                    0,
+                    class.as_ptr(),
+                    std::ptr::null(),
+                    WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                    0,
+                    top,
+                    w as i32,
+                    h as i32,
+                    hwnd,
+                    std::ptr::null_mut(),
+                    GetModuleHandleW(std::ptr::null()),
+                    std::ptr::null(),
+                )
+            };
+            if content.is_null() {
+                unsafe { DestroyWindow(hwnd) };
+                return Err("cannot create the editor window".into());
+            }
+            STATES.with(|s| s.borrow_mut().insert(hwnd as usize, State { header: EditorHeader::default(), actions: Vec::new(), content }));
             Ok(HostWindow { hwnd })
         }
 
@@ -2019,12 +2372,35 @@ mod window {
             }
         }
 
+        pub fn set_header(&self, header: &EditorHeader) {
+            let Some(h) = self.live() else { return };
+            let changed = with_state(h, |s| {
+                let c = s.header != *header;
+                if c {
+                    s.header = header.clone();
+                }
+                c
+            });
+            if changed == Some(true) {
+                let mut c = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                unsafe { GetClientRect(h, &mut c) };
+                if c.right < min_width(h) {
+                    resize(h, f64::from(c.right), f64::from(c.bottom - header_px(h)));
+                }
+                unsafe { InvalidateRect(h, std::ptr::null(), 0) };
+            }
+        }
+
+        pub fn take_actions(&self) -> Vec<HeaderAction> {
+            self.live().and_then(|h| with_state(h, |s| std::mem::take(&mut s.actions))).unwrap_or_default()
+        }
+
         pub fn raw(&self) -> *mut c_void {
             self.hwnd
         }
 
         pub fn parent(&self) -> *mut c_void {
-            self.live().unwrap_or(std::ptr::null_mut())
+            self.live().and_then(|h| with_state(h, |s| s.content)).unwrap_or(std::ptr::null_mut())
         }
 
         pub fn raise(&self) {
@@ -2042,6 +2418,7 @@ mod window {
 
         pub fn close(self) {
             if let Some(h) = self.live() {
+                STATES.with(|s| s.borrow_mut().remove(&(h as usize)));
                 unsafe { DestroyWindow(h) };
             }
         }
@@ -2052,7 +2429,9 @@ mod window {
             return;
         }
         let (style, ex) = unsafe { (GetWindowLongPtrW(window, GWL_STYLE) as u32, GetWindowLongPtrW(window, GWL_EXSTYLE) as u32) };
-        let (ow, oh) = outer_size(style, ex, w, h);
+        let top = f64::from(header_px(window));
+        let w = w.max(f64::from(min_width(window)));
+        let (ow, oh) = outer_size(style, ex, w, h + top);
         PLUGIN_RESIZING.with(|f| f.set(true));
         unsafe { SetWindowPos(window, std::ptr::null_mut(), 0, 0, ow, oh, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) };
         PLUGIN_RESIZING.with(|f| f.set(false));
@@ -2088,6 +2467,12 @@ mod window {
             std::ptr::null_mut()
         }
         pub fn raise(&self) {}
+        pub fn set_header(&self, _header: &openpt_dsp::EditorHeader) {}
+
+        pub fn take_actions(&self) -> Vec<openpt_dsp::HeaderAction> {
+            Vec::new()
+        }
+
         pub fn is_visible(&self) -> bool {
             false
         }

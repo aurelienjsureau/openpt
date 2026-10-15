@@ -147,6 +147,28 @@ impl Plugin for Compressor {
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        self.run(io, None, frames);
+    }
+
+    fn accepts_key(&self) -> bool {
+        true
+    }
+
+    fn process_keyed(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
+        self.run(io, Some(key).filter(|k| !k.is_empty()), frames);
+    }
+
+    fn latency(&self) -> usize {
+        self.lookahead
+    }
+
+    fn gain_reduction_db(&self) -> f32 {
+        self.gr_meter
+    }
+}
+
+impl Compressor {
+    fn run(&mut self, io: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, frames: usize) {
         let ch = self.sc.len().min(io.len());
         let frames = frames_in(io, frames, ch);
         let hpf = self.p.on(6);
@@ -155,7 +177,11 @@ impl Plugin for Compressor {
         for n in 0..frames {
             let mut level = 0.0f32;
             for c in 0..ch {
-                let x = io.get(c).and_then(|b| b.get(n)).copied().unwrap_or(0.0);
+                let src = match key {
+                    Some(k) => k.get(c % k.len()),
+                    None => io.get(c),
+                };
+                let x = src.and_then(|b| b.get(n)).copied().unwrap_or(0.0);
                 let s = match self.sc.get_mut(c) {
                     Some(f) if hpf => f.process_sample(x),
                     _ => x,
@@ -177,14 +203,6 @@ impl Plugin for Compressor {
             }
         }
         self.gr_meter = max_gr;
-    }
-
-    fn latency(&self) -> usize {
-        self.lookahead
-    }
-
-    fn gain_reduction_db(&self) -> f32 {
-        self.gr_meter
     }
 }
 
@@ -293,11 +311,31 @@ impl Plugin for ExpanderGate {
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        self.run(io, None, frames);
+    }
+
+    fn accepts_key(&self) -> bool {
+        true
+    }
+
+    fn process_keyed(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
+        self.run(io, Some(key).filter(|k| !k.is_empty()), frames);
+    }
+
+    fn gain_reduction_db(&self) -> f32 {
+        self.gr_meter
+    }
+}
+
+impl ExpanderGate {
+    fn run(&mut self, io: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, frames: usize) {
         let ch = self.ch.min(io.len());
         let frames = frames_in(io, frames, ch);
         let mut max_gr = 0.0f32;
         for n in 0..frames {
-            let level = io.iter().take(ch).filter_map(|b| b.get(n)).fold(0.0f32, |m, v| m.max(v.abs()));
+            let det = key.unwrap_or(&*io);
+            let take = if key.is_some() { det.len() } else { ch };
+            let level = det.iter().take(take).filter_map(|b| b.get(n)).fold(0.0f32, |m, v| m.max(v.abs()));
             let gr = self.tick(level);
             max_gr = max_gr.max(gr);
             let g = db_to_gain(-gr);
@@ -308,10 +346,6 @@ impl Plugin for ExpanderGate {
             }
         }
         self.gr_meter = max_gr;
-    }
-
-    fn gain_reduction_db(&self) -> f32 {
-        self.gr_meter
     }
 }
 
@@ -408,6 +442,24 @@ impl Plugin for DeEsser {
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        self.run(io, None, frames);
+    }
+
+    fn accepts_key(&self) -> bool {
+        true
+    }
+
+    fn process_keyed(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
+        self.run(io, Some(key).filter(|k| !k.is_empty()), frames);
+    }
+
+    fn gain_reduction_db(&self) -> f32 {
+        self.gr_meter
+    }
+}
+
+impl DeEsser {
+    fn run(&mut self, io: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, frames: usize) {
         const CHUNK: usize = 16;
         let ch = self.hp.len().min(io.len());
         let frames = frames_in(io, frames, ch);
@@ -421,7 +473,11 @@ impl Plugin for DeEsser {
                 for c in 0..ch {
                     let (Some(b), Some(f)) = (io.get_mut(c), self.hp.get_mut(c)) else { continue };
                     let Some(x) = b.get_mut(i) else { continue };
-                    let h = f.process_sample(*x);
+                    let src = match key {
+                        Some(k) => k.get(c % k.len()).and_then(|kc| kc.get(i)).copied().unwrap_or(0.0),
+                        None => *x,
+                    };
+                    let h = f.process_sample(src);
                     level = level.max(h.abs());
                     if listen {
                         *x = h;
@@ -447,10 +503,6 @@ impl Plugin for DeEsser {
             n += len;
         }
         self.gr_meter = max_gr;
-    }
-
-    fn gain_reduction_db(&self) -> f32 {
-        self.gr_meter
     }
 }
 

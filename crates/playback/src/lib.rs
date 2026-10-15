@@ -702,6 +702,35 @@ impl Player {
         out
     }
 
+    pub fn set_editor_header(&self, track: TrackId, slot: usize, header: &openpt_dsp::EditorHeader) {
+        if let Some(e) = self.side().editors.get_mut(&(track, slot)) {
+            e.set_header(header);
+        }
+    }
+
+    pub fn header_actions(&self) -> Vec<(TrackId, usize, openpt_dsp::HeaderAction)> {
+        let mut side = self.side();
+        let mut out = Vec::new();
+        for (&(t, slot), e) in side.editors.iter_mut() {
+            out.extend(e.header_actions().into_iter().map(|a| (t, slot, a)));
+        }
+        out
+    }
+
+    pub fn plugin_state(&self, track: TrackId, slot: usize) -> Option<Vec<u8>> {
+        self.side().states.get_mut(&(track, slot)).and_then(|r| r.save_state())
+    }
+
+    pub fn load_plugin_state(&self, track: TrackId, slot: usize, data: &[u8]) -> bool {
+        self.side().editors.get_mut(&(track, slot)).is_some_and(|e| e.load_state(data))
+    }
+
+    pub fn editor_params(&self, track: TrackId, slot: usize, ids: &[String]) -> Vec<(String, f32)> {
+        let mut side = self.side();
+        let Some(e) = side.editors.get_mut(&(track, slot)) else { return Vec::new() };
+        ids.iter().filter_map(|id| Some((id.clone(), e.param_value(id)?))).collect()
+    }
+
     pub fn has_editor(&self, track: TrackId, slot: usize) -> bool {
         self.side().editors.contains_key(&(track, slot))
     }

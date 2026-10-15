@@ -417,6 +417,12 @@ pub struct Insert {
     pub sample: Option<SourceId>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub multi_mono: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<BusId>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub key_on: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub key_listen: bool,
 }
 
 fn yes() -> bool {
@@ -434,7 +440,14 @@ impl Insert {
             state: None,
             sample: None,
             multi_mono: false,
+            key: None,
+            key_on: false,
+            key_listen: false,
         }
+    }
+
+    pub fn keyed_bus(&self) -> Option<BusId> {
+        self.key.filter(|_| self.key_on && self.active && !self.bypass)
     }
 
     pub fn instance_id(&self) -> String {

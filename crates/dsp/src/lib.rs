@@ -173,6 +173,12 @@ pub trait Plugin: Send {
     fn gain_reduction_db(&self) -> f32 {
         0.0
     }
+    fn accepts_key(&self) -> bool {
+        false
+    }
+    fn process_keyed(&mut self, io: &mut [Vec<f32>], _key: &[Vec<f32>], frames: usize) {
+        self.process(io, frames);
+    }
     fn set_transport(&mut self, _transport: &Transport) {}
     fn note_on(&mut self, _offset: usize, _note: u8, _velocity: u8) {}
     fn note_on_chan(&mut self, offset: usize, _channel: u8, note: u8, velocity: u8) {
@@ -217,6 +223,42 @@ pub trait PluginEditor: Send {
     fn is_open(&self) -> bool;
     fn idle(&mut self) -> Vec<(String, f32)>;
     fn set_param(&mut self, _id: &str, _value: f32) {}
+    fn set_header(&mut self, _header: &EditorHeader) {}
+    fn header_actions(&mut self) -> Vec<HeaderAction> {
+        Vec::new()
+    }
+    fn load_state(&mut self, _data: &[u8]) -> bool {
+        false
+    }
+    fn param_value(&mut self, _id: &str) -> Option<f32> {
+        None
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EditorHeader {
+    pub track: String,
+    pub slot: String,
+    pub preset: String,
+    pub presets: Vec<String>,
+    pub bypass: bool,
+    pub takes_key: bool,
+    pub busses: Vec<String>,
+    pub key: Option<usize>,
+    pub key_on: bool,
+    pub key_listen: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum HeaderAction {
+    Bypass,
+    Preset(Option<usize>),
+    PrevPreset,
+    NextPreset,
+    SavePreset,
+    Key(Option<usize>),
+    ExternalKey,
+    KeyListen,
 }
 
 pub trait PluginStateReader: Send {

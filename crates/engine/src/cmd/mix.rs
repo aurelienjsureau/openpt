@@ -114,6 +114,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("mix.insert_remove", "Remove Insert", [], None, "{track?, slot}", has_selection, insert_remove),
         cmd!("mix.insert_bypass", "Bypass Insert", [], None, "{track?, slot, value?: bool}", has_selection, insert_bypass),
+        cmd!(
+            "mix.insert_key",
+            "Key Input",
+            [],
+            None,
+            "{track?, slot, bus?: name | id | null, on?: bool, listen?: bool} (choosing a bus turns External Key on)",
+            has_selection,
+            insert_key
+        ),
         cmd!("mix.insert_param", "Set Plugin Parameter", [], None, "{track?, slot, param, value}", has_selection, insert_param),
         cmd!(
             "mix.insert_params",
@@ -399,6 +408,34 @@ fn insert_bypass(e: &mut Engine, p: &Value) -> Result<Value> {
         .ok_or_else(|| bad("mix.insert_bypass", "empty slot"))?;
     ins.bypass = val.unwrap_or(!ins.bypass);
     Ok(json!({"bypass": ins.bypass}))
+}
+
+fn insert_key(e: &mut Engine, p: &Value) -> Result<Value> {
+    let (t, slot) = track_slot(e, p, "mix.insert_key", INSERT_SLOTS)?;
+    let s = e.session_mut();
+    let bus = match p.get("bus") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::String(n)) if n.is_empty() || n.eq_ignore_ascii_case("none") => Some(None),
+        Some(Value::String(n)) => Some(Some(s.bus_by_name(n).map(|b| b.id).ok_or_else(|| bad("mix.insert_key", format!("no bus `{n}`")))?)),
+        Some(Value::Number(n)) => {
+            let id = n.as_u64().ok_or_else(|| bad("mix.insert_key", "bad bus id"))?;
+            Some(Some(s.busses.iter().find(|b| b.id.0 == id).map(|b| b.id).ok_or_else(|| bad("mix.insert_key", format!("no bus {id}")))?))
+        }
+        Some(_) => return Err(bad("mix.insert_key", "`bus` must be a name, an id or null")),
+    };
+    let ins = s
+        .track_mut(t)
+        .and_then(|tr| tr.mixer.inserts.get_mut(slot))
+        .and_then(Option::as_mut)
+        .ok_or_else(|| bad("mix.insert_key", "empty slot"))?;
+    if let Some(b) = bus {
+        ins.key = b;
+        ins.key_on = b.is_some();
+    }
+    ins.key_on = bool_or(p, "on", ins.key_on) && ins.key.is_some();
+    ins.key_listen = bool_or(p, "listen", ins.key_listen) && ins.key_on;
+    Ok(json!({"bus": ins.key.map(|b| b.0), "on": ins.key_on, "listen": ins.key_listen}))
 }
 
 fn insert_param(e: &mut Engine, p: &Value) -> Result<Value> {

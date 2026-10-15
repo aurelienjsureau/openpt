@@ -681,6 +681,14 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, oc
         if ui.button("Bypass").clicked() {
             run_pick(app, ui, "mix.insert_bypass", json!({"track": id.0, "slot": slot}));
         }
+        if let Some(ins) = app.engine.session().track(id).and_then(|t| t.mixer.inserts.get(slot).cloned().flatten())
+            && crate::plugin_ui::takes_key(&ins.plugin)
+        {
+            ui.menu_button("Key Input", |ui| {
+                let busses: Vec<(u64, String)> = app.engine.session().busses.iter().map(|b| (b.id.0, b.name.clone())).collect();
+                crate::plugin_ui::key_menu(app, ui, id, slot, &ins, &busses);
+            });
+        }
         if ui.button("no insert").clicked() {
             run_pick(app, ui, "mix.insert_remove", json!({"track": id.0, "slot": slot}));
         }

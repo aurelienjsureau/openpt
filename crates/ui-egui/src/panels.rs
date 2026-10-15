@@ -535,6 +535,9 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                         }
                     }
                 });
+                if !instrument && crate::plugin_ui::takes_key(&ins.plugin) {
+                    ui.horizontal(|ui| crate::plugin_ui::key_input(app, ui, tid, slot, &ins));
+                }
                 if instrument && openpt_mix::is_third_party(&ins.plugin) {
                     ui.label(egui::RichText::new("Load and edit sounds in the plugin's own editor.").color(Tokens::current().text_dim));
                     return;
@@ -685,35 +688,86 @@ fn preset_dir(app: &SoundApp, plugin: &str) -> Option<std::path::PathBuf> {
     app.preset_dir.as_ref().map(|d| d.join(crate::preset_folder_name(plugin)))
 }
 
-fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, ins: &openpt_model::Insert) {
-    if ui.button("<factory default>").clicked() {
-        let defaults: serde_json::Map<String, serde_json::Value> = info.params.iter().map(|p| (p.id.to_string(), json!(p.default))).collect();
-        let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": defaults, "preset": "<factory default>"}));
-        ui.close();
-    }
-    let Some(dir) = preset_dir(app, info.id) else {
-        ui.label("User presets need the desktop app.");
-        return;
-    };
+pub(crate) fn preset_names(app: &SoundApp, plugin: &str) -> Vec<String> {
+    let Some(dir) = preset_dir(app, plugin) else { return Vec::new() };
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .map(|rd| rd.flatten().filter_map(|e| e.path().file_stem().and_then(|x| x.to_str()).map(str::to_string)).collect())
         .unwrap_or_default();
     names.sort();
-    for n in &names {
-        if ui.button(n).clicked() {
-            if let Ok(text) = std::fs::read_to_string(dir.join(format!("{n}.json")))
-                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&text)
-            {
-                let params: serde_json::Map<String, serde_json::Value> = v
-                    .get("params")
-                    .and_then(serde_json::Value::as_object)
-                    .into_iter()
-                    .flatten()
-                    .filter(|(k, val)| info.params.iter().any(|pi| pi.id == k.as_str()) && val.as_f64().is_some_and(f64::is_finite))
-                    .map(|(k, val)| (k.clone(), val.clone()))
-                    .collect();
-                let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": n}));
-            }
+    names
+}
+
+pub(crate) fn recall_preset(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, name: Option<&str>) {
+    let Some(name) = name else {
+        let defaults: serde_json::Map<String, serde_json::Value> = info.params.iter().map(|p| (p.id.to_string(), json!(p.default))).collect();
+        let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": defaults, "preset": "<factory default>"}));
+        return;
+    };
+    let Some(dir) = preset_dir(app, info.id) else { return };
+    let Some(v) = std::fs::read_to_string(dir.join(format!("{name}.json"))).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else {
+        app.ui.status = format!("Could not read the preset {name}");
+        return;
+    };
+    if let Some(state) = v.get("state").and_then(serde_json::Value::as_str)
+        && let Some(bytes) = openpt_model::b64::decode(state)
+        && let Some(p) = &app.player
+    {
+        if !p.load_plugin_state(tid, slot, &bytes) {
+            app.ui.status = format!("{} refused the preset {name}", info.name);
+            return;
+        }
+        let ids: Vec<String> = app
+            .engine
+            .session()
+            .track(tid)
+            .and_then(|t| t.mixer.inserts.get(slot).cloned().flatten())
+            .map(|i| i.params.keys().cloned().collect())
+            .unwrap_or_default();
+        let params: serde_json::Map<String, serde_json::Value> = p.editor_params(tid, slot, &ids).into_iter().map(|(k, x)| (k, json!(x))).collect();
+        let _ = app.engine.execute("mix.insert_state", &json!({"track": tid.0, "slot": slot, "state": state}));
+        let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": name}));
+        return;
+    }
+    let params: serde_json::Map<String, serde_json::Value> = v
+        .get("params")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(k, val)| info.params.iter().any(|pi| pi.id == k.as_str()) && val.as_f64().is_some_and(f64::is_finite))
+        .map(|(k, val)| (k.clone(), val.clone()))
+        .collect();
+    let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": name}));
+}
+
+pub(crate) fn save_preset(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, ins: &openpt_model::Insert, name: &str) {
+    let Some(dir) = preset_dir(app, info.id) else { return };
+    let clean = openpt_engine::io::sanitize_name(name);
+    let mut body = json!({"format": "openpt-plugin-preset", "plugin": info.id, "params": ins.params});
+    if openpt_mix::is_third_party(&ins.plugin)
+        && let Some(state) = app.player.as_ref().and_then(|p| p.plugin_state(tid, slot))
+    {
+        body["state"] = json!(openpt_model::b64::encode(&state));
+    }
+    let ok = std::fs::create_dir_all(&dir).is_ok() && std::fs::write(dir.join(format!("{clean}.json")), body.to_string()).is_ok();
+    app.ui.status = if ok { format!("Saved preset {clean}") } else { "Could not save the preset".into() };
+    if ok {
+        let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": {}, "preset": clean}));
+    }
+}
+
+fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, ins: &openpt_model::Insert) {
+    if ui.button("<factory default>").clicked() {
+        recall_preset(app, tid, slot, info, None);
+        ui.close();
+    }
+    if preset_dir(app, info.id).is_none() {
+        ui.label("User presets need the desktop app.");
+        return;
+    }
+    for n in preset_names(app, info.id) {
+        if ui.button(&n).clicked() {
+            recall_preset(app, tid, slot, info, Some(&n));
             ui.close();
         }
     }
@@ -723,13 +777,7 @@ fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut name).desired_width(140.0));
         if ui.button("Save").clicked() {
-            let clean = openpt_engine::io::sanitize_name(&name);
-            let body = json!({"format": "openpt-plugin-preset", "plugin": info.id, "params": ins.params});
-            let ok = std::fs::create_dir_all(&dir).is_ok() && std::fs::write(dir.join(format!("{clean}.json")), body.to_string()).is_ok();
-            app.ui.status = if ok { format!("Saved preset {clean}") } else { "Could not save the preset".into() };
-            if ok {
-                let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": {}, "preset": clean}));
-            }
+            save_preset(app, tid, slot, info, ins, &name);
         }
     });
     ui.ctx().memory_mut(|m| m.data.insert_temp(key, name));

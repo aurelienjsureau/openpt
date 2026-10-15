@@ -16,7 +16,7 @@ pub fn header(
     ui: &mut Ui,
     tid: TrackId,
     slot: usize,
-    info: &PluginInfo,
+    _info: &PluginInfo,
     ins: &Insert,
     presets: impl FnOnce(&mut SoundApp, &mut Ui),
 ) {
@@ -50,9 +50,11 @@ pub fn header(
                 let _ = app.run("mix.insert_bypass", json!({"track": tid.0, "slot": slot}));
             }
             ui.add_enabled(false, egui::Button::new("Auto").small());
-            ui.label(small(&format!("{} · {}", char::from(b'a'.saturating_add(slot as u8)), info.name)));
         });
     });
+    if takes_key(&ins.plugin) {
+        ui.horizontal(|ui| key_input(app, ui, tid, slot, ins));
+    }
 }
 
 pub fn panel(ui: &mut Ui, info: &PluginInfo, ins: &Insert, mut set: impl FnMut(&str, f32)) {
@@ -214,6 +216,50 @@ fn draw_graph(p: &egui::Painter, g: Rect, kind: Graph, info: &PluginInfo, ins: &
             p.rect_stroke(sq, 0.0, Stroke::new(1.0, grid), StrokeKind::Inside);
             p.text(pos2(sq.max.x + 6.0, sq.min.y + 8.0), Align2::LEFT_CENTER, format!("Threshold {th:.1} dB"), regular(9.0), LABEL);
             p.text(pos2(sq.max.x + 6.0, sq.min.y + 22.0), Align2::LEFT_CENTER, format!("Ratio {ratio:.1}:1"), regular(9.0), LABEL);
+        }
+    }
+}
+
+pub fn takes_key(plugin: &str) -> bool {
+    openpt_mix::is_third_party(plugin) || matches!(plugin, "compressor" | "expander_gate" | "de_esser")
+}
+
+pub fn key_input(app: &mut SoundApp, ui: &mut Ui, tid: TrackId, slot: usize, ins: &Insert) {
+    let t = Tokens::current();
+    let busses: Vec<(u64, String)> = app.engine.session().busses.iter().map(|b| (b.id.0, b.name.clone())).collect();
+    let current = ins.key.and_then(|k| busses.iter().find(|(id, _)| *id == k.0)).map_or("no key input", |(_, n)| n.as_str()).to_string();
+    let lit = |on: bool| if on { Color32::from_rgb(232, 160, 40) } else { t.slot_face[0] };
+    let (r, resp) = ui.allocate_exact_size(vec2(16.0, 14.0), Sense::hover());
+    let col = if ins.key_on { Color32::from_rgb(232, 160, 40) } else { t.text_dim };
+    let p = ui.painter();
+    let c = pos2(r.min.x + 4.5, r.center().y);
+    p.circle_stroke(c, 3.0, Stroke::new(1.5, col));
+    p.line_segment([pos2(c.x + 3.0, c.y), pos2(r.max.x - 1.0, c.y)], Stroke::new(1.5, col));
+    for x in [r.max.x - 2.0, r.max.x - 5.0] {
+        p.line_segment([pos2(x, c.y), pos2(x, c.y + 3.0)], Stroke::new(1.5, col));
+    }
+    resp.on_hover_text("Key Input");
+    ui.menu_button(egui::RichText::new(current).font(regular(11.0)), |ui| key_menu(app, ui, tid, slot, ins, &busses));
+    let ext = ui.add_enabled(ins.key.is_some(), egui::Button::new(egui::RichText::new("External Key").font(regular(10.0))).fill(lit(ins.key_on)).small());
+    if ext.clicked() {
+        let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "on": !ins.key_on}));
+    }
+    let listen = ui.add_enabled(ins.key_on, egui::Button::new(egui::RichText::new("Key Listen").font(regular(10.0))).fill(lit(ins.key_listen)).small());
+    if listen.clicked() {
+        let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "listen": !ins.key_listen}));
+    }
+}
+
+pub fn key_menu(app: &mut SoundApp, ui: &mut Ui, tid: TrackId, slot: usize, ins: &Insert, busses: &[(u64, String)]) {
+    if ui.selectable_label(ins.key.is_none(), "no key input").clicked() {
+        let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "bus": null}));
+        ui.close();
+    }
+    ui.separator();
+    for (id, name) in busses {
+        if ui.selectable_label(ins.key.is_some_and(|k| k.0 == *id), name).clicked() {
+            let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "bus": id}));
+            ui.close();
         }
     }
 }

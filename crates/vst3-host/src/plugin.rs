@@ -31,6 +31,7 @@ pub struct Vst3Plugin {
     has_input: bool,
     has_output: bool,
     event_input: bool,
+    key: bool,
     held: [bool; 128],
     channels: usize,
     max_block: usize,
@@ -79,6 +80,7 @@ impl Vst3Plugin {
             has_input: false,
             has_output: false,
             event_input: false,
+            key: false,
             held: [false; 128],
             channels: 2,
             max_block: 0,
@@ -191,6 +193,7 @@ impl Plugin for Vst3Plugin {
                 self.has_input = layout.inputs.first().is_some_and(|&c| c > 0);
                 self.has_output = layout.outputs.first().is_some_and(|&c| c > 0);
                 self.event_input = layout.event_input;
+                self.key = layout.key;
                 self.max_block = mb;
                 self.latency = self.inst.latency() as usize;
                 self.tail = self.inst.tail() as usize;
@@ -240,77 +243,15 @@ impl Plugin for Vst3Plugin {
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
-        if !self.inst.is_active() || self.max_block == 0 {
-            return;
-        }
-        let ch = self.channels.min(io.len());
-        let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
-        if frames == 0 || ch == 0 {
-            return;
-        }
-        if self.inst.host().latency_changed.swap(false, Ordering::Relaxed) {
-            self.latency = self.inst.latency() as usize;
-        }
-        let last = u32::try_from(frames - 1).unwrap_or(u32::MAX);
-        for e in &mut self.notes {
-            if e.time() > last {
-                e.set_time(last);
-            }
-        }
-        for c in &mut self.controls {
-            c.0 = c.0.min(last);
-        }
-        let mut start = 0usize;
-        while start < frames {
-            let n = (frames - start).min(self.max_block);
-            let end = u32::try_from(start + n).unwrap_or(u32::MAX);
-            if self.has_input {
-                for c in 0..self.inputs.channels(0) {
-                    let src = io.get(c.min(ch - 1)).and_then(|s| s.get(start..start + n));
-                    if let (Some(src), Some(dst)) = (src, self.inputs.channel_mut(0, c).and_then(|d| d.get_mut(..n))) {
-                        dst.copy_from_slice(src);
-                    }
-                }
-            }
-            let k = self.notes.iter().position(|e| e.time() >= end).unwrap_or(self.notes.len());
-            let offset = u32::try_from(start).unwrap_or(u32::MAX);
-            let notes = self.notes.get(..k).unwrap_or(&[]);
-            let r = self.inst.process(
-                n,
-                &mut self.inputs,
-                &mut self.outputs,
-                &self.pending,
-                &self.controls,
-                notes,
-                offset,
-                self.position,
-                self.transport.as_ref(),
-            );
-            self.pending.clear();
-            self.notes.drain(..k);
-            self.position = self.position.saturating_add(i64::try_from(n).unwrap_or(0));
-            match r {
-                Ok(()) if self.has_output => {
-                    let oc = self.outputs.channels(0);
-                    for (c, dst) in io.iter_mut().take(ch).enumerate() {
-                        let Some(dst) = dst.get_mut(start..start + n) else { continue };
-                        if ch == 1 && oc >= 2 {
-                            if let (Some(l), Some(r)) = (self.outputs.channel(0, 0), self.outputs.channel(0, 1)) {
-                                for ((d, a), b) in dst.iter_mut().zip(l).zip(r) {
-                                    *d = 0.5 * (a + b);
-                                }
-                            }
-                        } else if let Some(src) = self.outputs.channel(0, c.min(oc.saturating_sub(1))).and_then(|s| s.get(..n)) {
-                            dst.copy_from_slice(src);
-                        }
-                    }
-                }
-                Err(e) => log::debug!("{}: {e}", self.info.id),
-                _ => {}
-            }
-            start += n;
-        }
-        self.controls.clear();
+        self.run(io, None, frames);
+    }
+
+    fn accepts_key(&self) -> bool {
+        self.key
+    }
+
+    fn process_keyed(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
+        self.run(io, Some(key).filter(|k| !k.is_empty()), frames);
     }
 
     fn latency(&self) -> usize {
@@ -421,6 +362,95 @@ impl Plugin for Vst3Plugin {
     }
 }
 
+impl Vst3Plugin {
+    fn run(&mut self, io: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, frames: usize) {
+        if !self.inst.is_active() || self.max_block == 0 {
+            return;
+        }
+        let ch = self.channels.min(io.len());
+        let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
+        if frames == 0 || ch == 0 {
+            return;
+        }
+        if self.inst.host().latency_changed.swap(false, Ordering::Relaxed) {
+            self.latency = self.inst.latency() as usize;
+        }
+        let last = u32::try_from(frames - 1).unwrap_or(u32::MAX);
+        for e in &mut self.notes {
+            if e.time() > last {
+                e.set_time(last);
+            }
+        }
+        for c in &mut self.controls {
+            c.0 = c.0.min(last);
+        }
+        let mut start = 0usize;
+        while start < frames {
+            let n = (frames - start).min(self.max_block);
+            let end = u32::try_from(start + n).unwrap_or(u32::MAX);
+            if self.has_input {
+                for c in 0..self.inputs.channels(0) {
+                    let src = io.get(c.min(ch - 1)).and_then(|s| s.get(start..start + n));
+                    if let (Some(src), Some(dst)) = (src, self.inputs.channel_mut(0, c).and_then(|d| d.get_mut(..n))) {
+                        dst.copy_from_slice(src);
+                    }
+                }
+            }
+            if self.key {
+                for c in 0..self.inputs.channels(1) {
+                    let src = match key {
+                        Some(k) => k.get(c % k.len()),
+                        None => io.get(c.min(ch - 1)),
+                    };
+                    let Some(dst) = self.inputs.channel_mut(1, c).and_then(|d| d.get_mut(..n)) else { continue };
+                    match src.and_then(|s| s.get(start..start + n)) {
+                        Some(src) => dst.copy_from_slice(src),
+                        None => dst.fill(0.0),
+                    }
+                }
+            }
+            let k = self.notes.iter().position(|e| e.time() >= end).unwrap_or(self.notes.len());
+            let offset = u32::try_from(start).unwrap_or(u32::MAX);
+            let notes = self.notes.get(..k).unwrap_or(&[]);
+            let r = self.inst.process(
+                n,
+                &mut self.inputs,
+                &mut self.outputs,
+                &self.pending,
+                &self.controls,
+                notes,
+                offset,
+                self.position,
+                self.transport.as_ref(),
+            );
+            self.pending.clear();
+            self.notes.drain(..k);
+            self.position = self.position.saturating_add(i64::try_from(n).unwrap_or(0));
+            match r {
+                Ok(()) if self.has_output => {
+                    let oc = self.outputs.channels(0);
+                    for (c, dst) in io.iter_mut().take(ch).enumerate() {
+                        let Some(dst) = dst.get_mut(start..start + n) else { continue };
+                        if ch == 1 && oc >= 2 {
+                            if let (Some(l), Some(r)) = (self.outputs.channel(0, 0), self.outputs.channel(0, 1)) {
+                                for ((d, a), b) in dst.iter_mut().zip(l).zip(r) {
+                                    *d = 0.5 * (a + b);
+                                }
+                            }
+                        } else if let Some(src) = self.outputs.channel(0, c.min(oc.saturating_sub(1))).and_then(|s| s.get(..n)) {
+                            dst.copy_from_slice(src);
+                        }
+                    }
+                }
+                Err(e) => log::debug!("{}: {e}", self.info.id),
+                _ => {}
+            }
+            start += n;
+        }
+        self.controls.clear();
+    }
+}
+
 struct Vst3Editor {
     link: Arc<EditorLink>,
     host: ComWrapper<HostContext>,
@@ -487,5 +517,23 @@ impl PluginEditor for Vst3Editor {
         if let (Some(&vid), Some(n)) = (self.ids.get(i), self.normalized(i, value)) {
             self.link.set_normalized(vid, n);
         }
+    }
+
+    fn set_header(&mut self, header: &openpt_dsp::EditorHeader) {
+        self.link.set_header(header);
+    }
+
+    fn header_actions(&mut self) -> Vec<openpt_dsp::HeaderAction> {
+        self.link.header_actions()
+    }
+
+    fn load_state(&mut self, data: &[u8]) -> bool {
+        self.link.load_state(data)
+    }
+
+    fn param_value(&mut self, id: &str) -> Option<f32> {
+        let i = self.info.params.iter().position(|p| p.id == id)?;
+        let n = self.link.normalized(*self.ids.get(i)?)?;
+        self.plain(i, n)
     }
 }
