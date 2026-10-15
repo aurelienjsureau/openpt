@@ -88,7 +88,7 @@ fn open_paths(app: &mut SoundApp, paths: &[String]) {
     let mut audio = Vec::new();
     for p in paths {
         let lower = p.to_ascii_lowercase();
-        let r = if lower.ends_with(".openpt") {
+        let r = if lower.ends_with(".openpt") || lower.ends_with(".ptx") || lower.ends_with(".ptxt") {
             dialogs::run_or_ask(app, "session.open", serde_json::json!({"path": p}))
         } else if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
             app.run("file.import_midi", serde_json::json!({"path": p}))
