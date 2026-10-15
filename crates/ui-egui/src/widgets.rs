@@ -182,8 +182,8 @@ pub fn knob(ui: &mut Ui, size: f32, value: &mut f32, range: std::ops::RangeInclu
     p.circle_filled(c + vec2(0.0, 1.0), rad + 1.0, Color32::from_black_alpha(110));
     rounded_vgradient(p, Rect::from_center_size(c, Vec2::splat(2.0 * rad)), 2.0 * rad, shade(t.knob_bg, 0.18), shade(t.knob_bg, -0.25));
     p.circle_stroke(c, rad, Stroke::new(1.2, t.knob_ring));
-    p.line_segment([c + d * rad * 0.1, c + d * (rad - 1.5)], Stroke::new(1.6, t.knob_pointer));
-    p.circle_filled(c + d * (rad + 3.0), 1.8, t.counter_text);
+    p.line_segment([c + d * rad * 0.15, c + d * (rad - 3.2)], Stroke::new(1.6, t.knob_pointer));
+    p.circle_filled(c + d * rad, 2.1, t.counter_text);
     resp.on_hover_text(tip)
 }
 

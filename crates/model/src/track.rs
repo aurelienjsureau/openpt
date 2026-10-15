@@ -225,6 +225,22 @@ pub struct Track {
     pub pinned: bool,
     #[serde(default)]
     pub midi_channel: Option<u8>,
+    #[serde(default)]
+    pub midi_from: Option<MidiFrom>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MidiFrom {
+    Track(TrackId),
+    Plugins(TrackId),
+}
+
+impl MidiFrom {
+    pub fn track(self) -> TrackId {
+        match self {
+            MidiFrom::Track(t) | MidiFrom::Plugins(t) => t,
+        }
+    }
 }
 
 fn yes() -> bool {
@@ -265,6 +281,7 @@ impl Track {
             elastic: None,
             pinned: false,
             midi_channel: None,
+            midi_from: None,
         }
     }
 

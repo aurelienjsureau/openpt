@@ -67,6 +67,7 @@ impl Rig {
 #[test]
 fn dragging_a_track_list_row_moves_the_track_to_the_gap_it_is_dropped_in() {
     let mut r = Rig::new();
+    r.app.engine.session_mut().edit.selected_tracks.clear();
     let ids = r.order();
     let (from, lower_half_of_fifth) = (r.row(0), r.row(4) + vec2(0.0, 5.0));
     r.drag(from, lower_half_of_fifth);

@@ -84,23 +84,20 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac|mp3, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: false, fold_down?: stereo}", always, bounce),
         cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo}", has_tracks, |e, p| {
-            let dir = str_param(p, "dir").ok_or_else(|| bad("file.bounce_stems", "`dir` required"))?.to_string();
-            let r = range_param(e, "file.bounce_stems", p)?;
-            let r = if r.is_empty() { openpt_time::Range::new(0, e.session().content_end().max(1)) } else { r };
-            let format = match str_param(p, "format") {
-                Some("aiff") | Some("aif") => openpt_audio_io::FileFormat::Aiff,
-                Some("flac") => openpt_audio_io::FileFormat::Flac,
-                _ => openpt_audio_io::FileFormat::Wav,
-            };
-            let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
-                Some("16") => openpt_audio_io::BitDepth::Int16,
-                Some("32") | Some("32f") => openpt_audio_io::BitDepth::Float32,
-                _ => openpt_audio_io::BitDepth::Int24,
-            };
-            let fold = fold_down_param(p, "file.bounce_stems")?;
-            let files = crate::io::bounce_stems_with(e, &dir, r, &openpt_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", false), bwf: None }, fold)?;
-            Ok(json!({"files": files}))
+            stems(e, p, "file.bounce_stems", None)
         }),
+        cmd!(
+            noundo "file.export_tracks_audio",
+            "Selected Tracks as Audio Files...",
+            ["File", "Export"],
+            None,
+            "{dir, tracks?, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?} — each track (audio, instrument, MIDI, aux) rendered alone to a file",
+            has_selection,
+            |e, p| {
+                let tracks = tracks_required(e, "file.export_tracks_audio", p)?;
+                stems(e, p, "file.export_tracks_audio", Some(tracks))
+            }
+        ),
         cmd!(noundo "file.export_midi", "MIDI...", ["File", "Export"], None, "{path, tracks?}", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("file.export_midi", "`path` required"))?.to_string();
             let only = if p.get("tracks").is_some() || p.get("track").is_some() { Some(tracks_param(e, "file.export_midi", p)?) } else { None };
@@ -345,6 +342,26 @@ fn write_score(e: &mut Engine, p: &Value, id: &str, svg: bool) -> Result<Value> 
     crate::io::write_file(&path, text.as_bytes())?;
     let measures = parts.iter().map(|p| p.measures.len()).max().unwrap_or(0);
     Ok(json!({"path": path, "parts": parts.len(), "measures": measures}))
+}
+
+fn stems(e: &mut Engine, p: &Value, id: &str, only: Option<Vec<TrackId>>) -> Result<Value> {
+    let dir = str_param(p, "dir").ok_or_else(|| bad(id, "`dir` required"))?.to_string();
+    let r = range_param(e, id, p)?;
+    let r = if r.is_empty() { openpt_time::Range::new(0, e.session().content_end().max(1)) } else { r };
+    let format = match str_param(p, "format") {
+        Some("aiff") | Some("aif") => openpt_audio_io::FileFormat::Aiff,
+        Some("flac") => openpt_audio_io::FileFormat::Flac,
+        _ => openpt_audio_io::FileFormat::Wav,
+    };
+    let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
+        Some("16") => openpt_audio_io::BitDepth::Int16,
+        Some("32") | Some("32f") => openpt_audio_io::BitDepth::Float32,
+        _ => openpt_audio_io::BitDepth::Int24,
+    };
+    let fold = fold_down_param(p, id)?;
+    let opts = openpt_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", false), bwf: None };
+    let files = crate::io::bounce_stems_with(e, &dir, r, &opts, fold, only.as_deref())?;
+    Ok(json!({"files": files}))
 }
 
 #[cfg(test)]

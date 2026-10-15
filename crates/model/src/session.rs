@@ -472,6 +472,32 @@ impl Session {
         id
     }
 
+    pub fn grid_anchors(&self) -> Vec<Samples> {
+        let mut a: Vec<Samples> = self.tracks.iter().flat_map(|t| t.clips().iter().flat_map(|c| [c.start, c.end()])).collect();
+        a.extend(self.markers.iter().map(|m| m.start));
+        a.sort_unstable();
+        a.dedup();
+        a
+    }
+
+    pub fn snap_to_grid(&self, pos: Samples) -> Samples {
+        let g = self.edit.grid;
+        let anchors = if g == openpt_time::GridValue::ClipsMarkers { self.grid_anchors() } else { Vec::new() };
+        g.snap_with(pos, self.sample_rate, &self.tempo, self.frame_rate, &anchors)
+    }
+
+    pub fn grid_line_at_or_before(&self, pos: Samples) -> Samples {
+        let g = self.edit.grid;
+        let anchors = if g == openpt_time::GridValue::ClipsMarkers { self.grid_anchors() } else { Vec::new() };
+        g.line_at_or_before_with(pos, self.sample_rate, &self.tempo, self.frame_rate, &anchors)
+    }
+
+    pub fn grid_lines(&self, start: Samples, end: Samples, max: usize) -> Vec<Samples> {
+        let g = self.edit.grid;
+        let anchors = if g == openpt_time::GridValue::ClipsMarkers { self.grid_anchors() } else { Vec::new() };
+        g.lines_with(start, end, self.sample_rate, &self.tempo, self.frame_rate, max, &anchors)
+    }
+
     pub fn add_bus(&mut self, name: &str, format: ChannelFormat) -> BusId {
         if let Some(b) = self.bus_by_name(name) {
             return b.id;

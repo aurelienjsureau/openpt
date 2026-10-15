@@ -62,7 +62,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, Option<&str>)] = &[
     ("window.beat_detective", "Beat Detective", "", None),
     ("window.tempo_ops", "Tempo Operations", "", None),
     ("window.time_ops", "Time Operations", "", None),
-    ("window.midi_ops", "MIDI Operations", "", None),
+    ("window.midi_ops", "Event Operations", "", None),
     ("window.rtp", "MIDI Real-Time Properties", "", None),
     ("window.playback_engine", "Playback Engine", "", None),
     ("ui.audio_device", "Audio Device", "", None),
@@ -408,7 +408,7 @@ const MENU_WINDOWS: &[(&str, &str)] = &[
     ("Event > Beat Detective", "window.beat_detective"),
     ("Event > Tempo Operations > Tempo Operations Window", "window.tempo_ops"),
     ("Event > Time Operations > Time Operations Window", "window.time_ops"),
-    ("Event > MIDI Operations > MIDI Operations Window", "window.midi_ops"),
+    ("Event > Event Operations > Event Operations Window", "window.midi_ops"),
     ("Event > MIDI Real-Time Properties", "window.rtp"),
 ];
 

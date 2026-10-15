@@ -31,6 +31,7 @@ pub struct Vst3Plugin {
     has_input: bool,
     has_output: bool,
     event_input: bool,
+    multi_out: bool,
     key: bool,
     held: [bool; 128],
     channels: usize,
@@ -81,6 +82,7 @@ impl Vst3Plugin {
             has_output: false,
             event_input: false,
             key: false,
+            multi_out: false,
             held: [false; 128],
             channels: 2,
             max_block: 0,
@@ -186,7 +188,7 @@ impl Plugin for Vst3Plugin {
         let mb = max_block.clamp(1, MAX_BLOCK);
         self.channels = channels.clamp(1, MAX_CHANNELS);
         self.max_block = 0;
-        match self.inst.configure(sr, mb, self.channels == 1) {
+        match self.inst.configure(sr, mb, self.channels == 1, self.multi_out) {
             Ok(layout) => {
                 self.inputs = BusBuffers::new(&layout.inputs, mb);
                 self.outputs = BusBuffers::new(&layout.outputs, mb);
@@ -248,6 +250,22 @@ impl Plugin for Vst3Plugin {
 
     fn accepts_key(&self) -> bool {
         self.key
+    }
+
+    fn set_multi_output(&mut self, on: bool) {
+        self.multi_out = on;
+    }
+
+    fn extra_outputs(&self) -> usize {
+        if self.multi_out { (1..16).take_while(|b| self.outputs.channels(*b) > 0).count() } else { 0 }
+    }
+
+    fn extra_output_channels(&self, bus: usize) -> usize {
+        if self.multi_out { self.outputs.channels(bus + 1) } else { 0 }
+    }
+
+    fn extra_output(&self, bus: usize, ch: usize) -> Option<&[f32]> {
+        if self.multi_out { self.outputs.channel(bus + 1, ch) } else { None }
     }
 
     fn process_keyed(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
@@ -317,6 +335,10 @@ impl Plugin for Vst3Plugin {
         }
     }
 
+    fn take_midi_out(&mut self, out: &mut Vec<(usize, [u8; 3])>) {
+        self.inst.midi_out(out);
+    }
+
     fn all_notes_off(&mut self) {
         for k in 0..128u8 {
             if self.held.get(k as usize).copied().unwrap_or(false) {
@@ -345,7 +367,9 @@ impl Plugin for Vst3Plugin {
 
     fn editor(&mut self) -> Option<Box<dyn PluginEditor>> {
         let link = self.inst.editor()?;
-        Some(Box::new(Vst3Editor { link, host: self.inst.host_ref(), info: self.info, ids: self.ids.clone(), maps: self.maps.clone() }))
+        let raw = self.inst.params();
+        let units = self.ids.iter().map(|id| raw.iter().find(|p| p.id == *id).map(|p| p.units.clone()).unwrap_or_default()).collect();
+        Some(Box::new(Vst3Editor { link, host: self.inst.host_ref(), info: self.info, ids: self.ids.clone(), maps: self.maps.clone(), units }))
     }
 
     fn state_reader(&mut self) -> Option<Box<dyn openpt_dsp::PluginStateReader>> {
@@ -457,6 +481,7 @@ struct Vst3Editor {
     info: &'static PluginInfo,
     ids: Vec<u32>,
     maps: Vec<Mapping>,
+    units: Vec<String>,
 }
 
 impl Vst3Editor {
@@ -531,9 +556,21 @@ impl PluginEditor for Vst3Editor {
         self.link.load_state(data)
     }
 
+    fn output_buses(&mut self) -> Vec<(String, u32)> {
+        self.link.output_buses()
+    }
+
     fn param_value(&mut self, id: &str) -> Option<f32> {
         let i = self.info.params.iter().position(|p| p.id == id)?;
         let n = self.link.normalized(*self.ids.get(i)?)?;
         self.plain(i, n)
+    }
+
+    fn value_text(&mut self, id: &str, value: f32) -> Option<String> {
+        let i = self.info.params.iter().position(|p| p.id == id)?;
+        let n = self.normalized(i, value)?;
+        let text = self.link.value_text(*self.ids.get(i)?, n)?;
+        let units = self.units.get(i).map(String::as_str).unwrap_or("");
+        Some(if units.is_empty() || text.ends_with(units) { text } else { format!("{text} {units}") })
     }
 }

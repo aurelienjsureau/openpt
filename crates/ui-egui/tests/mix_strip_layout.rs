@@ -100,6 +100,49 @@ fn the_meter_starts_level_with_the_top_of_the_faders_travel() {
 }
 
 #[test]
+fn mix_name_plates_take_the_track_colour_and_elide() {
+    let _palette = PALETTE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = SoundApp::new(openpt_engine::demo::demo_engine(), None, Services::default());
+    app.engine.session_mut().edit.selected_tracks.clear();
+    let color = app.engine.session_mut().tracks.iter_mut().find(|t| t.name == "Kick").map(|t| {
+        t.name = "01_Kick_Room_Overhead_Long".into();
+        t.color
+    });
+    let color = color.unwrap_or([222, 104, 72]);
+    app.run("window.mix", json!({})).unwrap();
+    app.run("ui.theme", json!({"mode": "dark"})).unwrap();
+    let mut harness = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
+        |ui, app: &mut SoundApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        app,
+    );
+    for _ in 0..4 {
+        harness.step();
+    }
+    let output = harness.output();
+    let names: Vec<_> = texts(output, |t| t.galley.elided && t.galley.job.text.contains("Kick")).collect();
+    assert_eq!(names.len(), 1, "the mix plate elides the long name once");
+    let name = names[0];
+    let center = name.visual_bounding_rect().center();
+    let plate = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            Shape::Rect(rect) if rect.rect.contains(center) && rect.fill.a() == 255 => Some(rect),
+            _ => None,
+        })
+        .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+        .expect("a plate behind the name");
+    assert_eq!([plate.fill.r(), plate.fill.g(), plate.fill.b()], color);
+    let ink = name.override_text_color.unwrap_or(name.galley.job.sections[0].format.color);
+    let ratio = contrast(ink, plate.fill);
+    assert!(ratio >= 4.5, "name contrast {ratio:.2}:1");
+    assert!(name.visual_bounding_rect().bottom() < 1000.0 - 8.0, "the name sits above the window edge");
+}
+
+#[test]
 fn narrow_strips_show_ticks_without_numbers() {
     let _palette = PALETTE.lock().unwrap_or_else(|e| e.into_inner());
     let mut harness = mix(ThemeMode::Dark);

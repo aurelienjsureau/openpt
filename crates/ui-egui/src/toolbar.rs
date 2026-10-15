@@ -282,26 +282,120 @@ fn grid_nudge(app: &mut SoundApp, ui: &mut Ui) {
 }
 
 fn value_menu(app: &mut SoundApp, resp: &egui::Response, cmd: &str) {
+    let grid = cmd == "view.grid";
+    let flag = if grid { "grid.follow_main" } else { "nudge.follow_main" };
+    let (current, follow, main) = {
+        let s = app.engine.session();
+        (if grid { s.edit.grid } else { s.edit.nudge }, s.edit.flag(flag), s.edit.main_counter.id())
+    };
     egui::Popup::menu(resp).show(|ui| {
-        for v in ["1 bar", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/8t", "1/16t", "1/4."] {
-            if ui.button(v).clicked() {
-                let _ = app.run(cmd, json!({"value": v}));
+        let mut pick: Option<serde_json::Value> = None;
+        let scales: Vec<(&str, &str)> = [
+            ("bars_beats", "Bars|Beats"),
+            ("min_secs", "Min:Secs"),
+            ("timecode", "Timecode"),
+            ("feet_frames", "Feet+Frames"),
+            ("samples", "Samples"),
+        ]
+        .into_iter()
+        .filter(|(id, _)| !follow || *id == main)
+        .collect();
+        for (id, title) in scales {
+            let mut items = |ui: &mut Ui| scale_items(ui, id, current, &mut pick);
+            if follow {
+                items(ui);
+            } else {
+                let on = current.scale() == id;
+                ui.menu_button(if on { format!("✓ {title}") } else { title.to_string() }, items);
             }
+        }
+        if grid && ui.selectable_label(current == openpt_time::GridValue::ClipsMarkers, "Clips/Markers").clicked() {
+            pick = Some(json!("clips_markers"));
         }
         ui.separator();
-        for (label, v) in [
-            ("1 msec", json!({"seconds": 0.001})),
-            ("10 msec", json!({"seconds": 0.01})),
-            ("100 msec", json!({"seconds": 0.1})),
-            ("1 second", json!({"seconds": 1.0})),
-            ("1 frame", json!({"frames": 1})),
-            ("100 samples", json!({"samples": 100})),
-        ] {
-            if ui.button(label).clicked() {
-                let _ = app.run(cmd, json!({"value": v}));
-            }
+        if ui.selectable_label(follow, "Follow Main Time Scale").clicked() {
+            let _ = app.run("view.follow_main_scale", json!({"which": if grid { "grid" } else { "nudge" }, "value": !follow}));
+            ui.close();
+        }
+        if let Some(v) = pick {
+            let _ = app.run(cmd, json!({"value": v}));
+            ui.close();
         }
     });
+}
+
+fn scale_items(ui: &mut Ui, scale: &str, current: openpt_time::GridValue, pick: &mut Option<serde_json::Value>) {
+    use openpt_time::{GridValue as G, NoteValue as N};
+    let mut row = |ui: &mut Ui, label: &str, value: G, v: serde_json::Value| {
+        if ui.selectable_label(current == value, label).clicked() {
+            *pick = Some(v);
+        }
+    };
+    match scale {
+        "bars_beats" => {
+            let (dotted, triplet) = match current {
+                G::Note { dotted, triplet, .. } => (dotted, triplet),
+                _ => (false, false),
+            };
+            for (label, n, text) in [
+                ("1 bar", N::Bar, "1 bar"),
+                ("Whole note", N::Whole, "1/1"),
+                ("Half note", N::Half, "1/2"),
+                ("Quarter note", N::Quarter, "1/4"),
+                ("Eighth note", N::Eighth, "1/8"),
+                ("Sixteenth note", N::Sixteenth, "1/16"),
+                ("Thirty-second note", N::ThirtySecond, "1/32"),
+                ("Sixty-fourth note", N::SixtyFourth, "1/64"),
+            ] {
+                let mods = format!("{}{}", if dotted { " dotted" } else { "" }, if triplet { " triplet" } else { "" });
+                row(ui, label, G::Note { value: n, dotted, triplet }, json!(format!("{text}{mods}")));
+            }
+            ui.separator();
+            if let G::Note { value, .. } = current {
+                let text = |d: bool, t: bool| {
+                    let base = match value {
+                        N::Bar => "1 bar",
+                        N::Whole => "1/1",
+                        N::Half => "1/2",
+                        N::Quarter => "1/4",
+                        N::Eighth => "1/8",
+                        N::Sixteenth => "1/16",
+                        N::ThirtySecond => "1/32",
+                        N::SixtyFourth => "1/64",
+                    };
+                    format!("{base}{}{}", if d { " dotted" } else { "" }, if t { " triplet" } else { "" })
+                };
+                if ui.selectable_label(dotted, "Dotted").clicked() {
+                    *pick = Some(json!(text(!dotted, false)));
+                }
+                if ui.selectable_label(triplet, "Triplet").clicked() {
+                    *pick = Some(json!(text(false, !triplet)));
+                }
+            }
+        }
+        "min_secs" => {
+            for (label, s) in [("1 second", 1.0), ("500 msec", 0.5), ("100 msec", 0.1), ("10 msec", 0.01), ("1 msec", 0.001)] {
+                row(ui, label, G::Seconds(s), json!({"seconds": s}));
+            }
+        }
+        "timecode" => {
+            row(ui, "1 second", G::Seconds(1.0), json!({"seconds": 1.0}));
+            for (label, f) in [("5 frames", 5.0), ("1 frame", 1.0), ("1/2 frame", 0.5), ("1/4 frame", 0.25), ("1 subframe", 0.01)] {
+                row(ui, label, G::Frames(f), json!({"frames": f}));
+            }
+        }
+        "feet_frames" => {
+            row(ui, "1 foot", G::Feet(1.0), json!({"feet": 1.0}));
+            for (label, f) in [("1 frame", 1.0), ("1/4 frame", 0.25), ("1 subframe", 0.01)] {
+                row(ui, label, G::Frames(f), json!({"frames": f}));
+            }
+        }
+        _ => {
+            for n in [10_000, 1_000, 100, 10, 2, 1] {
+                row(ui, &format!("{n} sample{}", if n == 1 { "" } else { "s" }), G::Samples(n), json!({"samples": n}));
+            }
+        }
+    }
 }
 
 fn transport(app: &mut SoundApp, ui: &mut Ui) {

@@ -74,3 +74,21 @@ fn key_listen_plays_the_key() {
     assert!(quiet < 1e-4, "the key is silent before the kick ({quiet})");
     assert!(loud > 0.3, "the key is heard ({loud})");
 }
+
+#[test]
+fn a_latent_plugin_elsewhere_does_not_make_the_key_late() {
+    let render = |latent: bool| {
+        let mut s = fixture(true, false, false);
+        s.edit.delay_compensation = true;
+        if latent {
+            let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Latent"));
+            let mut c = Insert::new("compressor");
+            c.params.insert("lookahead".into(), 5.0);
+            s.track_mut(t).unwrap().mixer.inserts[0] = Some(c);
+        }
+        render_range(&s, Range::new(0, LEN as i64), 512).swap_remove(0)
+    };
+    let (plain, latent) = (render(false), render(true));
+    let worst = plain.iter().zip(&latent).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-3, "the ducking moved by the other track's latency (max diff {worst})");
+}

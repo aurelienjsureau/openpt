@@ -63,14 +63,24 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "view.main_counter", "Main Counter", ["View", "Main Counter"], None, "{format: bars_beats|min_secs|timecode|feet_frames|samples}", always, |e, p| {
             let f = str_param(p, "format").and_then(TimeFormat::from_id).ok_or_else(|| bad("view.main_counter", "unknown format"))?;
             e.session_mut().edit.main_counter = f;
+            follow_main_scale(e.session_mut());
             Ok(json!({"format": f}))
+        }),
+        cmd!(noundo "view.follow_main_scale", "Follow Main Time Scale", [], None, "{which: grid|nudge, value?: bool} — the Grid or Nudge value follows the main counter's time scale", always, |e, p| {
+            let which = str_param(p, "which").filter(|w| matches!(*w, "grid" | "nudge")).ok_or_else(|| bad("view.follow_main_scale", "`which` must be grid or nudge"))?;
+            let flag = format!("{which}.follow_main");
+            let s = e.session_mut();
+            let on = bool_or(p, "value", !s.edit.flag(&flag));
+            s.edit.set_flag(&flag, on);
+            follow_main_scale(s);
+            Ok(json!({"follow": on}))
         }),
         cmd!(noundo "view.sub_counter", "Sub Counter", [], None, "{format?: … | null}", always, |e, p| {
             let f = str_param(p, "format").and_then(TimeFormat::from_id);
             e.session_mut().edit.sub_counter = f;
             Ok(json!({"format": f}))
         }),
-        cmd!(noundo "view.grid", "Grid Value", [], Some("Shift+=/-"), "{value: '1/16' | '1 bar' | '1/8t' | '1/4.' | {seconds} | {frames} | {samples}, or step: ±n values larger or smaller; lines?: bool}", always, |e, p| {
+        cmd!(noundo "view.grid", "Grid Value", [], Some("Shift+=/-"), "{value: '1/16' | '1 bar' | '1/8t' | '1/4.' | '1/1' (whole) | 'clips_markers' | {seconds} | {frames: 0.01..} | {feet} | {samples}, or step: ±n values larger or smaller; lines?: bool}", always, |e, p| {
             let g = value_or_step(p, e.session().edit.grid).ok_or_else(|| bad("view.grid", "unknown grid value"))?;
             let lines = p.get("lines").and_then(Value::as_bool);
             let s = e.session_mut();
@@ -84,7 +94,9 @@ pub fn specs() -> Vec<CommandSpec> {
             Ok(json!({"value": s.edit.grid_lines}))
         }),
         cmd!(noundo "view.nudge", "Nudge Value", [], Some("Alt+Shift+=/-"), "{value or step: like grid}", always, |e, p| {
-            let g = value_or_step(p, e.session().edit.nudge).ok_or_else(|| bad("view.nudge", "unknown nudge value"))?;
+            let g = value_or_step(p, e.session().edit.nudge)
+                .filter(|g| *g != GridValue::ClipsMarkers)
+                .ok_or_else(|| bad("view.nudge", "unknown nudge value (Clips/Markers is for the Grid only)"))?;
             e.session_mut().edit.nudge = g;
             Ok(json!({"nudge": g.label()}))
         }),
@@ -125,23 +137,46 @@ fn value_or_step(p: &Value, current: GridValue) -> Option<GridValue> {
     Some((0..step.unsigned_abs().min(16)).fold(current, |g, _| g.stepped(step > 0)))
 }
 
+fn follow_main_scale(s: &mut openpt_model::Session) {
+    let main = s.edit.main_counter.id();
+    let typical = match main {
+        "bars_beats" => GridValue::default(),
+        "min_secs" => GridValue::Seconds(1.0),
+        "timecode" => GridValue::Frames(1.0),
+        "feet_frames" => GridValue::Feet(1.0),
+        _ => GridValue::Samples(1_000),
+    };
+    if s.edit.flag("grid.follow_main") && s.edit.grid.scale() != main {
+        s.edit.grid = typical;
+    }
+    if s.edit.flag("nudge.follow_main") && s.edit.nudge.scale() != main {
+        s.edit.nudge = typical;
+    }
+}
 pub fn grid_param(p: &Value, key: &str) -> Option<GridValue> {
     let v = p.get(key)?;
     if let Some(sec) = v.get("seconds").and_then(Value::as_f64) {
         return sec.is_finite().then_some(GridValue::Seconds(sec.clamp(0.000_01, 3600.0)));
     }
-    if let Some(f) = v.get("frames").and_then(Value::as_i64) {
-        return Some(GridValue::Frames(f.clamp(1, 100_000)));
+    if let Some(f) = v.get("frames").and_then(Value::as_f64).filter(|f| f.is_finite()) {
+        return Some(GridValue::Frames(f.clamp(0.01, 100_000.0)));
+    }
+    if let Some(f) = v.get("feet").and_then(Value::as_f64).filter(|f| f.is_finite()) {
+        return Some(GridValue::Feet(f.clamp(0.01, 10_000.0)));
     }
     if let Some(n) = v.get("samples").and_then(Value::as_i64) {
         return Some(GridValue::Samples(n.clamp(1, i64::from(u32::MAX))));
     }
     let s = v.as_str()?.trim().to_ascii_lowercase();
+    if matches!(s.as_str(), "clips_markers" | "clips/markers" | "clips") {
+        return Some(GridValue::ClipsMarkers);
+    }
     let triplet = s.ends_with('t') || s.contains("triplet");
     let dotted = s.ends_with('.') || s.contains("dotted");
     let core: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '/' || *c == ' ' || c.is_ascii_alphabetic() && *c != 't').collect();
     let value = match core.trim() {
-        "1 bar" | "bar" | "1/1" | "1" => NoteValue::Bar,
+        "1 bar" | "bar" | "1" => NoteValue::Bar,
+        "1/1" | "whole" => NoteValue::Whole,
         "1/2" => NoteValue::Half,
         "1/4" => NoteValue::Quarter,
         "1/8" => NoteValue::Eighth,

@@ -301,7 +301,7 @@ impl AudioState {
                 {
                     let at_sample = self.pos.saturating_add(sample_offset as i64);
                     for t in &self.session.tracks {
-                        if t.kind.is_midi() && t.mixer.record_arm && !t.inactive && t.matches_midi_channel(ev.channel()) {
+                        if t.kind.is_midi() && t.mixer.record_arm && !t.inactive && t.midi_from.is_none() && t.matches_midi_channel(ev.channel()) {
                             rec_ring.push(midi::RecordedMidiEvent { track_id: t.id.0, at_sample, event: ev });
                         }
                     }
@@ -311,6 +311,18 @@ impl AudioState {
         self.mix.monitor_only = !self.playing;
         self.mix.recording = self.recording;
         self.mix.render(&self.session, self.pos, n, &mut self.pending);
+        if self.recording
+            && self.playing
+            && let Some(rec_ring) = &self.midi_record
+        {
+            for &(t, off, m) in &self.mix.midi_routed {
+                if self.session.track(t).is_some_and(|tr| tr.mixer.record_arm) {
+                    let len = if matches!(m[0] & 0xF0, 0xC0 | 0xD0) { 2 } else { 3 };
+                    let event = LiveMidiEvent { port_id: 0, timestamp_us: 0, len, data: m };
+                    rec_ring.push(midi::RecordedMidiEvent { track_id: t.0, at_sample: self.pos.saturating_add(off as i64), event });
+                }
+            }
+        }
         self.send_garbage();
         self.pending_len = n;
         if let Ok(mut m) = self.shared.meters.try_lock() {
@@ -725,6 +737,13 @@ impl Player {
         self.side().editors.get_mut(&(track, slot)).is_some_and(|e| e.load_state(data))
     }
 
+    pub fn editor_value_text(&self, track: TrackId, slot: usize, id: &str, value: f32) -> Option<String> {
+        self.side().editors.get_mut(&(track, slot))?.value_text(id, value)
+    }
+
+    pub fn plugin_output_buses(&self, track: TrackId, slot: usize) -> Vec<(String, u32)> {
+        self.side().editors.get_mut(&(track, slot)).map(|e| e.output_buses()).unwrap_or_default()
+    }
     pub fn editor_params(&self, track: TrackId, slot: usize, ids: &[String]) -> Vec<(String, f32)> {
         let mut side = self.side();
         let Some(e) = side.editors.get_mut(&(track, slot)) else { return Vec::new() };

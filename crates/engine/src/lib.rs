@@ -1,6 +1,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod autosave;
+pub mod beat_detective;
 pub mod catalog;
 pub mod catalog_more;
 pub mod clip_group_file;
@@ -81,7 +82,7 @@ pub struct Clipboard {
 
 impl Clipboard {
     pub fn of_range(s: &Session, range: openpt_time::Range) -> Clipboard {
-        let line = s.edit.grid.line_at_or_before(range.start, s.sample_rate, &s.tempo, s.frame_rate);
+        let line = s.grid_line_at_or_before(range.start);
         Clipboard { length: range.len(), grid_offset: range.start.saturating_sub(line), ..Clipboard::default() }
     }
 }

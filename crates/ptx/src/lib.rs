@@ -10,6 +10,7 @@ pub struct Block {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrackKind {
     Audio,
+    Midi,
     Aux,
     Master,
     Vca,
@@ -25,21 +26,45 @@ pub struct Insert {
     pub state: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Track {
     pub name: String,
     pub kind: TrackKind,
     pub stereo: bool,
     pub inserts: Vec<Insert>,
+    pub input: Option<String>,
+    pub output: Option<String>,
+    pub volume_db: f32,
+    pub pan: Vec<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Region {
+    pub name: String,
+    pub file: Option<usize>,
+    pub offset: u64,
+    pub length: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placement {
+    pub track: String,
+    pub channel: usize,
+    pub region: usize,
+    pub start: u64,
+}
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PtxSession {
     pub app: String,
     pub sample_rate: Option<u32>,
     pub bit_depth: Option<u8>,
     pub tracks: Vec<Track>,
     pub audio_files: Vec<String>,
+    pub audio_folders: Vec<Option<String>>,
+    pub regions: Vec<Region>,
+    pub placements: Vec<Placement>,
+    pub busses: Vec<(String, bool)>,
+    pub hardware: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +166,94 @@ fn insert_at(d: &[u8], b: &Block) -> Option<Insert> {
     })
 }
 
+fn uint_at(d: &[u8], at: usize, n: usize) -> Option<u64> {
+    let b = d.get(at..at + n.min(8))?;
+    Some(b.iter().rev().fold(0u64, |v, x| (v << 8) | u64::from(*x)))
+}
+
+fn three_point(d: &[u8], at: usize) -> Option<(u64, u64, u64)> {
+    let nib = |k: usize| d.get(at + k).map(|b| usize::from(b >> 4));
+    let (no, nl, ns) = (nib(1)?, nib(2)?, nib(3)?);
+    if no > 5 || nl > 5 || ns > 5 {
+        return None;
+    }
+    let mut p = at + 5;
+    let offset = uint_at(d, p, no)?;
+    p += no;
+    let length = uint_at(d, p, nl)?;
+    p += nl;
+    let start = uint_at(d, p, ns)?;
+    Some((offset, length, start))
+}
+
+fn regions(d: &[u8], all: &[&Block], s: &mut PtxSession) {
+    for list in all.iter().filter(|b| b.content_type == 0x262A) {
+        for r in list.children.iter().filter(|b| b.content_type == 0x2629) {
+            let Some((name, after)) = string_at(d, r.start + 9) else { continue };
+            let Some((offset, length, _)) = three_point(d, after) else { continue };
+            let file = r.children.first().and_then(|c| u32_at(d, c.end)).map(|f| f as usize);
+            s.regions.push(Region { name, file, offset, length });
+        }
+    }
+    let mut channels: Vec<(String, Vec<u16>)> = Vec::new();
+    for list in all.iter().filter(|b| b.content_type == 0x1015) {
+        for t in list.children.iter().filter(|b| b.content_type == 0x1014) {
+            let Some((name, after)) = string_at(d, t.start) else { continue };
+            let Some(n) = u32_at(d, after + 1) else { continue };
+            let map: Vec<u16> = (0..n.min(16) as usize).filter_map(|k| u16_at(d, after + 5 + 2 * k)).collect();
+            channels.push((name, map));
+        }
+    }
+    for map in all.iter().filter(|b| b.content_type == 0x1054) {
+        for (index, t) in map.children.iter().filter(|b| b.content_type == 0x1052).enumerate() {
+            let label = string_at(d, t.start).map(|x| x.0);
+            let owner = match &label {
+                Some(n) => s.tracks.iter().any(|tr| &tr.name == n).then(|| (n.clone(), 0)),
+                None => channels.iter().find_map(|(name, map)| map.iter().position(|c| usize::from(*c) == index).map(|ch| (name.clone(), ch))),
+            };
+            let Some((track, channel)) = owner else { continue };
+            for e in t.children.iter().filter(|b| b.content_type == 0x1050) {
+                if d.get(e.start + 44) == Some(&1) {
+                    continue;
+                }
+                for p in e.children.iter().filter(|b| b.content_type == 0x104F) {
+                    let (Some(region), Some(start)) = (u32_at(d, p.start + 2), u32_at(d, p.start + 7)) else { continue };
+                    s.placements.push(Placement { track: track.clone(), channel, region: region as usize, start: u64::from(start) });
+                }
+            }
+        }
+    }
+}
+
+fn last_string(d: &[u8], start: usize, end: usize) -> Option<String> {
+    (start..end.saturating_sub(5)).rev().find_map(|k| {
+        let n = u32_at(d, k)? as usize;
+        let stop = k + 4 + n;
+        (n > 0 && n < 256 && (stop == end || stop + 1 == end))
+            .then(|| d.get(k + 4..stop))
+            .flatten()
+            .filter(|s| s.iter().all(|c| (0x20..0x7F).contains(c)))
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+    })
+}
+
+fn path_name(d: &[u8], start: usize, end: usize) -> Option<String> {
+    let id = (start..end.saturating_sub(4)).find(|&k| d.get(k..k + 4) == Some(&[0x2A, 0, 0, 0]))?;
+    (id + 12..end.saturating_sub(4)).find_map(|k| {
+        let n = u32_at(d, k)? as usize;
+        let name = d.get(k + 4..k + 4 + n).filter(|_| k + 4 + n <= end)?;
+        (n > 0 && n < 256 && name.iter().all(|c| (0x20..0x7F).contains(c))).then(|| String::from_utf8_lossy(name).into_owned())
+    })
+}
+
+fn path_ref(d: &[u8], start: usize, end: usize) -> Option<String> {
+    (start..end.saturating_sub(9)).find_map(|k| {
+        let n = u32_at(d, k)? as usize;
+        let name = d.get(k + 4..k + 4 + n)?;
+        let ok = n > 0 && n < 256 && name.iter().all(|c| (0x20..0x7F).contains(c)) && d.get(k + 4 + n..k + 9 + n) == Some(&[0, 0, 0, 0, 0x2A]);
+        ok.then(|| String::from_utf8_lossy(name).into_owned())
+    })
+}
 pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
     let d = decrypt(bytes)?;
     let tree = blocks(&d, HEADER, d.len(), 14);
@@ -164,37 +277,102 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
         }
         let kind = match code {
             0x00 => TrackKind::Audio,
+            0x01 => TrackKind::Midi,
             0x02 => TrackKind::Aux,
             0x05 => TrackKind::Master,
             0x09 => TrackKind::Vca,
             0x0B => TrackKind::Folder,
             c => TrackKind::Other(c),
         };
-        s.tracks.push(Track { name, kind, stereo: d.get(after).copied() == Some(1), inserts: Vec::new() });
+        s.tracks.push(Track {
+            name,
+            kind,
+            stereo: d.get(after).copied() == Some(1),
+            inserts: Vec::new(),
+            input: None,
+            output: None,
+            volume_db: 0.0,
+            pan: Vec::new(),
+        });
     }
+    let rulers = ["Tempo", "Meter", "Key Signature", "Chord Symbols", "Markers"];
+    let mut next = 0usize;
     for ch in all.iter().filter(|b| b.content_type == 0x261B) {
         let mut inner = Vec::new();
         walk(&ch.children, &mut inner);
-        let Some((name, _)) = inner.iter().find(|b| b.content_type == 0x2619).and_then(|b| string_at(&d, b.start)) else { continue };
-        let inserts: Vec<Insert> = inner.iter().filter(|b| b.content_type == 0x1038).filter_map(|b| insert_at(&d, b)).collect();
-        if let Some(t) = s.tracks.iter_mut().find(|t| t.name == name && t.inserts.is_empty()) {
-            t.inserts = inserts;
+        let Some(head) = inner.iter().find(|b| b.content_type == 0x2619) else { continue };
+        let name = string_at(&d, head.start).map(|x| x.0).unwrap_or_default();
+        if rulers.contains(&name.as_str()) {
+            continue;
         }
+        let inserts: Vec<Insert> = inner.iter().filter(|b| b.content_type == 0x1038).filter_map(|b| insert_at(&d, b)).collect();
+        let out_section = ch.children.iter().find(|b| b.content_type == 0x260D);
+        let output = out_section
+            .and_then(|o| o.children.iter().find(|b| b.content_type == 0x260E))
+            .and_then(|b| path_name(&d, b.start, b.end).or_else(|| last_string(&d, b.start, b.end)));
+        let input = out_section.and_then(|o| path_ref(&d, o.end, ch.end));
+        let mix = out_section.and_then(|o| o.children.iter().find(|b| b.content_type == 0x1029)).and_then(|b| {
+            let f = |k: usize| u32_at(&d, b.start + k).map(|v| v as i32 as f32);
+            Some((f(1)? / 10.0, f(13)? / 100.0, f(41)? / 100.0))
+        });
+        let at = if name.is_empty() { Some(next) } else { s.tracks.iter().position(|t| t.name == name) };
+        if let Some(i) = at
+            && let Some(t) = s.tracks.get_mut(i)
+            && t.output.is_none()
+            && t.inserts.is_empty()
+        {
+            t.inserts = inserts;
+            t.output = output;
+            t.input = input;
+            if let Some(m) = mix {
+                (t.volume_db, t.pan) = (m.0, if t.stereo { vec![m.1, m.2] } else { vec![m.1] });
+            }
+            next = i + 1;
+        }
+    }
+    for b in all.iter().filter(|b| b.content_type == 0x2602) {
+        let mut inner = Vec::new();
+        walk(&b.children, &mut inner);
+        if inner.iter().any(|c| c.content_type == 0x2600)
+            && let Some((n, _)) = string_at(&d, b.start + 2)
+        {
+            s.hardware.push(n);
+        }
+    }
+    let paths: Vec<String> = all.iter().filter(|b| b.content_type == 0x2602).filter_map(|b| string_at(&d, b.start + 2).map(|x| x.0)).collect();
+    let channels: std::collections::HashMap<String, u32> = all
+        .iter()
+        .filter(|b| b.content_type == 0x2602)
+        .filter_map(|b| string_at(&d, b.start + 2).and_then(|(n, at)| Some((n, u32_at(&d, at).filter(|c| (1..=64).contains(c))?))))
+        .collect();
+    for p in &paths {
+        let sub_of_hardware = s.hardware.iter().any(|h| p.starts_with(h.trim_end_matches(|c: char| c.is_ascii_digit() || c == '-')));
+        let used = s.tracks.iter().any(|t| t.input.as_ref() == Some(p) || t.output.as_ref() == Some(p));
+        if !used || sub_of_hardware || p.ends_with(".L") || p.ends_with(".R") || s.hardware.contains(p) || s.busses.iter().any(|b| &b.0 == p) {
+            continue;
+        }
+        let stereo = channels.get(p).map_or_else(|| paths.iter().any(|q| q == &format!("{p}.L")), |n| *n >= 2);
+        s.busses.push((p.clone(), stereo));
     }
     for b in all.iter().filter(|b| b.content_type == 0x103A) {
         let mut at = b.start;
+        let mut folder: Option<String> = None;
         while at + 8 < b.end {
-            if let Some((name, after)) = string_at(&d, at)
-                && after + 4 <= b.end
-                && matches!(d.get(after..after + 4), Some(b"EVAW" | b"FFIA"))
-            {
-                s.audio_files.push(name);
-                at = after + 4;
-            } else {
-                at += 1;
+            match string_at(&d, at) {
+                Some((name, after)) if after + 4 <= b.end && matches!(d.get(after..after + 4), Some(b"EVAW" | b"FFIA")) => {
+                    s.audio_files.push(name);
+                    s.audio_folders.push(folder.clone());
+                    at = after + 4;
+                }
+                Some((name, after)) if name.chars().all(|c| !c.is_control()) && !name.ends_with(['\\', ':']) => {
+                    folder = Some(name);
+                    at = after;
+                }
+                _ => at += 1,
             }
         }
     }
+    regions(&d, &all, &mut s);
     Ok(s)
 }
 

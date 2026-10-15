@@ -12,6 +12,7 @@ const KNOWN_UNREACHED: &[&str] = &[
     "markers.next",
     "markers.previous",
     "mix.insert_move",
+    "mix.new_bus",
     "mix.phase_invert",
     "mix.send_surround_pan",
     "setup.hardware",

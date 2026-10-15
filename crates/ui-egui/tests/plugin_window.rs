@@ -14,6 +14,9 @@ fn a_long_plugin_window_stays_on_a_short_screen() {
         app,
     );
     h.run_steps(4);
-    let window = h.ctx.memory(|m| m.area_rect(egui::Id::new(("plugin", kick.0, 0usize)))).unwrap();
+    let window = h
+        .ctx
+        .memory(|m| m.area_rect(egui::Id::new(("plugin-panel", kick.0, 0usize))).or_else(|| m.area_rect(egui::Id::new(("plugin", kick.0, 0usize)))))
+        .unwrap();
     assert!(window.bottom() <= 500.0, "{window:?}");
 }

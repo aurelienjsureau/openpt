@@ -741,6 +741,7 @@ impl SoundApp {
                 key: ins.key.and_then(|k| busses.iter().position(|(id, _)| *id == k.0)),
                 key_on: ins.key_on,
                 key_listen: ins.key_listen,
+                params: info.params.iter().map(|p| p.name.to_string()).collect(),
             };
             let Some(p) = &self.player else { return };
             p.set_editor_header(tid, slot, &header);
@@ -786,6 +787,12 @@ impl SoundApp {
                 }
                 A::ExternalKey => {
                     let _ = self.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "on": !ins.key_on}));
+                }
+                A::Automate(i) => {
+                    if let Some(p) = info.params.get(i) {
+                        let view = format!("plugin:{}:{}", char::from(b'a'.saturating_add(slot as u8)), p.id);
+                        let _ = self.run("track.view", json!({"tracks": [tid.0], "view": view}));
+                    }
                 }
                 A::KeyListen => {
                     let _ = self.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "listen": !ins.key_listen}));
@@ -1373,6 +1380,11 @@ impl SoundApp {
         {
             self.ensure_input();
         }
+        static WAKER: std::sync::Once = std::sync::Once::new();
+        WAKER.call_once(|| {
+            let c = ctx.clone();
+            openpt_vst3_host::set_ui_waker(move || c.request_repaint());
+        });
         let editors = self.player.as_ref().is_some_and(Player::any_editor_open);
         ctx.request_repaint_after_secs(if editors { 0.03 } else { 1.0 } + ctx.input(|i| i.predicted_dt));
         control::collect_screenshots(self, ctx);

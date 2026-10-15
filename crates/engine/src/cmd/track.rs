@@ -82,7 +82,24 @@ pub fn specs() -> Vec<CommandSpec> {
             |t| t.hidden
         )),
         cmd!("track.pin", "Pin Track", [], None, "{tracks?}", has_selection, |e, p| flag(e, p, "track.pin", |t, v| t.pinned = v, |t| t.pinned)),
-        cmd!("track.move", "Move Track", [], None, "{track, to: index}", has_tracks, move_track),
+        cmd!(
+            "track.move",
+            "Move Track",
+            [],
+            None,
+            "{track, to: index} or {tracks, gap: index} (several tracks, kept in order, before that position)",
+            has_tracks,
+            move_track
+        ),
+        cmd!(
+            "mix.route_to_track",
+            "Route to Track",
+            [],
+            None,
+            "{tracks?, dest: track, send_slot?} — output (or a send) to an existing track's input bus, made when it has none",
+            has_selection,
+            route_to_track
+        ),
         cmd!(
             "track.playlist_step",
             "Previous/Next Playlist",
@@ -270,7 +287,26 @@ pub fn specs() -> Vec<CommandSpec> {
             }
         ),
         cmd!("track.midi_channel", "MIDI Channel", [], None, "{tracks?, channel: 1..16 | 'omni' | null}", has_selection, midi_channel),
+        cmd!("track.midi_input", "MIDI Input", [], None, "{tracks?, from: track | null, plugins?: bool}", has_selection, midi_input),
     ]
+}
+
+fn midi_input(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "track.midi_input";
+    let tracks = tracks_required(e, id, p)?;
+    let from = match track_param(e, id, p, "from")? {
+        Some(src) if tracks.contains(&src) => return Err(bad(id, "a track cannot feed itself")),
+        Some(src) if p.get("plugins").and_then(Value::as_bool).unwrap_or(false) => Some(openpt_model::MidiFrom::Plugins(src)),
+        Some(src) => Some(openpt_model::MidiFrom::Track(src)),
+        None => None,
+    };
+    let s = e.session_mut();
+    for t in &tracks {
+        if let Some(tr) = s.track_mut(*t).filter(|tr| tr.kind.is_midi()) {
+            tr.midi_from = from;
+        }
+    }
+    Ok(json!({}))
 }
 
 fn midi_channel(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -798,7 +834,26 @@ fn view(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 fn move_track(e: &mut Engine, p: &Value) -> Result<Value> {
-    let t = track_param(e, "track.move", p, "track")?.ok_or_else(|| bad("track.move", "`track` required"))?;
+    let id = "track.move";
+    if let Some(gap) = p.get("gap").and_then(Value::as_u64) {
+        let mut moving = tracks_required(e, id, p)?;
+        let s = e.session_mut();
+        moving.sort_by_key(|t| s.track_index(*t));
+        let gap = usize::try_from(gap).unwrap_or(usize::MAX).min(s.tracks.len());
+        let before = moving.iter().filter(|t| s.track_index(**t).is_some_and(|i| i < gap)).count();
+        let mut taken = Vec::new();
+        for t in &moving {
+            if let Some(i) = s.track_index(*t) {
+                taken.push(s.tracks.remove(i));
+            }
+        }
+        let at = gap.saturating_sub(before).min(s.tracks.len());
+        for (k, tr) in taken.into_iter().enumerate() {
+            s.tracks.insert(at + k, tr);
+        }
+        return Ok(json!({"at": at}));
+    }
+    let t = track_param(e, id, p, "track")?.ok_or_else(|| bad(id, "`track` required"))?;
     let to = i64_or(p, "to", 0).max(0) as usize;
     let s = e.session_mut();
     if let Some(i) = s.track_index(t) {
@@ -806,6 +861,49 @@ fn move_track(e: &mut Engine, p: &Value) -> Result<Value> {
         s.tracks.insert(to.min(s.tracks.len()), tr);
     }
     Ok(json!({}))
+}
+
+fn route_to_track(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "mix.route_to_track";
+    let tracks = tracks_required(e, id, p)?;
+    let dest = track_param(e, id, p, "dest")?.ok_or_else(|| bad(id, "`dest` required"))?;
+    if tracks.contains(&dest) {
+        return Err(bad(id, "a track cannot feed itself"));
+    }
+    let s = e.session_mut();
+    let d = s.track(dest).ok_or_else(|| bad(id, "no such track"))?;
+    let bus = match &d.mixer.input {
+        Route::Bus(b) => *b,
+        _ => {
+            let (name, fmt) = (d.name.clone(), if d.format.channels() == 1 { ChannelFormat::Mono } else { d.format });
+            let b = s.add_bus(&name, fmt);
+            if let Some(d) = s.track_mut(dest) {
+                d.mixer.input = Route::Bus(b);
+            }
+            b
+        }
+    };
+    let slot = p.get("send_slot").and_then(Value::as_u64).map(|k| k as usize);
+    let inf_default = s.edit.flag("pref.sends_default_inf");
+    for t in &tracks {
+        let Some(tr) = s.track_mut(*t) else { continue };
+        match slot {
+            Some(k) => {
+                if let Some(x) = tr.mixer.sends.get_mut(k) {
+                    *x = Some(match x.take() {
+                        Some(old) => openpt_model::SendSlot { target: Route::Bus(bus), ..old },
+                        None => {
+                            let mut n = openpt_model::SendSlot::new(Route::Bus(bus));
+                            n.level_db = if inf_default { -144.0 } else { 0.0 };
+                            n
+                        }
+                    });
+                }
+            }
+            None => tr.mixer.output = Route::Bus(bus),
+        }
+    }
+    Ok(json!({"bus": bus.0}))
 }
 
 fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -928,6 +1026,9 @@ fn route(e: &mut Engine, p: &Value, input: bool) -> Result<Value> {
             .map_or(ChannelFormat::Stereo, |t| if t.kind == TrackKind::Aux { t.format } else { ChannelFormat::Stereo });
         r = Route::Bus(s.add_bus(&name.clone(), fmt));
     }
+    if bool_or(p, "cascade", false) {
+        return cascade(s, tracks, &r, input);
+    }
     for t in &tracks {
         if let Some(tr) = s.track_mut(*t) {
             if input {
@@ -940,9 +1041,93 @@ fn route(e: &mut Engine, p: &Value, input: bool) -> Result<Value> {
     Ok(json!({key: r}))
 }
 
+fn cascade(s: &mut openpt_model::Session, mut tracks: Vec<TrackId>, first: &Route, input: bool) -> Result<Value> {
+    let id = if input { "track.input" } else { "track.output" };
+    tracks.sort_by_key(|t| s.track_index(*t));
+    let mut routes: Vec<Route> = Vec::new();
+    match first {
+        Route::Hardware(name) => {
+            let paths: Vec<(String, usize, usize)> = (if input { &s.inputs } else { &s.outputs })
+                .iter()
+                .map(|p| (p.name.clone(), usize::from(p.first_channel), p.format.channels()))
+                .collect();
+            let (_, mut ch, width) = paths.iter().find(|p| p.0 == *name).cloned().ok_or_else(|| bad(id, "unknown path"))?;
+            for t in &tracks {
+                let w = if input { s.track(*t).map_or(1, |x| x.format.channels()) } else { width };
+                let Some(p) = paths.iter().find(|p| p.1 == ch && p.2 == w) else { break };
+                routes.push(Route::Hardware(p.0.clone()));
+                ch += w;
+            }
+        }
+        Route::Bus(b) => {
+            let at = s.busses.iter().position(|x| x.id == *b).ok_or_else(|| bad(id, "unknown bus"))?;
+            routes.extend(s.busses.iter().skip(at).take(tracks.len()).map(|x| Route::Bus(x.id)));
+        }
+        _ => return Err(bad(id, "cascading needs an interface path or a bus")),
+    }
+    let n = routes.len();
+    for (t, r) in tracks.iter().zip(routes) {
+        if let Some(tr) = s.track_mut(*t) {
+            if input {
+                tr.mixer.input = r;
+            } else {
+                tr.mixer.output = r;
+            }
+        }
+    }
+    Ok(json!({"assigned": n}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_tracks_move_together_and_route_to_an_existing_track() {
+        let mut e = Engine::default();
+        let ids: Vec<u64> =
+            (0..5).map(|k| e.execute("track.new", &serde_json::json!({"name": format!("T{k}")})).unwrap()["tracks"][0].as_u64().unwrap()).collect();
+        e.execute("track.move", &serde_json::json!({"tracks": [ids[3], ids[1]], "gap": 5})).unwrap();
+        let names: Vec<String> = e.session().tracks.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, ["T0", "T2", "T4", "T1", "T3"]);
+        e.execute("track.move", &serde_json::json!({"tracks": [ids[1], ids[3]], "gap": 0})).unwrap();
+        let names: Vec<String> = e.session().tracks.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, ["T1", "T3", "T0", "T2", "T4"]);
+        let aux = e.execute("track.new", &serde_json::json!({"kind": "aux", "name": "Verb"})).unwrap()["tracks"][0].as_u64().unwrap();
+        e.execute("mix.route_to_track", &serde_json::json!({"tracks": [ids[0], ids[2]], "dest": aux, "send_slot": 0})).unwrap();
+        let s = e.session();
+        let bus = match s.track(TrackId(aux)).unwrap().mixer.input {
+            Route::Bus(b) => b,
+            ref other => panic!("{other:?}"),
+        };
+        assert_eq!(s.bus(bus).unwrap().name, "Verb");
+        for t in [ids[0], ids[2]] {
+            assert_eq!(s.track(TrackId(t)).unwrap().mixer.sends[0].as_ref().unwrap().target, Route::Bus(bus));
+        }
+        e.execute("mix.route_to_track", &serde_json::json!({"tracks": [ids[4]], "dest": aux})).unwrap();
+        assert_eq!(e.session().track(TrackId(ids[4])).unwrap().mixer.output, Route::Bus(bus));
+        assert!(e.execute("mix.route_to_track", &serde_json::json!({"tracks": [aux], "dest": aux})).is_err());
+    }
+
+    #[test]
+    fn inputs_and_busses_cascade_track_by_track() {
+        let mut e = Engine::default();
+        let mut ids = Vec::new();
+        for f in ["mono", "mono", "stereo", "mono"] {
+            ids.push(e.execute("track.new", &serde_json::json!({"format": f})).unwrap()["tracks"][0].as_u64().unwrap());
+        }
+        e.execute("track.input", &serde_json::json!({"tracks": ids, "input": "In 1", "cascade": true})).unwrap();
+        let input = |e: &Engine, t: u64| e.session().track(TrackId(t)).map(|x| x.mixer.input.clone());
+        let hw = |n: &str| Some(Route::Hardware(n.into()));
+        assert_eq!([input(&e, ids[0]), input(&e, ids[1]), input(&e, ids[2]), input(&e, ids[3])], [hw("In 1"), hw("In 2"), hw("In 3-4"), hw("In 5")]);
+        e.execute("setup.io", &serde_json::json!({"action": "create_busses", "name": "Bus", "count": 3})).unwrap();
+        e.execute("track.output", &serde_json::json!({"tracks": [ids[0], ids[1]], "output": "Bus 2", "cascade": true})).unwrap();
+        let out = |e: &Engine, t: u64| e.session().track(TrackId(t)).map(|x| x.mixer.output.clone());
+        let bus = |e: &Engine, n: &str| Some(Route::Bus(e.session().bus_by_name(n).unwrap().id));
+        assert_eq!(out(&e, ids[0]), bus(&e, "Bus 2"));
+        assert_eq!(out(&e, ids[1]), bus(&e, "Bus 3"));
+        assert!(e.execute("track.input", &serde_json::json!({"tracks": ids, "input": "none", "cascade": true})).is_err());
+    }
 
     #[test]
     fn new_tracks_go_after_the_last_selected_track() {

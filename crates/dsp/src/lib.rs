@@ -173,6 +173,16 @@ pub trait Plugin: Send {
     fn gain_reduction_db(&self) -> f32 {
         0.0
     }
+    fn set_multi_output(&mut self, _on: bool) {}
+    fn extra_outputs(&self) -> usize {
+        0
+    }
+    fn extra_output_channels(&self, _bus: usize) -> usize {
+        0
+    }
+    fn extra_output(&self, _bus: usize, _ch: usize) -> Option<&[f32]> {
+        None
+    }
     fn accepts_key(&self) -> bool {
         false
     }
@@ -190,6 +200,7 @@ pub trait Plugin: Send {
     }
     fn midi(&mut self, _offset: usize, _msg: [u8; 3]) {}
     fn all_notes_off(&mut self) {}
+    fn take_midi_out(&mut self, _out: &mut Vec<(usize, [u8; 3])>) {}
     fn set_sample(&mut self, _sample: Option<Arc<dyn SampleSource>>) -> bool {
         false
     }
@@ -230,7 +241,13 @@ pub trait PluginEditor: Send {
     fn load_state(&mut self, _data: &[u8]) -> bool {
         false
     }
+    fn output_buses(&mut self) -> Vec<(String, u32)> {
+        Vec::new()
+    }
     fn param_value(&mut self, _id: &str) -> Option<f32> {
+        None
+    }
+    fn value_text(&mut self, _id: &str, _value: f32) -> Option<String> {
         None
     }
 }
@@ -247,6 +264,7 @@ pub struct EditorHeader {
     pub key: Option<usize>,
     pub key_on: bool,
     pub key_listen: bool,
+    pub params: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -259,6 +277,7 @@ pub enum HeaderAction {
     Key(Option<usize>),
     ExternalKey,
     KeyListen,
+    Automate(usize),
 }
 
 pub trait PluginStateReader: Send {

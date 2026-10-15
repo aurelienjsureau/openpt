@@ -399,6 +399,7 @@ pub enum Route {
 }
 
 pub const MULTI_MONO_PREFIX: &str = "mm:";
+pub const MULTI_OUT_PREFIX: &str = "mo:";
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Insert {
@@ -423,6 +424,10 @@ pub struct Insert {
     pub key_on: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub key_listen: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multi_out: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<BusId>,
 }
 
 fn yes() -> bool {
@@ -443,6 +448,8 @@ impl Insert {
             key: None,
             key_on: false,
             key_listen: false,
+            multi_out: false,
+            outputs: Vec::new(),
         }
     }
 
@@ -451,11 +458,23 @@ impl Insert {
     }
 
     pub fn instance_id(&self) -> String {
-        if self.multi_mono { format!("{MULTI_MONO_PREFIX}{}", self.plugin) } else { self.plugin.clone() }
+        let mut id = self.plugin.clone();
+        if self.multi_mono {
+            id.insert_str(0, MULTI_MONO_PREFIX);
+        }
+        if self.multi_out {
+            id.insert_str(0, MULTI_OUT_PREFIX);
+        }
+        id
     }
 
     pub fn is_instance(&self, id: &str) -> bool {
-        if self.multi_mono { id.strip_prefix(MULTI_MONO_PREFIX) == Some(self.plugin.as_str()) } else { id == self.plugin }
+        let id = if self.multi_out { id.strip_prefix(MULTI_OUT_PREFIX) } else { Some(id) };
+        let id = match id {
+            Some(i) if self.multi_mono => i.strip_prefix(MULTI_MONO_PREFIX),
+            other => other,
+        };
+        id == Some(self.plugin.as_str())
     }
 
     pub fn state_bytes(&self) -> Option<Vec<u8>> {
@@ -588,12 +607,32 @@ fn finite_params<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<Stri
     Ok(params.into_iter().filter_map(|(k, v)| Some((k, v.map(|v| v as f32).filter(|v| v.is_finite())?))).collect())
 }
 
+const FADER_LAW: [(f32, f32); 11] = [
+    (-144.0, 0.0),
+    (-60.0, 0.067),
+    (-40.0, 0.128),
+    (-30.0, 0.250),
+    (-20.0, 0.366),
+    (-15.0, 0.462),
+    (-10.0, 0.559),
+    (-5.0, 0.652),
+    (0.0, 0.747),
+    (6.0, 0.874),
+    (12.0, 1.0),
+];
+
 pub fn fader_pos_to_db(pos: f32) -> f32 {
     let p = finite_or(pos, 0.0).clamp(0.0, 1.0);
     if p <= 0.0 {
         return -144.0;
     }
-    if p >= 0.25 { -24.0 + (p - 0.25) / 0.75 * 36.0 } else { -24.0 - (1.0 - p / 0.25).powf(1.5) * 120.0 }
+    for w in FADER_LAW.windows(2) {
+        let [(d0, p0), (d1, p1)] = [w[0], w[1]];
+        if p <= p1 {
+            return d0 + (d1 - d0) * (p - p0) / (p1 - p0);
+        }
+    }
+    12.0
 }
 
 pub fn fader_db_to_pos(db: f32) -> f32 {
@@ -601,12 +640,13 @@ pub fn fader_db_to_pos(db: f32) -> f32 {
     if db <= -144.0 {
         return 0.0;
     }
-    if db >= -24.0 {
-        (0.25 + (db.min(12.0) + 24.0) / 36.0 * 0.75).min(1.0)
-    } else {
-        let x = ((-24.0 - db) / 120.0).clamp(0.0, 1.0).powf(1.0 / 1.5);
-        ((1.0 - x) * 0.25).max(0.0)
+    for w in FADER_LAW.windows(2) {
+        let [(d0, p0), (d1, p1)] = [w[0], w[1]];
+        if db <= d1 {
+            return p0 + (p1 - p0) * (db - d0) / (d1 - d0);
+        }
     }
+    1.0
 }
 
 #[cfg(test)]
@@ -663,6 +703,9 @@ mod tests {
         }
         assert_eq!(fader_pos_to_db(0.0), -144.0);
         assert_eq!(fader_db_to_pos(f32::NAN), 0.0);
+        assert!((fader_db_to_pos(0.0) - 0.747).abs() < 1e-4);
+        assert!((fader_db_to_pos(-20.0) - 0.366).abs() < 1e-4);
+        assert!((fader_pos_to_db(0.128) + 40.0).abs() < 1e-3);
     }
 
     #[test]

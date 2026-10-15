@@ -611,10 +611,15 @@ pub fn shuffle_clips(s: &mut Session, ids: &[ClipId], delta: Samples, dest: &[(T
 
 pub fn grid_delta(s: &Session, clip: &Clip, raw: Samples, relative: bool) -> Samples {
     let (g, sr, map, rate) = (&s.edit.grid, s.sample_rate, &s.tempo, s.frame_rate);
+    let anchors: Vec<Samples> = if *g == openpt_time::GridValue::ClipsMarkers {
+        s.grid_anchors().into_iter().filter(|a| *a != clip.start && *a != clip.end()).collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let sync = if (0..clip.length).contains(&clip.sync_point) { clip.sync_point } else { 0 };
     let anchor = clip.start.saturating_add(sync);
-    let from = if relative { g.line_at_or_before(anchor, sr, map, rate) } else { anchor };
-    g.snap(from.saturating_add(raw), sr, map, rate).saturating_sub(from)
+    let from = if relative { g.line_at_or_before_with(anchor, sr, map, rate, &anchors) } else { anchor };
+    g.snap_with(from.saturating_add(raw), sr, map, rate, &anchors).saturating_sub(from)
 }
 
 pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Option<Samples>, shuffle: bool) -> Option<Clip> {

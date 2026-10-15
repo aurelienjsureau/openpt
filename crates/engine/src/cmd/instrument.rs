@@ -1,6 +1,6 @@
 use super::*;
 use crate::cmd;
-use openpt_model::{Insert, TrackKind};
+use openpt_model::{ChannelFormat, Insert, TrackKind};
 use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -13,6 +13,15 @@ pub fn specs() -> Vec<CommandSpec> {
             "{track?, plugin: id, params?: {id: value}} — an instrument track's instrument: built-in, `vst3:` or `au:` id; `params` sets built-in parameters (clamped into range; unknown ids and other fields are errors)",
             has_selection,
             set_instrument
+        ),
+        cmd!(
+            "mix.instrument_outputs",
+            "Multiple Outputs",
+            [],
+            None,
+            "{track?, on: bool, outputs?: [{name, channels}] (the plugin's output buses after the main one), create_auxes?: bool} — an instrument's extra outputs each feed a bus, for Aux tracks to take",
+            has_selection,
+            instrument_outputs
         ),
         cmd!(
             "mix.instrument_param",
@@ -79,6 +88,62 @@ fn set_instrument_param(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"track": t, "param": param, "value": v}))
 }
 
+fn instrument_outputs(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "mix.instrument_outputs";
+    let t = tracks_required(e, id, p)?.first().copied().ok_or_else(|| bad(id, "no track"))?;
+    let on = p.get("on").and_then(Value::as_bool).ok_or_else(|| bad(id, "`on` required"))?;
+    let outs: Vec<(String, usize)> = p
+        .get("outputs")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|o| Some((o["name"].as_str()?.trim().to_string(), usize::try_from(o["channels"].as_u64()?).ok()?.clamp(1, 8))))
+                .take(32)
+                .collect()
+        })
+        .unwrap_or_default();
+    let create_auxes = bool_or(p, "create_auxes", false);
+    let s = e.session_mut();
+    let tname = s.track(t).map(|x| x.name.clone()).ok_or_else(|| bad(id, "no track"))?;
+    if s.track(t).and_then(|x| x.instrument.as_ref()).is_none() {
+        return Err(bad(id, "the track has no instrument"));
+    }
+    if !on {
+        if let Some(ins) = s.track_mut(t).and_then(|x| x.instrument.as_mut()) {
+            ins.multi_out = false;
+            ins.outputs.clear();
+        }
+        return Ok(json!({"on": false}));
+    }
+    let mut busses = Vec::new();
+    for (k, (name, ch)) in outs.iter().enumerate() {
+        let label = if name.is_empty() { format!("{tname} Out {}", k + 2) } else { format!("{tname} {name}") };
+        let fmt = if *ch == 1 { ChannelFormat::Mono } else { ChannelFormat::for_channels(*ch) };
+        busses.push((s.add_bus(&label, fmt), label, fmt));
+    }
+    if let Some(ins) = s.track_mut(t).and_then(|x| x.instrument.as_mut()) {
+        ins.multi_out = true;
+        ins.outputs = busses.iter().map(|b| b.0).collect();
+    }
+    let mut auxes = Vec::new();
+    if create_auxes {
+        let mut at = s.track_index(t).unwrap_or(0) + 1;
+        for (b, label, fmt) in &busses {
+            let a = s.add_track(TrackKind::Aux, *fmt, Some(label));
+            if let Some(tr) = s.track_mut(a) {
+                tr.mixer.input = openpt_model::Route::Bus(*b);
+                tr.mixer.output = openpt_model::Route::Main;
+            }
+            if let Some(from) = s.track_index(a) {
+                let tr = s.tracks.remove(from);
+                s.tracks.insert(at.min(s.tracks.len()), tr);
+                at += 1;
+            }
+            auxes.push(a.0);
+        }
+    }
+    Ok(json!({"on": true, "busses": busses.iter().map(|b| b.0 .0).collect::<Vec<_>>(), "auxes": auxes}))
+}
 #[cfg(test)]
 mod tests {
     use crate::Engine;

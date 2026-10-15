@@ -10,7 +10,7 @@ fn round_i64(x: f64) -> i64 {
     if x.is_finite() { x.round().clamp(i64::MIN as f64, i64::MAX as f64) as i64 } else { 0 }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct QuantizeOptions {
     pub grid_ticks: i64,
     pub strength: f32,
@@ -20,6 +20,7 @@ pub struct QuantizeOptions {
     pub quantize_ends: bool,
     pub preserve_duration: bool,
     pub random: f32,
+    pub groove: Vec<i64>,
 }
 
 impl Default for QuantizeOptions {
@@ -33,6 +34,7 @@ impl Default for QuantizeOptions {
             quantize_ends: false,
             preserve_duration: true,
             random: 0.0,
+            groove: Vec::new(),
         }
     }
 }
@@ -73,7 +75,13 @@ pub fn quantize_with_seed(notes: &mut [Note], opts: &QuantizeOptions, seed: u64)
     for n in notes.iter_mut() {
         let old_start = n.start;
         let old_end = n.end();
-        let target = nearest_line(old_start, grid, swing);
+        let target = if opts.groove.is_empty() {
+            nearest_line(old_start, grid, swing)
+        } else {
+            let line = nearest_line(old_start, grid, 0.0);
+            let k = line.div_euclid(grid).rem_euclid(opts.groove.len() as i64) as usize;
+            line.saturating_add(opts.groove.get(k).copied().unwrap_or(0))
+        };
         let d = target.saturating_sub(old_start);
         let dist = d.unsigned_abs() as f64;
         if include < 1.0 && dist > include * half {

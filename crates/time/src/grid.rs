@@ -3,6 +3,7 @@ use crate::{FrameRate, SampleRate, Samples, TICKS_PER_QUARTER, TempoMap, to_samp
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum NoteValue {
     Bar,
+    Whole,
     Half,
     Quarter,
     Eighth,
@@ -12,8 +13,9 @@ pub enum NoteValue {
 }
 
 impl NoteValue {
-    pub const ALL: [NoteValue; 7] = [
+    pub const ALL: [NoteValue; 8] = [
         NoteValue::Bar,
+        NoteValue::Whole,
         NoteValue::Half,
         NoteValue::Quarter,
         NoteValue::Eighth,
@@ -23,7 +25,7 @@ impl NoteValue {
     ];
     pub fn ticks(self) -> i64 {
         match self {
-            NoteValue::Bar => TICKS_PER_QUARTER * 4,
+            NoteValue::Bar | NoteValue::Whole => TICKS_PER_QUARTER * 4,
             NoteValue::Half => TICKS_PER_QUARTER * 2,
             NoteValue::Quarter => TICKS_PER_QUARTER,
             NoteValue::Eighth => TICKS_PER_QUARTER / 2,
@@ -35,6 +37,7 @@ impl NoteValue {
     pub fn label(self) -> &'static str {
         match self {
             NoteValue::Bar => "1 bar",
+            NoteValue::Whole => "1/1 note",
             NoteValue::Half => "1/2 note",
             NoteValue::Quarter => "1/4 note",
             NoteValue::Eighth => "1/8 note",
@@ -45,12 +48,16 @@ impl NoteValue {
     }
 }
 
+pub const FRAMES_PER_FOOT: f64 = 16.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum GridValue {
     Note { value: NoteValue, dotted: bool, triplet: bool },
     Seconds(f64),
-    Frames(i64),
+    Frames(f64),
+    Feet(f64),
     Samples(i64),
+    ClipsMarkers,
 }
 
 impl Default for GridValue {
@@ -72,9 +79,26 @@ impl GridValue {
                 }
                 s
             }
-            GridValue::Seconds(s) => format!("{s:.3} sec"),
-            GridValue::Frames(f) => format!("{f} frame{}", if *f == 1 { "" } else { "s" }),
-            GridValue::Samples(n) => format!("{n} samples"),
+            GridValue::Seconds(s) if *s >= 1.0 => format!("{} sec", trim(*s)),
+            GridValue::Seconds(s) => format!("{} msec", trim(s * 1000.0)),
+            GridValue::Frames(f) if (*f - 0.5).abs() < 1e-9 => "1/2 frame".into(),
+            GridValue::Frames(f) if (*f - 0.25).abs() < 1e-9 => "1/4 frame".into(),
+            GridValue::Frames(f) if (*f - 0.01).abs() < 1e-9 => "1 subframe".into(),
+            GridValue::Frames(f) => format!("{} frame{}", trim(*f), if (*f - 1.0).abs() < 1e-9 { "" } else { "s" }),
+            GridValue::Feet(f) => format!("{} f{}t", trim(*f), if (*f - 1.0).abs() < 1e-9 { "oo" } else { "ee" }),
+            GridValue::Samples(n) => format!("{n} sample{}", if *n == 1 { "" } else { "s" }),
+            GridValue::ClipsMarkers => "Clips/Markers".into(),
+        }
+    }
+
+    pub fn scale(&self) -> &'static str {
+        match self {
+            GridValue::Note { .. } => "bars_beats",
+            GridValue::Seconds(_) => "min_secs",
+            GridValue::Frames(_) => "timecode",
+            GridValue::Feet(_) => "feet_frames",
+            GridValue::Samples(_) => "samples",
+            GridValue::ClipsMarkers => "clips_markers",
         }
     }
 
@@ -88,9 +112,11 @@ impl GridValue {
                 let j = if larger { i.checked_sub(1) } else { i.checked_add(1) };
                 j.and_then(|j| NoteValue::ALL.get(j)).map_or(self, |&value| GridValue::Note { value, dotted, triplet })
             }
-            GridValue::Seconds(s) => next(&[0.001, 0.01, 0.1, 1.0, 10.0], s, larger).map_or(self, GridValue::Seconds),
-            GridValue::Frames(f) => next(&[1, 10, 100], f, larger).map_or(self, GridValue::Frames),
-            GridValue::Samples(n) => next(&[1, 10, 100, 1_000, 10_000, 100_000], n, larger).map_or(self, GridValue::Samples),
+            GridValue::Seconds(s) => next(&[0.001, 0.01, 0.1, 0.5, 1.0, 10.0], s, larger).map_or(self, GridValue::Seconds),
+            GridValue::Frames(f) => next(&[0.01, 0.25, 0.5, 1.0, 5.0, 10.0, 100.0], f, larger).map_or(self, GridValue::Frames),
+            GridValue::Feet(f) => next(&[1.0, 10.0], f, larger).map_or(self, GridValue::Feet),
+            GridValue::Samples(n) => next(&[1, 2, 10, 100, 1_000, 10_000, 100_000], n, larger).map_or(self, GridValue::Samples),
+            GridValue::ClipsMarkers => self,
         }
     }
 
@@ -106,6 +132,16 @@ impl GridValue {
         t.max(1)
     }
 
+    fn absolute_step(&self, sr: SampleRate, rate: FrameRate) -> Option<f64> {
+        match *self {
+            GridValue::Seconds(s) => Some(sr.as_f64() * s.clamp(0.000_01, 3600.0)),
+            GridValue::Frames(f) => Some(rate.samples_per_frame(sr) * f.clamp(0.01, 1_000_000.0)),
+            GridValue::Feet(f) => Some(rate.samples_per_frame(sr) * FRAMES_PER_FOOT * f.clamp(0.01, 100_000.0)),
+            GridValue::Samples(n) => Some(n.max(1) as f64),
+            GridValue::Note { .. } | GridValue::ClipsMarkers => None,
+        }
+    }
+
     pub fn step_samples(&self, at: Samples, sr: SampleRate, map: &TempoMap, rate: FrameRate) -> Samples {
         match *self {
             GridValue::Note { value, dotted, triplet } => {
@@ -113,9 +149,8 @@ impl GridValue {
                 let dt = Self::note_ticks(value, dotted, triplet, map, t0);
                 (map.tick_to_samples(t0 + dt, sr) - map.tick_to_samples(t0, sr)).max(1)
             }
-            GridValue::Seconds(s) => sr.samples(s.clamp(0.000_01, 3600.0)).max(1),
-            GridValue::Frames(f) => to_samples(rate.samples_per_frame(sr) * f.clamp(1, 1_000_000) as f64).max(1),
-            GridValue::Samples(n) => n.max(1),
+            GridValue::ClipsMarkers => sr.samples(1.0).max(1),
+            _ => to_samples(self.absolute_step(sr, rate).unwrap_or(1.0)).max(1),
         }
     }
 
@@ -140,14 +175,29 @@ impl GridValue {
                 let k = (t - bar_tick).div_euclid(step);
                 map.tick_to_samples(bar_tick + k * step, sr)
             }
+            GridValue::ClipsMarkers => pos,
             _ => {
-                let step = self.step_samples(pos, sr, map, rate);
-                pos.div_euclid(step).saturating_mul(step)
+                let step = self.absolute_step(sr, rate).unwrap_or(1.0).max(1.0);
+                let k = (pos as f64 / step).floor();
+                let mut line = to_samples(k * step);
+                if line > pos {
+                    line = to_samples((k - 1.0) * step);
+                }
+                line
             }
         }
     }
 
     pub fn next_line(&self, line: Samples, sr: SampleRate, map: &TempoMap, rate: FrameRate) -> Samples {
+        if let Some(st) = self.absolute_step(sr, rate) {
+            let st = st.max(1.0);
+            let k = (line as f64 / st).floor();
+            let mut n = to_samples((k + 1.0) * st);
+            if n <= line {
+                n = to_samples((k + 2.0) * st);
+            }
+            return n.max(line.saturating_add(1));
+        }
         let step = self.step_samples(line, sr, map, rate);
         let candidate = self.line_at_or_before(line.saturating_add(step), sr, map, rate);
         if candidate > line { candidate } else { line.saturating_add(step) }
@@ -155,6 +205,9 @@ impl GridValue {
 
     pub fn lines(&self, start: Samples, end: Samples, sr: SampleRate, map: &TempoMap, rate: FrameRate, max: usize) -> Vec<Samples> {
         let mut out = Vec::new();
+        if *self == GridValue::ClipsMarkers {
+            return out;
+        }
         let mut p = self.line_at_or_before(start, sr, map, rate);
         while p < end && out.len() < max {
             if p >= start {
@@ -168,8 +221,42 @@ impl GridValue {
         }
         out
     }
+
+    pub fn snap_with(&self, pos: Samples, sr: SampleRate, map: &TempoMap, rate: FrameRate, anchors: &[Samples]) -> Samples {
+        if *self != GridValue::ClipsMarkers {
+            return self.snap(pos, sr, map, rate);
+        }
+        anchors.iter().copied().min_by_key(|a| (a - pos).unsigned_abs()).unwrap_or(pos)
+    }
+
+    pub fn line_at_or_before_with(&self, pos: Samples, sr: SampleRate, map: &TempoMap, rate: FrameRate, anchors: &[Samples]) -> Samples {
+        if *self != GridValue::ClipsMarkers {
+            return self.line_at_or_before(pos, sr, map, rate);
+        }
+        anchors.iter().copied().take_while(|a| *a <= pos).last().unwrap_or(pos)
+    }
+
+    pub fn lines_with(
+        &self,
+        start: Samples,
+        end: Samples,
+        sr: SampleRate,
+        map: &TempoMap,
+        rate: FrameRate,
+        max: usize,
+        anchors: &[Samples],
+    ) -> Vec<Samples> {
+        if *self != GridValue::ClipsMarkers {
+            return self.lines(start, end, sr, map, rate, max);
+        }
+        anchors.iter().copied().filter(|a| *a >= start && *a < end).take(max).collect()
+    }
 }
 
+fn trim(v: f64) -> String {
+    let s = format!("{v:.3}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,7 +288,7 @@ mod tests {
     fn absolute_grids() {
         let (sr, map, rate) = (SampleRate::HZ_48000, TempoMap::default(), FrameRate::Fps25);
         assert_eq!(GridValue::Seconds(1.0).snap(70_000, sr, &map, rate), 48_000);
-        assert_eq!(GridValue::Frames(1).step_samples(0, sr, &map, rate), 1920);
+        assert_eq!(GridValue::Frames(1.0).step_samples(0, sr, &map, rate), 1920);
         assert_eq!(GridValue::Samples(0).step_samples(0, sr, &map, rate), 1);
     }
 
@@ -221,6 +308,31 @@ mod tests {
     }
 
     #[test]
+    fn frame_fractions_feet_whole_notes_and_clips_markers() {
+        let (sr, map, rate) = (SampleRate::HZ_48000, TempoMap::default(), FrameRate::Fps25);
+        assert_eq!(GridValue::Frames(0.5).step_samples(0, sr, &map, rate), 960);
+        assert_eq!(GridValue::Frames(0.01).step_samples(0, sr, &map, rate), 19);
+        assert_eq!(GridValue::Frames(0.01).label(), "1 subframe");
+        assert_eq!(GridValue::Feet(1.0).step_samples(0, sr, &map, rate), 1920 * 16);
+        assert_eq!(GridValue::Feet(1.0).label(), "1 foot");
+        assert_eq!(GridValue::Seconds(0.5).label(), "500 msec");
+        assert_eq!(GridValue::Samples(2).label(), "2 samples");
+        let lines = GridValue::Frames(0.01).lines(0, 192_000, sr, &map, rate, 100_000);
+        assert_eq!(lines.len(), 10_000);
+        assert_eq!(lines.last().copied(), Some(to_samples(9_999.0 * 19.2)));
+        let odd = TempoMap::new(120.0, 3, 4).unwrap();
+        let whole = GridValue::Note { value: NoteValue::Whole, dotted: false, triplet: false };
+        let bar = GridValue::Note { value: NoteValue::Bar, dotted: false, triplet: false };
+        assert_eq!(whole.step_samples(0, sr, &odd, rate), 96_000);
+        assert_eq!(bar.step_samples(0, sr, &odd, rate), 72_000);
+        let anchors = [1000, 5000, 9000];
+        let cm = GridValue::ClipsMarkers;
+        assert_eq!(cm.snap_with(4200, sr, &map, rate, &anchors), 5000);
+        assert_eq!(cm.line_at_or_before_with(8999, sr, &map, rate, &anchors), 5000);
+        assert_eq!(cm.lines_with(2000, 10_000, sr, &map, rate, 10, &anchors), vec![5000, 9000]);
+        assert!(cm.lines(0, 10_000, sr, &map, rate, 10).is_empty());
+    }
+    #[test]
     fn values_step_to_the_next_larger_or_smaller() {
         let note = |value, triplet| GridValue::Note { value, dotted: false, triplet };
         assert_eq!(note(NoteValue::Sixteenth, false).stepped(true), note(NoteValue::Eighth, false));
@@ -230,7 +342,7 @@ mod tests {
         assert_eq!(GridValue::Seconds(0.01).stepped(true), GridValue::Seconds(0.1));
         assert_eq!(GridValue::Seconds(0.5).stepped(false), GridValue::Seconds(0.1));
         assert_eq!(GridValue::Seconds(10.0).stepped(true), GridValue::Seconds(10.0));
-        assert_eq!(GridValue::Frames(1).stepped(true), GridValue::Frames(10));
+        assert_eq!(GridValue::Frames(1.0).stepped(true), GridValue::Frames(5.0));
         assert_eq!(GridValue::Samples(100).stepped(false), GridValue::Samples(10));
         assert_eq!(GridValue::Samples(1).stepped(false), GridValue::Samples(1));
     }

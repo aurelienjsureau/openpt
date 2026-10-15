@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(query "event.time_ops_window", "Time Operations Window", ["Event", "Time Operations"], None, "{} — tempo/meter map, song start and selection for the Time Operations window", always, |e, _| Ok(time_state(e.session()))),
         cmd!(query "event.tempo_ops_window", "Tempo Operations Window", ["Event", "Tempo Operations"], None, "{}", always, |e, _| Ok(time_state(e.session()))),
-        cmd!(query "event.midi_ops_window", "MIDI Operations Window", ["Event", "MIDI Operations"], None, "{} — input quantize and stored performances", always, |e, _| {
+        cmd!(query "event.midi_ops_window", "Event Operations Window", ["Event", "Event Operations"], None, "{} — input quantize and stored performances", always, |e, _| {
             let s = e.session();
             Ok(json!({"input_quantize": input_quantize_state(s), "performances": s.midi_originals.len(), "rtp": values_with_prefix(&s.edit, "rtp.")}))
         }),
@@ -72,17 +72,17 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(
             "event.select_split_notes",
             "Select/Split Notes...",
-            ["Event", "MIDI Operations"],
+            ["Event", "Event Operations"],
             Some("Alt+Y"),
             "{clips?, pitch_from?: 0, pitch_to?: 127, action?: select|split} — split moves the matching notes to a new MIDI track",
             has_selection,
             select_split
         ),
-        cmd!(noundo "event.input_quantize", "Input Quantize...", ["Event", "MIDI Operations"], None, "{enabled?: bool, grid?: '1/16'|ticks, strength?: 0..100, swing?: 0..100}", always, input_quantize),
+        cmd!(noundo "event.input_quantize", "Input Quantize...", ["Event", "Event Operations"], None, "{enabled?: bool, grid?: '1/16'|ticks, strength?: 0..100, swing?: 0..100}", always, input_quantize),
         cmd!(
             "event.step_input",
             "Step Input...",
-            ["Event", "MIDI Operations"],
+            ["Event", "Event Operations"],
             None,
             "{track?, pitch?: 60 | pitches?: [..], duration?: '1/8'|ticks, velocity?: 100, rest?: bool, advance?: true}",
             has_tracks,
@@ -91,7 +91,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(
             "event.restore_performance",
             "Restore Performance...",
-            ["Event", "MIDI Operations"],
+            ["Event", "Event Operations"],
             None,
             "{clips?} — returns MIDI clips to their stored original performance",
             has_selection,
@@ -100,7 +100,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(
             "event.flatten_performance",
             "Flatten Performance...",
-            ["Event", "MIDI Operations"],
+            ["Event", "Event Operations"],
             None,
             "{clips?} — makes the current notes the performance that Restore returns to",
             has_selection,
@@ -122,7 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Beat Detective",
             ["Event"],
             None,
-            "{tracks?, start?, end?, sensitivity?: 0.5, separate?: false, set_tempo?: false}",
+            "{tracks?, start?, end?, operation?: analyze|markers|separate|conform|smooth, start_bar_beat?: \"1|1\", end_bar_beat?, contains?: \"1/16\", resolution?: bars|beats|sub_beats, emphasis?: enhanced|low|high, sensitivity?: 0.5, trigger_pad_ms?: 5, strength?: 100, exclude_within?: 0, swing?: 0, crossfade?: true, crossfade_ms?: 5}",
             has_range,
             beat_detective
         ),
@@ -631,6 +631,7 @@ fn extract_chords(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 fn beat_detective(e: &mut Engine, p: &Value) -> Result<Value> {
+    use crate::beat_detective as bd;
     let id = "event.beat_detective";
     let tracks = tracks_required(e, id, p)?;
     let r = range_param(e, id, p)?;
@@ -641,54 +642,85 @@ fn beat_detective(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, "analyse at most 20 minutes at a time"));
     }
     let sens = f32_or(p, "sensitivity", 0.5).clamp(0.0, 1.0);
+    let (cap_start, cap_end) = bd::capture(e, r);
+    let start = str_param(p, "start_bar_beat").map_or(Some(cap_start), bd::parse_bar_beat).ok_or_else(|| bad(id, "`start_bar_beat` is bar|beat"))?;
+    let end = str_param(p, "end_bar_beat").map_or(Some(cap_end), bd::parse_bar_beat).ok_or_else(|| bad(id, "`end_bar_beat` is bar|beat"))?;
+    let contains = note_ticks(p.get("contains"), TICKS_PER_QUARTER / 4);
+    let resolution = match str_param(p, "resolution").unwrap_or("sub_beats") {
+        "bars" => bd::Resolution::Bars,
+        "beats" => bd::Resolution::Beats,
+        _ => bd::Resolution::SubBeats,
+    };
+    let emphasis = match str_param(p, "emphasis").unwrap_or("enhanced") {
+        "low" => bd::Emphasis::Low,
+        "high" => bd::Emphasis::High,
+        _ => bd::Emphasis::Enhanced,
+    };
+    let sel = bd::Selection { range: r, start, end, contains };
     let s = e.session();
     let sr = s.sample_rate;
-    let mut hits: Vec<Samples> = Vec::new();
-    for t in &tracks {
-        if s.track(*t).is_some_and(|x| x.kind.has_playlist() && !x.kind.is_midi()) {
-            hits.extend(crate::io::transients_in(s, *t, r, sens));
-        }
-    }
-    hits.sort_unstable();
-    let min_gap = sr.samples(0.03);
-    let mut beats: Vec<Samples> = Vec::new();
-    for h in hits {
-        if beats.last().is_none_or(|l| h - l >= min_gap) {
-            beats.push(h);
-        }
-    }
-    let mut iois: Vec<f64> = beats.windows(2).filter_map(|w| Some((w.get(1)? - w.first()?) as f64)).filter(|d| *d > 0.0).collect();
-    iois.sort_by(f64::total_cmp);
-    let bpm = iois.get(iois.len() / 2).map(|d| {
-        let mut b = 60.0 * sr.as_f64() / d;
-        let mut guard = 0;
-        while b < 70.0 && guard < 16 {
-            b *= 2.0;
-            guard += 1;
-        }
-        while b >= 180.0 && guard < 32 {
-            b /= 2.0;
-            guard += 1;
-        }
-        (b * 100.0).round() / 100.0
-    });
-    let separate = bool_or(p, "separate", false);
-    let set_tempo = bool_or(p, "set_tempo", false);
+    let triggers = bd::detect(s, &tracks, &sel, resolution, sens, emphasis);
+    let pad = sr.samples(f64_or(p, "trigger_pad_ms", 5.0).clamp(0.0, 1000.0) / 1000.0);
+    let label = |s: &openpt_model::Session, t: i64| {
+        let bb = s.tempo.bar_beat_at_tick(t);
+        format!("{}|{}|{:03}", bb.bar, bb.beat, bb.tick)
+    };
+    let shown: Vec<Value> = triggers.iter().take(4000).map(|t| json!({"at": t.at, "bar_beat": label(s, t.tick)})).collect();
+    let operation = str_param(p, "operation").unwrap_or("analyze").to_string();
+    let t0 = s.tempo.tick_at_bar_beat(start);
+    let t1 = s.tempo.tick_at_bar_beat(end);
+    let bpm = (t1 > t0).then(|| (t1 - t0) as f64 / TICKS_PER_QUARTER as f64 * 60.0 * sr.as_f64() / r.len() as f64);
     let s = e.session_mut();
-    let mut separated = 0;
-    if separate {
-        for t in &tracks {
-            for b in &beats {
-                separated += crate::edit::separate_at(s, *t, *b);
-            }
+    let done = match operation.as_str() {
+        "analyze" => 0,
+        "markers" => bd::generate_markers(s, &triggers).map_err(|err| bad(id, err))?,
+        "groove" => {
+            let name = str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()).unwrap_or("Groove").to_string();
+            let offsets = bd::groove_template(s, &triggers, contains);
+            let body = format!("{contains}|{}", offsets.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+            let key = format!("groove.{name}=");
+            s.edit.flags.retain(|f| !f.starts_with(&key));
+            s.edit.flags.insert(format!("{key}{body}"));
+            offsets.len()
         }
+        "separate" => bd::separate(s, &tracks, &triggers, pad),
+        "conform" => bd::conform(
+            s,
+            &tracks,
+            &triggers,
+            pad,
+            contains,
+            f64_or(p, "strength", 100.0) / 100.0,
+            f64_or(p, "exclude_within", 0.0) / 100.0,
+            f64_or(p, "swing", 0.0) / 100.0,
+        ),
+        "smooth" => {
+            let xf = sr.samples(f64_or(p, "crossfade_ms", 5.0).clamp(0.0, 500.0) / 1000.0);
+            bd::smooth(s, &tracks, r, if bool_or(p, "crossfade", true) { xf } else { 0 })
+        }
+        other => return Err(bad(id, format!("unknown operation `{other}`"))),
+    };
+    let mut separated = 0;
+    if bool_or(p, "separate", false) {
+        separated = bd::separate(s, &tracks, &triggers, pad);
     }
-    if set_tempo && let Some(b) = bpm {
+    if bool_or(p, "set_tempo", false)
+        && let Some(b) = bpm.filter(|b| (10.0..=400.0).contains(b))
+    {
         let tick = s.tempo.samples_to_ticks(r.start, sr);
         s.tempo.set_tempo(tick, b).map_err(|err| bad(id, err.to_string()))?;
     }
-    let shown: Vec<Samples> = beats.iter().take(2000).copied().collect();
-    Ok(json!({"beats": shown, "count": beats.len(), "bpm": bpm, "separated": separated}))
+    Ok(json!({
+        "operation": operation,
+        "triggers": shown,
+        "count": triggers.len(),
+        "beats": triggers.iter().take(2000).map(|t| t.at).collect::<Vec<_>>(),
+        "bpm": bpm.map(|b| (b * 100.0).round() / 100.0),
+        "done": done,
+        "separated": separated,
+        "start_bar_beat": format!("{}|{}", start.bar, start.beat),
+        "end_bar_beat": format!("{}|{}", end.bar, end.beat),
+    }))
 }
 
 fn identify_beat(e: &mut Engine, p: &Value) -> Result<Value> {

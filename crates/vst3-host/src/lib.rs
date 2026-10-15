@@ -33,6 +33,19 @@ pub use plugin::Vst3Plugin;
 use openpt_dsp::{Category, Plugin, PluginInfo};
 use std::path::{Path, PathBuf};
 
+static UI_WAKER: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+pub fn set_ui_waker(f: impl Fn() + Send + Sync + 'static) {
+    let _ = UI_WAKER.set(Box::new(f));
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn wake_ui() {
+    if let Some(f) = UI_WAKER.get() {
+        f();
+    }
+}
+
 pub const ID_PREFIX: &str = "vst3:";
 
 pub const AUDIO_MODULE_CLASS: &str = "Audio Module Class";

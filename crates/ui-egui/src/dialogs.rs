@@ -176,6 +176,15 @@ impl Dialogs {
             }
             "file.import_audio" => Dialog::PathPrompt { cmd: id.into(), title: "Import Audio".into(), path: home, key: "path".into() },
             "file.import_midi" => Dialog::PathPrompt { cmd: id.into(), title: "Import MIDI".into(), path: home, key: "path".into() },
+            "event.add_key_change" => Dialog::PathPrompt {
+                cmd: id.into(),
+                title: "Add Key Change (e.g. G major, E minor)".into(),
+                path: "C major".into(),
+                key: "key".into(),
+            },
+            "event.add_chord_change" => {
+                Dialog::PathPrompt { cmd: id.into(), title: "Add Chord Change (e.g. Am7)".into(), path: "C".into(), key: "chord".into() }
+            }
             "session.open" => Dialog::PathPrompt { cmd: id.into(), title: "Open Session".into(), path: home, key: "path".into() },
             "session.save" if e.path.is_some() => return false,
             "session.save" | "session.save_as" | "session.save_copy" => Dialog::PathPrompt {
@@ -516,6 +525,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                 Dialog::PathPrompt { cmd, path, key, .. } => {
                     ui.add(egui::TextEdit::singleline(path).desired_width(420.0));
                     if let Some(pick) = &app.services.pick_open
+                        && key == "path"
                         && cmd != "session.save_as"
                         && cmd != "session.save_copy"
                         && key != "dir"
@@ -739,6 +749,9 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
             return;
         }
         match app.run(&cmd, params) {
+            Ok(v) if cmd == "file.export_tracks_audio" => {
+                app.ui.status = format!("Exported {} track(s) as audio files", v["files"].as_array().map_or(0, Vec::len));
+            }
             Ok(v) if cmd == "file.export_clips" => {
                 app.ui.status = format!("Exported {} clip(s) to {}", v["written"], v["dir"].as_str().unwrap_or_default());
             }

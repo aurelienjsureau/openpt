@@ -125,7 +125,10 @@ impl Plugin for MultiMono {
     }
 
     fn editor(&mut self) -> Option<Box<dyn PluginEditor>> {
-        self.inner.first_mut().and_then(|p| p.editor())
+        let mut all = self.inner.iter_mut().map(|p| p.editor());
+        let first = all.next().flatten()?;
+        let others: Vec<Box<dyn PluginEditor>> = all.flatten().collect();
+        Some(Box::new(MultiEditor { first, others }))
     }
 
     fn state_reader(&mut self) -> Option<Box<dyn PluginStateReader>> {
@@ -133,6 +136,57 @@ impl Plugin for MultiMono {
     }
 }
 
+struct MultiEditor {
+    first: Box<dyn PluginEditor>,
+    others: Vec<Box<dyn PluginEditor>>,
+}
+
+impl PluginEditor for MultiEditor {
+    fn open(&mut self) -> Result<(), String> {
+        self.first.open()
+    }
+
+    fn close(&mut self) {
+        self.first.close();
+    }
+
+    fn is_open(&self) -> bool {
+        self.first.is_open()
+    }
+
+    fn idle(&mut self) -> Vec<(String, f32)> {
+        self.first.idle()
+    }
+
+    fn set_param(&mut self, id: &str, value: f32) {
+        self.first.set_param(id, value);
+        self.others.iter_mut().for_each(|e| e.set_param(id, value));
+    }
+
+    fn set_header(&mut self, header: &openpt_dsp::EditorHeader) {
+        self.first.set_header(header);
+    }
+
+    fn header_actions(&mut self) -> Vec<openpt_dsp::HeaderAction> {
+        self.first.header_actions()
+    }
+
+    fn load_state(&mut self, data: &[u8]) -> bool {
+        let mut ok = self.first.load_state(data);
+        for e in &mut self.others {
+            ok &= e.load_state(data);
+        }
+        ok
+    }
+
+    fn param_value(&mut self, id: &str) -> Option<f32> {
+        self.first.param_value(id)
+    }
+
+    fn value_text(&mut self, id: &str, value: f32) -> Option<String> {
+        self.first.value_text(id, value)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

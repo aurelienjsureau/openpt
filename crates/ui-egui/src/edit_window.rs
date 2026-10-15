@@ -29,6 +29,18 @@ const COLUMNS: [Column; 7] = [
     ("comments", "Comments", "COMMENTS", COLUMN_W),
 ];
 
+pub(crate) fn move_tracks_to(app: &mut SoundApp, id: TrackId, gap: usize) {
+    let s = app.engine.session();
+    let tracks: Vec<u64> = if s.edit.selected_tracks.contains(&id) && s.edit.selected_tracks.len() > 1 {
+        s.edit.selected_tracks.iter().map(|t| t.0).collect()
+    } else {
+        vec![id.0]
+    };
+    if let Err(e) = app.run("track.move", json!({"tracks": tracks, "gap": gap})) {
+        app.ui.status = e;
+    }
+}
+
 pub fn edit_columns(s: &Session) -> Vec<Column> {
     let all = s.edit.flag("edit_view.all");
     COLUMNS.into_iter().filter(|c| all || s.edit.flag(&format!("edit_view.{}", c.0))).collect()
@@ -171,7 +183,7 @@ fn dock_tabs(app: &mut SoundApp, ui: &mut Ui) {
             let slot = track.and_then(|t| s.track(t)).and_then(|tr| {
                 tr.mixer.inserts.iter().position(|i| {
                     i.as_ref()
-                        .and_then(|i| openpt_dsp::plugin_info(&i.plugin))
+                        .and_then(|i| crate::mix_window::plugin_info(&i.plugin))
                         .is_some_and(|info| info.name.eq_ignore_ascii_case(&name) || name.to_lowercase().contains(&info.name.to_lowercase()))
                 })
             });
@@ -240,6 +252,22 @@ fn main_area_content(app: &mut SoundApp, ui: &mut Ui) {
     let tl = Rect::from_min_max(pos2(full.min.x + hw, full.min.y + rulers_h), pos2(full.max.x - 12.0, full.max.y - hscroll_h));
     let rulers_rect = Rect::from_min_max(pos2(full.min.x, full.min.y), pos2(full.max.x, full.min.y + rulers_h));
     app.edit_layout.timeline = [tl.min.x, tl.min.y, tl.max.x, tl.max.y];
+    if crate::mix_window::insert_drag_active(ui.ctx())
+        && let Some(p) = ui.ctx().pointer_latest_pos()
+    {
+        let edge = 20.0;
+        let push = if p.y < tl.min.y + edge {
+            p.y - (tl.min.y + edge)
+        } else if p.y > tl.max.y - edge {
+            p.y - (tl.max.y - edge)
+        } else {
+            0.0
+        };
+        if push != 0.0 {
+            app.edit_layout.scroll_by((push * 0.5).clamp(-40.0, 40.0), tl.height());
+            ui.ctx().request_repaint();
+        }
+    }
     follow_zoom_toggle(app);
     ui.painter().rect_filled(full, 0.0, t.window_bg);
     scroll_and_zoom(app, ui, full, tl);
@@ -947,6 +975,9 @@ fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect, tl: Rect, 
     if s.edit.grid_lines {
         grid_lines(&painter, &s, tl, lane);
     }
+    if app.ui.show_beat_detective && s.edit.selected_tracks.contains(&track.id) {
+        beat_triggers(app, &painter, &s, tl, lane);
+    }
     if let Some(p) = &auto_view {
         draw_automation(&painter, &s, track, p, tl, lane);
     }
@@ -1130,12 +1161,8 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
         let rows = app.edit_layout.rows.clone();
         let target_row = rows.iter().position(|(_, r)| p.y < (r[1] + r[3]) * 0.5).unwrap_or(rows.len());
         let s = app.engine.session();
-        let to = rows.get(target_row).and_then(|(tid, _)| s.track_index(TrackId(*tid))).unwrap_or(s.tracks.len());
-        let from = s.track_index(id).unwrap_or(0);
-        let to = if to > from { to - 1 } else { to };
-        if to != from {
-            let _ = app.run("track.move", json!({"track": id.0, "to": to}));
-        }
+        let gap = rows.get(target_row).and_then(|(tid, _)| s.track_index(TrackId(*tid))).unwrap_or(s.tracks.len());
+        move_tracks_to(app, id, gap);
     }
     let pl_r = at(114.0, 1.0, 11.0, 14.5);
     let presp = ui.interact(pl_r, ui.id().with(("pl", id.0)), Sense::click());
@@ -1186,7 +1213,8 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
         }
     }
     if h >= 55.0 {
-        let vresp = header_selector(ui, at(17.0, 37.0, 105.0, 16.0), ui.id().with(("view", id.0)), &view_label(&track.view), t.text, true);
+        let vresp =
+            header_selector(ui, at(17.0, 37.0, 105.0, 16.0), ui.id().with(("view", id.0)), &track_view_label(track, &track.view), t.text, true);
         egui::Popup::menu(&vresp).show(|ui| view_menu(app, ui, track));
     }
     if h >= 72.0 {
@@ -1429,7 +1457,7 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
     let ui = column_ui(ui, "io", r);
     let row = |y: f32, h: f32| (r.height() >= y + h + 1.0).then_some(Rect::from_min_size(r.min + vec2(7.0, y), vec2(r.width() - 14.0, h)));
     if let Some(input) = row(4.0, 15.0) {
-        let resp = header_selector(&ui, input, ui.id().with(("in", id.0)), &crate::mix_window::input_name(app, track), t.text, true);
+        let resp = header_selector(&ui, input, ui.id().with(("in", id.0)), &crate::mix_window::input_name(app, track), t.counter_text, true);
         crate::mix_window::route_popup(app, &resp.on_hover_text("Input"), id, true);
     }
     if let Some(out) = row(21.0, 17.0) {
@@ -1439,7 +1467,7 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
         raised_key(ui.painter(), out, t.slot_face, resp.hovered() || fresp.hovered());
         groove(ui.painter(), fader.min.x - 0.5, out.min.y + 1.0..=out.max.y - 1.0, t.slot_face[0]);
         let name = crate::mix_window::route_name(app, &track.mixer.output);
-        ui.painter().with_clip_rect(sel.shrink(1.0)).text(sel.center(), Align2::CENTER_CENTER, name, bold(10.0), t.text);
+        ui.painter().with_clip_rect(sel.shrink(1.0)).text(sel.center(), Align2::CENTER_CENTER, name, bold(10.0), t.counter_text);
         let c = fader.center() + vec2(0.5, 0.0);
         ui.painter().vline(c.x, c.y - 5.0..=c.y + 5.0, Stroke::new(1.0, t.text));
         ui.painter().rect_filled(Rect::from_center_size(c + vec2(0.0, -1.5), vec2(5.0, 2.5)), 0.5, t.text);
@@ -1460,7 +1488,18 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
             (0..m.pan.len().min(2)).map(|i| crate::widgets::pan_text(openpt_mix::pan_at(track, i, now))).collect::<Vec<_>>().join(" ")
         };
         let ink = Tokens::DARK.counter_text;
-        for (y, label, value) in [(7.5, "vol", crate::widgets::db_text(openpt_mix::volume_db_at(track, now))), (22.0, "pan", pan)] {
+        let stereo = m.pan.len() >= 2;
+        if stereo {
+            let y = vr.min.y + 22.0;
+            for (k, align, x) in [(0, Align2::LEFT_CENTER, vr.min.x + 7.0), (1, Align2::RIGHT_CENTER, vr.max.x - 6.5)] {
+                let v = crate::widgets::pan_text(openpt_mix::pan_at(track, k, now));
+                ui.painter().text(pos2(x, y), align, v, bold(10.0), ink);
+            }
+            ui.painter().vline(vr.center().x, vr.min.y + 17.0..=vr.max.y - 2.0, Stroke::new(1.0, Color32::from_gray(45)));
+        }
+        let rows: &[(f32, &str, String)] =
+            &[(7.5, "vol", crate::widgets::db_text(openpt_mix::volume_db_at(track, now))), (22.0, "pan", pan)][..if stereo { 1 } else { 2 }];
+        for (y, label, value) in rows.iter().cloned() {
             let lr = ui.painter().text(pos2(vr.min.x + 7.0, vr.min.y + y), Align2::LEFT_CENTER, label, bold(10.0), ink);
             let room = vr.max.x - 6.5 - (lr.max.x + 6.0);
             let size =
@@ -1663,6 +1702,16 @@ fn view_label(v: &str) -> String {
     }
 }
 
+fn track_view_label(track: &Track, v: &str) -> String {
+    if let Some(AutoParam::Plugin { slot, param }) = AutoParam::parse(v)
+        && let Some(Some(ins)) = track.mixer.inserts.get(usize::from(slot))
+        && let Some(pi) = crate::mix_window::plugin_info(&ins.plugin).and_then(|i| i.param(&param))
+    {
+        return format!("{} {}", (b'a' + slot) as char, pi.name);
+    }
+    view_label(v)
+}
+
 fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
     let id = track.id.0;
     let mut opts: Vec<&str> = Vec::new();
@@ -1682,14 +1731,18 @@ fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
     }
     for (slot, ins) in track.mixer.inserts.iter().enumerate() {
         let Some(ins) = ins else { continue };
-        let Some(info) = openpt_dsp::plugin_info(&ins.plugin) else { continue };
+        let Some(info) = crate::mix_window::plugin_info(&ins.plugin) else { continue };
         ui.menu_button(info.name, |ui| {
-            for p in info.params {
-                let v = format!("plugin:{}:{}", (b'a' + slot as u8) as char, p.id);
-                if ui.button(p.name).clicked() {
-                    let _ = app.run("track.view", json!({"track": id, "view": v}));
+            let max_h = (ui.ctx().content_rect().height() - 80.0).max(160.0);
+            egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
+                for p in info.params {
+                    let v = format!("plugin:{}:{}", (b'a' + slot as u8) as char, p.id);
+                    if ui.selectable_label(track.view == v, p.name).clicked() {
+                        let _ = app.run("track.view", json!({"track": id, "view": v}));
+                        ui.close();
+                    }
                 }
-            }
+            });
         });
     }
 }
@@ -1782,11 +1835,34 @@ pub(crate) fn track_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     });
 }
 
+fn beat_triggers(app: &SoundApp, painter: &egui::Painter, s: &Session, tl: Rect, lane: Rect) {
+    let col = Color32::from_rgb(232, 160, 40);
+    let mut last_label = f32::NEG_INFINITY;
+    for (at, label) in &app.ops.bd.triggers {
+        let x = x_of(s, tl, *at);
+        if x < lane.min.x || x > lane.max.x {
+            continue;
+        }
+        painter.line_segment([pos2(x, lane.min.y), pos2(x, lane.max.y)], Stroke::new(1.0, col));
+        if x - last_label > 46.0 {
+            painter.text(pos2(x + 2.0, lane.min.y + 2.0), Align2::LEFT_TOP, label.trim_end_matches("|000"), regular(9.0), col);
+            last_label = x;
+        }
+    }
+}
 fn grid_lines(painter: &egui::Painter, s: &Session, tl: Rect, lane: Rect) {
     let t = Tokens::current();
     let view = Range::new(sample_at(s, tl, tl.min.x).max(0), sample_at(s, tl, tl.max.x));
     let sr = s.sample_rate;
     let px = |g: &GridValue| g.step_samples(view.start, sr, &s.tempo, s.frame_rate) as f64 / s.edit.zoom.samples_per_px;
+    if s.edit.grid == GridValue::ClipsMarkers {
+        let col = grid_veil(t.grid_line, t.playlist_bg);
+        for at in s.grid_lines(view.start, view.end, 2000) {
+            let x = x_of(s, tl, at);
+            painter.line_segment([pos2(x, lane.min.y), pos2(x, lane.max.y)], Stroke::new(1.0, col));
+        }
+        return;
+    }
     let bar = GridValue::Note { value: NoteValue::Bar, dotted: false, triplet: false };
     let (grid, col) = if px(&s.edit.grid) > 7.0 {
         (s.edit.grid, grid_veil(t.grid_line, t.playlist_bg))
@@ -2150,13 +2226,19 @@ fn draw_automation(painter: &egui::Painter, s: &Session, track: &Track, p: &Auto
             }
         }
     }
-    painter.text(pos2(lane.min.x + 6.0, lane.min.y + 9.0), Align2::LEFT_CENTER, p.label(), regular(10.0), t.text_dim);
+    painter.text(
+        pos2(lane.min.x + 6.0, lane.min.y + 9.0),
+        Align2::LEFT_CENTER,
+        track_view_label(track, &automation_id(p)),
+        regular(10.0),
+        t.text_dim,
+    );
 }
 
 fn plugin_range(track: &Track, p: &AutoParam) -> (f32, f32) {
     if let AutoParam::Plugin { slot, param } = p
         && let Some(Some(ins)) = track.mixer.inserts.get(usize::from(*slot))
-        && let Some(info) = openpt_dsp::plugin_info(&ins.plugin)
+        && let Some(info) = crate::mix_window::plugin_info(&ins.plugin)
         && let Some(pi) = info.param(param)
     {
         return (pi.min, pi.max);
@@ -2333,7 +2415,7 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, y: f3
 
 fn snap(s: &Session, at: Samples) -> Samples {
     let on = s.edit.edit_mode.is_grid() || s.edit.flag(ops::SNAP_TO_GRID);
-    if on { s.edit.grid.snap(at, s.sample_rate, &s.tempo, s.frame_rate) } else { at }
+    if on { s.snap_to_grid(at) } else { at }
 }
 
 fn clip_at(track: &Track, at: Samples) -> Option<&Clip> {
@@ -2966,7 +3048,7 @@ fn automation_id(p: &AutoParam) -> String {
 }
 
 fn drag_snap(s: &Session, at: Samples, flip: bool) -> Samples {
-    if s.edit.edit_mode.is_grid() != flip { s.edit.grid.snap(at, s.sample_rate, &s.tempo, s.frame_rate) } else { at }
+    if s.edit.edit_mode.is_grid() != flip { s.snap_to_grid(at) } else { at }
 }
 
 struct DragPlan {
@@ -4398,6 +4480,7 @@ mod tests {
     #[test]
     fn dragging_a_name_plate_down_drops_it_where_released() {
         let mut h = harness(4);
+        h.state_mut().engine.session_mut().edit.selected_tracks.clear();
         let order = |h: &Harness<SoundApp>| -> Vec<TrackId> { h.state().engine.session().tracks.iter().map(|t| t.id).collect() };
         let before = order(&h);
         let grab = row(&h, 0).min + vec2(40.0, 12.0);

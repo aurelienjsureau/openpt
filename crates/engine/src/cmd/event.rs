@@ -34,20 +34,20 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(
             "event.quantize",
             "Quantize...",
-            ["Event", "MIDI Operations"],
+            ["Event", "Event Operations"],
             Some("Alt+0"),
-            "{grid?: 1/16 | ticks, strength?: 100, swing?: 0, clips?}",
+            "{grid?: 1/16 | ticks, strength?: 100, swing?: 0, groove?: template name (from Beat Detective), clips?}",
             has_selection,
             quantize
         ),
-        cmd!("event.transpose", "Transpose...", ["Event", "MIDI Operations"], Some("Alt+T"), "{semitones, clips?}", has_selection, |e, p| {
+        cmd!("event.transpose", "Transpose...", ["Event", "Event Operations"], Some("Alt+T"), "{semitones, clips?}", has_selection, |e, p| {
             let st = i64_or(p, "semitones", 0).clamp(-127, 127) as i32;
             midi_op(e, p, move |n| openpt_midi::ops::transpose(n, st))
         }),
         cmd!(
             "event.change_velocity",
             "Change Velocity...",
-            ["Event", "MIDI Operations"],
+            ["Event", "Event Operations"],
             None,
             "{set?|add?|scale?|min?,max?, clips?}",
             has_selection,
@@ -56,7 +56,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(
             "event.change_duration",
             "Change Duration...",
-            ["Event", "MIDI Operations"],
+            ["Event", "Event Operations"],
             Some("Alt+P"),
             "{set?|add?|scale?|legato?: gap, clips?}",
             has_selection,
@@ -75,9 +75,32 @@ pub fn specs() -> Vec<CommandSpec> {
             }
             Ok(json!({"removed": n}))
         }),
+        cmd!(
+            "event.add_chord_change",
+            "Add Chord Change...",
+            ["Event"],
+            None,
+            "{chord: 'Am7', at?} — a chord on the Chords ruler",
+            always,
+            |e, p| {
+                let chord = str_param(p, "chord")
+                    .map(str::trim)
+                    .filter(|c| !c.is_empty())
+                    .ok_or_else(|| bad("event.add_chord_change", "`chord` required"))?
+                    .to_string();
+                let at = position_param(e, "event.add_chord_change", p, "at")?.unwrap_or(e.session().edit.selection.start).max(0);
+                let s = e.session_mut();
+                s.markers.retain(|m| !(m.ruler == 2 && m.start == at));
+                let mid = s.add_marker(&chord, openpt_model::MarkerKind::Marker, at, at);
+                if let Some(m) = s.markers.iter_mut().find(|m| m.id == mid) {
+                    m.ruler = 2;
+                }
+                Ok(json!({"chord": chord, "at": at}))
+            }
+        ),
         cmd!("event.add_key_change", "Add Key Change...", ["Event"], None, "{key: 'C major', at?}", always, |e, p| {
             let key = str_param(p, "key").unwrap_or("C major").to_string();
-            let at = position_param(e, "event.add_key_change", p, "at")?.unwrap_or(0);
+            let at = position_param(e, "event.add_key_change", p, "at")?.unwrap_or(e.session().edit.selection.start).max(0);
             let s = e.session_mut();
             s.key_signatures.retain(|(t, _)| *t != at);
             s.key_signatures.push((at, key));
@@ -242,12 +265,19 @@ fn grid_ticks(p: &Value) -> i64 {
 }
 
 fn quantize(e: &mut Engine, p: &Value) -> Result<Value> {
-    let opts = QuantizeOptions {
+    let mut opts = QuantizeOptions {
         grid_ticks: grid_ticks(p),
         strength: (f32_or(p, "strength", 100.0) / 100.0).clamp(0.0, 1.0),
         swing: (f32_or(p, "swing", 0.0) / 100.0).clamp(0.0, 1.0),
         ..QuantizeOptions::default()
     };
+    if let Some(name) = str_param(p, "groove").map(str::trim).filter(|n| !n.is_empty()) {
+        let body = super::more_util::text(&e.session().edit, &format!("groove.{name}"))
+            .ok_or_else(|| bad("event.quantize", format!("no groove `{name}`")))?;
+        let (grid, offsets) = body.split_once('|').ok_or_else(|| bad("event.quantize", "damaged groove template"))?;
+        opts.grid_ticks = grid.parse::<i64>().ok().filter(|g| *g > 0).ok_or_else(|| bad("event.quantize", "damaged groove template"))?;
+        opts.groove = offsets.split(',').filter_map(|o| o.trim().parse::<i64>().ok()).collect();
+    }
     midi_op(e, p, move |n| openpt_midi::ops::quantize(n, &opts))
 }
 

@@ -717,6 +717,8 @@ impl IComponentHandlerTrait for HostContext {
             } else if e.len() < EDIT_CAP {
                 e.push((id, v));
             }
+            drop(e);
+            crate::wake_ui();
         }
         sb::kResultOk
     }
@@ -1298,7 +1300,51 @@ impl Instance {
         }
     }
 
-    pub fn configure(&mut self, sample_rate: f64, max_frames: usize, mono: bool) -> Result<Layout, Vst3Error> {
+    pub fn midi_out(&self, out: &mut Vec<(usize, [u8; 3])>) {
+        use sv::Event_::EventTypes_ as T;
+        let byte = |v: i32| v.clamp(0, 127) as u8;
+        let vel = |v: f32| (v * 127.0).round().clamp(0.0, 127.0) as u8;
+        self.out_events.with(|v| {
+            for e in v.iter() {
+                let at = usize::try_from(e.sampleOffset).unwrap_or(0);
+                let msg = unsafe {
+                    match u32::from(e.r#type) {
+                        t if t == T::kNoteOnEvent as u32 => {
+                            let n = e.__field0.noteOn;
+                            let v = vel(n.velocity);
+                            [if v == 0 { 0x80 } else { 0x90 } | (n.channel as u8 & 0x0F), byte(i32::from(n.pitch)), v]
+                        }
+                        t if t == T::kNoteOffEvent as u32 => {
+                            let n = e.__field0.noteOff;
+                            [0x80 | (n.channel as u8 & 0x0F), byte(i32::from(n.pitch)), vel(n.velocity)]
+                        }
+                        t if t == T::kPolyPressureEvent as u32 => {
+                            let n = e.__field0.polyPressure;
+                            [0xA0 | (n.channel as u8 & 0x0F), byte(i32::from(n.pitch)), vel(n.pressure)]
+                        }
+                        t if t == T::kLegacyMIDICCOutEvent as u32 => {
+                            let c = e.__field0.midiCCOut;
+                            let ch = c.channel as u8 & 0x0F;
+                            let (a, b) = (byte(i32::from(c.value)), byte(i32::from(c.value2)));
+                            match c.controlNumber {
+                                n @ 0..=127 => [0xB0 | ch, n, a],
+                                128 => [0xD0 | ch, a, 0],
+                                129 => [0xE0 | ch, a, b],
+                                130 => [0xC0 | ch, a, 0],
+                                _ => continue,
+                            }
+                        }
+                        _ => continue,
+                    }
+                };
+                if out.len() < out.capacity() {
+                    out.push((at, msg));
+                }
+            }
+        });
+    }
+
+    pub fn configure(&mut self, sample_rate: f64, max_frames: usize, mono: bool, all_outputs: bool) -> Result<Layout, Vst3Error> {
         self.shutdown();
         let audio = sv::MediaTypes_::kAudio;
         let event = sv::MediaTypes_::kEvent;
@@ -1340,12 +1386,15 @@ impl Instance {
         };
         for (dir, n) in [(din, nin), (dout, nout)] {
             for i in 0..n {
-                let on = i == 0 || (key && dir == din && i == 1);
+                let on = i == 0 || (key && dir == din && i == 1) || (all_outputs && dir == dout);
                 unsafe { self.component.activateBus(audio as sv::MediaType, dir as sv::BusDirection, i, u8::from(on)) };
             }
         }
         if layout.event_input {
             unsafe { self.component.activateBus(event as sv::MediaType, din as sv::BusDirection, 0, 1) };
+        }
+        if self.bus_count(event, dout) > 0 {
+            unsafe { self.component.activateBus(event as sv::MediaType, dout as sv::BusDirection, 0, 1) };
         }
         self.event_in = layout.event_input;
         let sample32 = sv::SymbolicSampleSizes_::kSample32 as i32;
@@ -1754,6 +1803,26 @@ impl EditorLink {
         }
     }
 
+    pub fn value_text(&self, id: u32, normalized: f64) -> Option<String> {
+        let g = self.lock();
+        let c = g.controller.as_ref()?;
+        let mut s: sv::String128 = [0; 128];
+        ok(unsafe { c.getParamStringByValue(id, normalized.clamp(0.0, 1.0), &mut s) }).then(|| read_c16(&s)).filter(|t| !t.is_empty())
+    }
+
+    pub fn output_buses(&self) -> Vec<(String, u32)> {
+        let g = self.lock();
+        let Some(c) = &g.component else { return Vec::new() };
+        let (audio, out) = (sv::MediaTypes_::kAudio as sv::MediaType, sv::BusDirections_::kOutput as sv::BusDirection);
+        let n = unsafe { c.getBusCount(audio, out) }.clamp(0, MAX_BUSES);
+        (0..n)
+            .filter_map(|i| {
+                let mut info: sv::BusInfo = unsafe { std::mem::zeroed() };
+                ok(unsafe { c.getBusInfo(audio, out, i, &mut info) }).then(|| (read_c16(&info.name), u32::try_from(info.channelCount).unwrap_or(0)))
+            })
+            .collect()
+    }
+
     pub fn normalized(&self, id: u32) -> Option<f64> {
         let g = self.lock();
         let c = g.controller.as_ref()?;
@@ -1944,11 +2013,14 @@ mod window {
 
     const STYLE: u32 = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
     const HEADER: f64 = 46.0;
+    const HEADER2: f64 = 86.0;
 
     struct State {
         header: EditorHeader,
         actions: Vec<HeaderAction>,
         content: HWND,
+        resizable: bool,
+        view_size: (i32, i32),
     }
 
     thread_local! {
@@ -1970,7 +2042,14 @@ mod window {
     }
 
     fn header_px(hwnd: HWND) -> i32 {
-        (HEADER * dpi_scale(hwnd)).round() as i32
+        let mut c = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { GetClientRect(hwnd, &mut c) };
+        header_px_at(hwnd, c.right)
+    }
+
+    fn header_px_at(hwnd: HWND, width: i32) -> i32 {
+        let k = dpi_scale(hwnd);
+        with_state(hwnd, |s| header_height(&s.header, width, k)).unwrap_or_else(|| (HEADER * k).round() as i32)
     }
 
     fn frame_insets(hwnd: HWND) -> RECT {
@@ -1989,32 +2068,44 @@ mod window {
         Key,
         ExtKey,
         Listen,
+        Auto,
         Bypass,
+    }
+
+    fn one_row_width(h: &EditorHeader, k: f64) -> i32 {
+        ((if h.takes_key { 794.0 } else { 512.0 }) * k).round() as i32
+    }
+
+    fn header_height(h: &EditorHeader, width: i32, k: f64) -> i32 {
+        ((if width >= one_row_width(h, k) { HEADER } else { HEADER2 }) * k).round() as i32
     }
 
     fn layout(h: &EditorHeader, width: i32, k: f64) -> Vec<(Item, RECT, &'static str)> {
         let px = |v: f64| (v * k).round() as i32;
-        let (top, bottom) = (px(19.0), px(40.0));
-        let r = |x0: f64, x1: f64| RECT { left: px(x0), top, right: px(x1), bottom };
+        let one_row = width >= one_row_width(h, k);
+        let row = |y: f64| (px(y), px(y + 21.0));
+        let (r1, r2) = (row(19.0), if one_row { row(19.0) } else { row(59.0) });
+        let at = |(top, bottom): (i32, i32), x0: f64, x1: f64| RECT { left: px(x0), top, right: px(x1), bottom };
         let mut out = vec![
-            (Item::Track, r(8.0, 140.0), "Track"),
-            (Item::Preset, r(148.0, 318.0), "Preset"),
-            (Item::Prev, r(322.0, 342.0), ""),
-            (Item::Next, r(344.0, 364.0), ""),
+            (Item::Track, at(r1, 8.0, 140.0), "Track"),
+            (Item::Preset, at(r1, 148.0, 318.0), "Preset"),
+            (Item::Prev, at(r1, 322.0, 342.0), ""),
+            (Item::Next, at(r1, 344.0, 364.0), ""),
         ];
         if h.takes_key {
-            out.push((Item::Key, r(378.0, 490.0), "Key Input"));
-            out.push((Item::ExtKey, r(494.0, 572.0), ""));
-            out.push((Item::Listen, r(576.0, 646.0), ""));
+            let x = if one_row { 378.0 } else { 8.0 };
+            out.push((Item::Key, at(r2, x, x + 112.0), "Key Input"));
+            out.push((Item::ExtKey, at(r2, x + 116.0, x + 194.0), ""));
+            out.push((Item::Listen, at(r2, x + 198.0, x + 268.0), ""));
         }
         let right = width - px(8.0);
-        out.push((Item::Bypass, RECT { left: right - px(64.0), top, right, bottom }, ""));
+        out.push((Item::Auto, RECT { left: right - px(122.0), top: r2.0, right: right - px(70.0), bottom: r2.1 }, ""));
+        out.push((Item::Bypass, RECT { left: right - px(64.0), top: r2.0, right, bottom: r2.1 }, ""));
         out
     }
 
     fn min_width(hwnd: HWND) -> i32 {
-        let key = with_state(hwnd, |s| s.header.takes_key).unwrap_or(false);
-        (if key { 730.0 } else { 448.0 } * dpi_scale(hwnd)).round() as i32
+        (448.0 * dpi_scale(hwnd)).round() as i32
     }
 
     fn rgb(r: u8, g: u8, b: u8) -> u32 {
@@ -2052,6 +2143,7 @@ mod window {
         }
         let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
         unsafe { GetClientRect(hwnd, &mut client) };
+        fill(hdc, &client, rgb(36, 38, 41));
         let strip = RECT { left: 0, top: 0, right: client.right, bottom: header_px(hwnd) };
         fill(hdc, &strip, rgb(52, 54, 58));
         fill(hdc, &RECT { top: strip.bottom - 1, ..strip }, rgb(20, 21, 23));
@@ -2072,7 +2164,7 @@ mod window {
         let items = layout(&h, client.right, k);
         for (_, r, label) in &items {
             if !label.is_empty() {
-                text(hdc, label, &RECT { left: r.left, top: px(3.0), right: r.right, bottom: px(17.0) }, dim, DT_LEFT);
+                text(hdc, label, &RECT { left: r.left, top: r.top - px(16.0), right: r.right, bottom: r.top - px(2.0) }, dim, DT_LEFT);
             }
         }
         unsafe { SelectObject(hdc, font) };
@@ -2123,6 +2215,10 @@ mod window {
                         },
                         DT_CENTER,
                     );
+                }
+                Item::Auto => {
+                    fill(hdc, r, rgb(70, 72, 76));
+                    text(hdc, "Auto", r, if h.params.is_empty() { rgb(110, 112, 116) } else { bright }, DT_CENTER);
                 }
                 Item::Bypass => {
                     fill(hdc, r, if h.bypass { rgb(40, 110, 200) } else { rgb(70, 72, 76) });
@@ -2196,20 +2292,27 @@ mod window {
             }
             Item::ExtKey => h.key.is_some().then_some(HeaderAction::ExternalKey),
             Item::Listen => h.key_on.then_some(HeaderAction::KeyListen),
+            Item::Auto => {
+                let e: Vec<(usize, String, bool)> = h.params.iter().enumerate().map(|(i, n)| (i + 10, n.clone(), false)).collect();
+                match popup(hwnd, &r, &e) {
+                    0 => None,
+                    n => Some(HeaderAction::Automate(n - 10)),
+                }
+            }
             Item::Bypass => Some(HeaderAction::Bypass),
         };
         if let Some(a) = action {
             with_state(hwnd, |s| s.actions.push(a));
+            crate::wake_ui();
         }
     }
 
-    fn place_content(hwnd: HWND, w: i32, h: i32) -> (i32, i32) {
-        let top = header_px(hwnd);
+    fn place_content(hwnd: HWND, w: i32, h: i32) {
+        let top = header_px_at(hwnd, w);
         let ch = (h - top).max(1);
-        if let Some(c) = with_state(hwnd, |s| s.content) {
-            unsafe { MoveWindow(c, 0, top, w, ch, 1) };
-        }
-        (w, ch)
+        let Some((c, (vw, _))) = with_state(hwnd, |s| (s.content, s.view_size)) else { return };
+        let cw = if vw > 0 { vw.min(w) } else { w };
+        unsafe { MoveWindow(c, ((w - cw) / 2).max(0), top, cw, ch, 1) };
     }
 
     unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -2238,7 +2341,7 @@ mod window {
         {
             let Some(w) = (unsafe { (lparam as *mut RECT).as_mut() }) else { return 1 };
             let f = frame_insets(hwnd);
-            let top = header_px(hwnd);
+            let top = header_px_at(hwnd, (w.right - f.right) - (w.left - f.left));
             let mut r = sb::ViewRect {
                 left: 0,
                 top: 0,
@@ -2246,7 +2349,8 @@ mod window {
                 bottom: ((w.bottom - f.bottom) - (w.top - f.top) - top).max(1),
             };
             if unsafe { v.checkSizeConstraint(&mut r) } == sb::kResultTrue {
-                let (cw, ch) = ((r.right - r.left).max(min_width(hwnd)), r.bottom - r.top + top);
+                let cw = (r.right - r.left).max(min_width(hwnd));
+                let ch = r.bottom - r.top + header_px_at(hwnd, cw);
                 let (ow, oh) = (cw + f.right - f.left, ch + f.bottom - f.top);
                 if matches!(wparam as u32, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT) {
                     w.left = w.right - ow;
@@ -2262,16 +2366,21 @@ mod window {
             return 1;
         }
         if ours && msg == WM_SIZE {
-            let (cw, ch) = place_content(hwnd, (lparam & 0xFFFF) as i32, ((lparam >> 16) & 0xFFFF) as i32);
+            let (w, h) = ((lparam & 0xFFFF) as i32, ((lparam >> 16) & 0xFFFF) as i32);
+            let avail = (w, (h - header_px_at(hwnd, w)).max(1));
             unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
             if !PLUGIN_RESIZING.with(std::cell::Cell::get)
+                && with_state(hwnd, |s| s.resizable) == Some(true)
                 && let Some(v) = view_of(hwnd)
             {
-                let mut r = sb::ViewRect { left: 0, top: 0, right: cw, bottom: ch };
-                if r.right > 0 && r.bottom > 0 {
+                let mut r = sb::ViewRect { left: 0, top: 0, right: avail.0, bottom: avail.1 };
+                let fits = r.right > 0 && r.bottom > 0 && unsafe { v.checkSizeConstraint(&mut r) } == sb::kResultTrue;
+                let size = (r.right - r.left, r.bottom - r.top);
+                if fits && size.0 > 0 && size.1 > 0 && with_state(hwnd, |s| std::mem::replace(&mut s.view_size, size)) != Some(size) {
                     unsafe { v.onSize(&mut r) };
                 }
             }
+            place_content(hwnd, w, h);
         }
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     }
@@ -2366,7 +2475,12 @@ mod window {
                 unsafe { DestroyWindow(hwnd) };
                 return Err("cannot create the editor window".into());
             }
-            STATES.with(|s| s.borrow_mut().insert(hwnd as usize, State { header: EditorHeader::default(), actions: Vec::new(), content }));
+            STATES.with(|s| {
+                s.borrow_mut().insert(
+                    hwnd as usize,
+                    State { header: EditorHeader::default(), actions: Vec::new(), content, resizable: false, view_size: (0, 0) },
+                )
+            });
             Ok(HostWindow { hwnd })
         }
 
@@ -2380,6 +2494,7 @@ mod window {
             let Some(h) = self.live() else { return };
             unsafe {
                 SetWindowLongPtrW(h, GWLP_USERDATA, view as isize);
+                with_state(h, |s| s.resizable = resizable && !view.is_null());
                 let style = GetWindowLongPtrW(h, GWL_STYLE) as u32;
                 let style =
                     if resizable && !view.is_null() { style | WS_THICKFRAME | WS_MAXIMIZEBOX } else { style & !(WS_THICKFRAME | WS_MAXIMIZEBOX) };
@@ -2405,7 +2520,10 @@ mod window {
             if changed == Some(true) {
                 let mut c = RECT { left: 0, top: 0, right: 0, bottom: 0 };
                 unsafe { GetClientRect(h, &mut c) };
-                if c.right < min_width(h) {
+                let (vw, vh) = with_state(h, |s| s.view_size).unwrap_or((0, 0));
+                if vw > 0 && vh > 0 {
+                    resize(h, f64::from(vw), f64::from(vh));
+                } else if c.right < min_width(h) {
                     resize(h, f64::from(c.right), f64::from(c.bottom - header_px(h)));
                 }
                 unsafe { InvalidateRect(h, std::ptr::null(), 0) };
@@ -2449,13 +2567,17 @@ mod window {
         if !on_main_thread() || window.is_null() || unsafe { IsWindow(window) } == 0 {
             return;
         }
+        with_state(window, |s| s.view_size = (w.round() as i32, h.round() as i32));
         let (style, ex) = unsafe { (GetWindowLongPtrW(window, GWL_STYLE) as u32, GetWindowLongPtrW(window, GWL_EXSTYLE) as u32) };
-        let top = f64::from(header_px(window));
         let w = w.max(f64::from(min_width(window)));
+        let top = f64::from(header_px_at(window, w.round() as i32));
         let (ow, oh) = outer_size(style, ex, w, h + top);
         PLUGIN_RESIZING.with(|f| f.set(true));
         unsafe { SetWindowPos(window, std::ptr::null_mut(), 0, 0, ow, oh, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) };
         PLUGIN_RESIZING.with(|f| f.set(false));
+        let mut c = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { GetClientRect(window, &mut c) };
+        place_content(window, c.right, c.bottom);
     }
 }
 

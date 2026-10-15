@@ -568,10 +568,10 @@ fn fill(block: &mut Vec<Vec<f32>>, chunk: &[Vec<f32>], n: usize, fold: Option<Ch
 }
 
 pub fn bounce_stems(e: &Engine, dir: &str, r: Range, opts: &EncodeOptions) -> Result<Vec<String>> {
-    bounce_stems_with(e, dir, r, opts, false)
+    bounce_stems_with(e, dir, r, opts, false, None)
 }
 
-pub fn bounce_stems_with(e: &Engine, dir: &str, r: Range, opts: &EncodeOptions, fold_stereo: bool) -> Result<Vec<String>> {
+pub fn bounce_stems_with(e: &Engine, dir: &str, r: Range, opts: &EncodeOptions, fold_stereo: bool, only: Option<&[TrackId]>) -> Result<Vec<String>> {
     let s = e.session();
     if r.len() > s.sample_rate.samples(MAX_BOUNCE_SECS) {
         return Err(EngineError::BadParams("file.bounce_stems".into(), "bounces are limited to 4 hours".into()));
@@ -586,13 +586,19 @@ pub fn bounce_stems_with(e: &Engine, dir: &str, r: Range, opts: &EncodeOptions, 
     let stems: Vec<(TrackId, String)> = s
         .tracks
         .iter()
-        .filter(|t| matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi) && !t.inactive && !t.mixer.mute)
+        .filter(|t| match only {
+            Some(ids) => ids.contains(&t.id) && !t.inactive && t.kind != TrackKind::Master,
+            None => matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi) && !t.inactive && !t.mixer.mute,
+        })
         .map(|t| (t.id, t.name.clone()))
         .collect();
     for (id, name) in stems {
         let mut solo = s.clone();
         for t in &mut solo.tracks {
             t.mixer.solo = t.id == id;
+            if t.id == id {
+                t.mixer.mute = false;
+            }
         }
         let path = Path::new(dir).join(format!("{} - {}.{ext}", sanitize_name(&s.name), sanitize_name(&name)));
         Bounce::new(Arc::new(solo), &path, r, opts, None, false, fold_stereo)?.run()?;
@@ -1027,11 +1033,10 @@ pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
     if is_ptx_path(path) {
         let s = ptx_session(path)?;
         let n = s.tracks.len();
+        let clips: usize = s.tracks.iter().map(|t| t.clips().len()).sum();
         e.replace_session(s);
         e.path = None;
-        e.message(format!(
-            "Opened from Pro Tools: {n} tracks (clips, routing and plug-ins are not imported yet). Save to keep it as an OpenPT session."
-        ));
+        e.message(format!("Opened from Pro Tools: {n} tracks, {clips} clips (routing is not imported yet). Save to keep it as an OpenPT session."));
         return Ok(Vec::new());
     }
     let text = read_text(path)?;
@@ -2066,27 +2071,36 @@ pub fn ptx_session(path: &str) -> Result<Session> {
     let name = Path::new(path).file_stem().map_or_else(|| "Pro Tools Session".to_string(), |s| s.to_string_lossy().into_owned());
     let rate = p.sample_rate.and_then(|r| openpt_time::SampleRate::new(r).ok()).unwrap_or(openpt_time::SampleRate::HZ_48000);
     let mut s = Session::new(name, rate);
-    s.tracks.retain(|t| t.kind != openpt_model::TrackKind::Master);
+
     #[cfg(not(target_arch = "wasm32"))]
     let vst3 = openpt_vst3_host::cached().unwrap_or_default();
     #[cfg(target_arch = "wasm32")]
     let vst3: Vec<openpt_vst3_host::Vst3Descriptor> = Vec::new();
     let mut missing: Vec<String> = Vec::new();
-    for t in &p.tracks {
-        use openpt_model::TrackKind as K;
-        let kind = match t.kind {
-            openpt_ptx::TrackKind::Audio => K::Audio,
-            openpt_ptx::TrackKind::Aux => K::Aux,
-            openpt_ptx::TrackKind::Master => K::Master,
-            openpt_ptx::TrackKind::Vca => K::Vca,
-            openpt_ptx::TrackKind::Folder => K::Folder,
-            openpt_ptx::TrackKind::Other(_) => K::Audio,
+    let mut bus_ids: std::collections::HashMap<&str, openpt_model::BusId> = std::collections::HashMap::new();
+    for (name, stereo) in &p.busses {
+        let fmt = if *stereo { openpt_model::ChannelFormat::Stereo } else { openpt_model::ChannelFormat::Mono };
+        bus_ids.insert(name.as_str(), s.add_bus(name, fmt));
+    }
+    let route = |name: &Option<String>| -> Option<openpt_model::Route> {
+        let n = name.as_deref()?;
+        if p.hardware.iter().any(|h| h == n) {
+            return Some(openpt_model::Route::Main);
+        }
+        bus_ids.get(n).map(|b| openpt_model::Route::Bus(*b))
+    };
+    let mut carried: std::collections::HashMap<String, Vec<&openpt_ptx::Insert>> = std::collections::HashMap::new();
+    for t in p.tracks.iter().filter(|t| t.kind == openpt_ptx::TrackKind::Master) {
+        let key = match route(&t.output) {
+            Some(openpt_model::Route::Bus(_)) => t.output.clone().unwrap_or_default(),
+            _ => String::new(),
         };
-        let format = if t.stereo { openpt_model::ChannelFormat::Stereo } else { openpt_model::ChannelFormat::Mono };
-        let id = s.add_track(kind, format, Some(&t.name));
-        let mut slot = 0;
-        for ins in &t.inserts {
-            let found = ptx_plugin(ins, t.stereo, &vst3);
+        carried.entry(key).or_default().extend(t.inserts.iter());
+    }
+    let add_inserts = |s: &mut Session, id: TrackId, list: &[&openpt_ptx::Insert], stereo: bool, missing: &mut Vec<String>| {
+        let mut slot = s.track(id).map_or(0, |t| t.mixer.inserts.iter().take_while(|i| i.is_some()).count());
+        for ins in list {
+            let found = ptx_plugin(ins, stereo, &vst3);
             if found.is_none() {
                 missing.push(ins.name.clone().unwrap_or_else(|| format!("{}{}", ins.manufacturer, ins.product)));
             }
@@ -2097,7 +2111,48 @@ pub fn ptx_session(path: &str) -> Result<Session> {
                 slot += 1;
             }
         }
+    };
+    if let Some(list) = carried.get("")
+        && let Some(m) = s.tracks.iter().find(|t| t.kind == openpt_model::TrackKind::Master).map(|t| t.id)
+    {
+        add_inserts(&mut s, m, list, true, &mut missing);
     }
+    for t in &p.tracks {
+        use openpt_model::TrackKind as K;
+        let kind = match t.kind {
+            openpt_ptx::TrackKind::Master => continue,
+            openpt_ptx::TrackKind::Audio | openpt_ptx::TrackKind::Other(_) => K::Audio,
+            openpt_ptx::TrackKind::Midi => K::Midi,
+            openpt_ptx::TrackKind::Aux => K::Aux,
+            openpt_ptx::TrackKind::Vca => K::Vca,
+            openpt_ptx::TrackKind::Folder => K::Folder,
+        };
+        let format = if t.stereo || kind == K::Folder { openpt_model::ChannelFormat::Stereo } else { openpt_model::ChannelFormat::Mono };
+        let id = s.add_track(kind, format, Some(&t.name));
+        if let Some(bus) = t.input.as_ref().filter(|_| kind == K::Aux)
+            && let Some(list) = carried.get(bus)
+        {
+            add_inserts(&mut s, id, list, t.stereo, &mut missing);
+        }
+        let own: Vec<&openpt_ptx::Insert> = t.inserts.iter().collect();
+        add_inserts(&mut s, id, &own, t.stereo, &mut missing);
+        let (input, output) = (route(&t.input), route(&t.output));
+        if let Some(tr) = s.track_mut(id) {
+            tr.mixer.volume_db = t.volume_db;
+            if t.pan.len() == tr.mixer.pan.len() {
+                tr.mixer.pan.clone_from(&t.pan);
+            }
+            if kind == K::Aux
+                && let Some(r) = input
+            {
+                tr.mixer.input = r;
+            }
+            if let Some(r) = output {
+                tr.mixer.output = r;
+            }
+        }
+    }
+    ptx_clips(&mut s, &p, Path::new(path).parent().unwrap_or(Path::new(".")), &mut missing);
     if p.bit_depth == Some(16) {
         s.bit_depth = openpt_model::BitDepthSetting::Int16;
     }
@@ -2109,6 +2164,103 @@ pub fn ptx_session(path: &str) -> Result<Session> {
     Ok(s)
 }
 
+fn ptx_find_audio(
+    session_dir: &Path,
+    folder: Option<&str>,
+    name: &str,
+    found: &mut std::collections::HashMap<String, Option<PathBuf>>,
+) -> Option<PathBuf> {
+    let mut dirs: Vec<PathBuf> = vec![session_dir.join("Audio Files"), session_dir.to_path_buf()];
+    if let Some(f) = folder {
+        let key = f.to_string();
+        if !found.contains_key(&key) {
+            let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
+            let mut roots: Vec<PathBuf> = vec![session_dir.to_path_buf()];
+            roots.extend(session_dir.parent().map(Path::to_path_buf));
+            if let Some(h) = &home {
+                for sub in ["Downloads", "Documents", "Desktop", "Music"] {
+                    roots.push(h.join(sub));
+                }
+            }
+            let hit = roots.iter().find_map(|r| {
+                let direct = r.join(f);
+                if direct.is_dir() {
+                    return Some(direct);
+                }
+                std::fs::read_dir(r).ok()?.flatten().map(|e| e.path().join(f)).find(|p| p.is_dir())
+            });
+            found.insert(key.clone(), hit);
+        }
+        if let Some(Some(d)) = found.get(&key) {
+            dirs.insert(0, d.clone());
+        }
+    }
+    dirs.into_iter().map(|d| d.join(name)).find(|p| p.is_file())
+}
+
+fn ptx_clips(s: &mut Session, p: &openpt_ptx::PtxSession, session_dir: &Path, missing: &mut Vec<String>) {
+    let rate = s.sample_rate.hz();
+    let mut folders = std::collections::HashMap::new();
+    let mut decoded: std::collections::HashMap<usize, Option<Arc<SourceAudio>>> = std::collections::HashMap::new();
+    let mut sources: std::collections::HashMap<(usize, Option<usize>), SourceId> = std::collections::HashMap::new();
+    let mut files = DecodedFiles::new();
+    let mut audio = |s: &Session, file: usize, missing: &mut Vec<String>| -> Option<Arc<SourceAudio>> {
+        decoded
+            .entry(file)
+            .or_insert_with(|| {
+                let name = p.audio_files.get(file)?;
+                let folder = p.audio_folders.get(file).cloned().flatten();
+                let Some(path) = ptx_find_audio(session_dir, folder.as_deref(), name, &mut folders) else {
+                    missing.push(name.clone());
+                    return None;
+                };
+                let _ = s;
+                decode_file(&mut files, &path, rate).inspect_err(|e| missing.push(e.clone())).ok()
+            })
+            .clone()
+    };
+    let tracks: Vec<(TrackId, String, usize)> =
+        s.tracks.iter().filter(|t| t.kind == TrackKind::Audio).map(|t| (t.id, t.name.clone(), t.format.channels())).collect();
+    for (tid, name, nch) in tracks {
+        let mut placed: Vec<&openpt_ptx::Placement> = p.placements.iter().filter(|x| x.track == name).collect();
+        placed.sort_by_key(|x| (x.start, x.channel));
+        for first in placed.iter().filter(|x| x.channel == 0) {
+            let Some(region) = p.regions.get(first.region) else { continue };
+            let Some(file) = region.file else { continue };
+            let right = (nch >= 2)
+                .then(|| placed.iter().find(|x| x.channel == 1 && x.start == first.start).and_then(|x| p.regions.get(x.region)).and_then(|r| r.file))
+                .flatten()
+                .filter(|r| *r != file);
+            let src = match sources.get(&(file, right)) {
+                Some(id) => *id,
+                None => {
+                    let Some(left) = audio(s, file, missing) else { continue };
+                    let buf = match right.and_then(|r| audio(s, r, missing)) {
+                        Some(r) => {
+                            let mut b = left.buffer.clone();
+                            b.channels.truncate(1);
+                            b.channels.extend(r.buffer.channels.first().cloned());
+                            b
+                        }
+                        None => left.buffer.clone(),
+                    };
+                    let file_name = p.audio_files.get(file).cloned().unwrap_or_default();
+                    let id = add_source_audio(s, &file_name, Arc::new(SourceAudio::new(buf)), None, FileFormat::Wav);
+                    sources.insert((file, right), id);
+                    id
+                }
+            };
+            let start = i64::try_from(first.start).unwrap_or(0);
+            let (offset, length) = (i64::try_from(region.offset).unwrap_or(0), i64::try_from(region.length).unwrap_or(0));
+            let clip_name = region.name.trim_end_matches(".L").to_string();
+            let cid = s.new_clip_id();
+            if let Some(pl) = s.track_mut(tid).and_then(|t| t.playlist_mut()) {
+                pl.clips.push(Clip::audio(cid, clip_name, src, offset, start, length));
+                pl.sort();
+            }
+        }
+    }
+}
 pub fn is_ptx_path(path: &str) -> bool {
     Path::new(path).extension().is_some_and(|x| x.eq_ignore_ascii_case("ptx") || x.eq_ignore_ascii_case("ptxt"))
 }
