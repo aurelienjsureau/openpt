@@ -388,6 +388,7 @@ pub struct SoundApp {
     pub quit_requested: bool,
     pub arrange_request: bool,
     touched: std::collections::HashSet<TrackId>,
+    param_touch: std::collections::HashMap<(TrackId, String), (f32, std::time::Instant)>,
     last_write_at: Samples,
     pub frame_ms: f32,
     last_frame: Option<f64>,
@@ -470,6 +471,7 @@ impl SoundApp {
             quit_requested: false,
             arrange_request: false,
             touched: std::collections::HashSet::new(),
+            param_touch: std::collections::HashMap::new(),
             last_write_at: i64::MIN,
             frame_ms: 0.0,
             last_frame: None,
@@ -692,6 +694,16 @@ impl SoundApp {
         }
     }
 
+    pub(crate) fn touch_param(&mut self, t: TrackId, slot: usize, param: &str, value: f32) {
+        use openpt_model::AutomationMode as M;
+        let writing =
+            self.engine.session().track(t).is_some_and(|tr| matches!(tr.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch));
+        if writing && self.is_playing() && slot < 26 {
+            let lane = format!("plugin:{}:{param}", char::from(b'a' + slot as u8));
+            self.param_touch.insert((t, lane), (value, std::time::Instant::now()));
+        }
+    }
+
     fn apply_editor_edits(&mut self) {
         let Some(p) = &self.player else { return };
         for (t, slot, param, value) in p.idle() {
@@ -700,6 +712,7 @@ impl SoundApp {
             }
             let key = format!("param:{}:{slot}:{param}", t.0);
             let _ = self.engine.execute_merged("mix.insert_param", &json!({"track": t.0, "slot": slot, "param": param, "value": value}), &key);
+            self.touch_param(t, slot, &param, value);
         }
     }
 
@@ -1102,6 +1115,9 @@ impl SoundApp {
         let may_write =
             playing && self.engine.session().tracks.iter().any(|t| matches!(t.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch));
         self.engine.hold_merge(may_write.then_some(PASS));
+        if !playing {
+            self.param_touch.clear();
+        }
         if !playing && self.touched.is_empty() {
             self.last_write_at = i64::MIN;
             return;
@@ -1134,6 +1150,25 @@ impl SoundApp {
                 write.then_some((t.id, t.mixer.volume_db))
             })
             .collect();
+        let params: Vec<(TrackId, String, f32)> = self
+            .param_touch
+            .iter()
+            .filter(|((t, _), (_, at))| {
+                self.engine.session().track(*t).is_some_and(|tr| match tr.mixer.automation_mode {
+                    M::Write | M::Latch | M::TouchLatch => true,
+                    M::Touch => at.elapsed() < std::time::Duration::from_millis(300),
+                    _ => false,
+                })
+            })
+            .map(|((t, lane), (v, _))| (*t, lane.clone(), *v))
+            .collect();
+        for (t, lane, v) in params {
+            let mut point = serde_json::json!({"track": t.0, "param": lane, "at": pos, "value": v});
+            if from != i64::MIN {
+                point["from"] = from.into();
+            }
+            let _ = self.engine.execute_merged("automation.set_point", &point, PASS);
+        }
         for (t, v) in writes {
             self.touched.insert(t);
             let mut point = serde_json::json!({"track": t.0, "param": "volume", "at": pos, "value": v});
@@ -1706,6 +1741,25 @@ mod tests {
         assert_eq!(lane.value_at(6 * q, 0.0), -30.0);
         assert_eq!(values(8 * q, 9 * q), [fader; 2]);
         assert_eq!(lane.value_at(10 * q, 0.0), -30.0);
+    }
+
+    #[test]
+    fn a_plugin_control_moved_in_latch_is_written_as_automation() {
+        let mut app = SoundApp::new(openpt_engine::demo::demo_engine(), None, Services::default());
+        let kick = app.engine.session().track_by_name("Kick").unwrap().id;
+        app.run("mix.automation_mode", json!({"tracks": ["Kick"], "mode": "latch"})).unwrap();
+        app.run("transport.play", json!({})).unwrap();
+        let ctx = egui::Context::default();
+        app.handle_transport(0.1);
+        app.touch_param(kick, 0, "input_gain", 3.0);
+        for _ in 0..3 {
+            app.handle_transport(0.1);
+            app.write_automation(&ctx);
+        }
+        app.run("transport.stop", json!({})).unwrap();
+        let param = openpt_model::AutoParam::parse("plugin:a:input_gain").unwrap();
+        let lane = app.engine.session().track(kick).unwrap().lane(&param).expect("a lane for the moved control");
+        assert!(lane.points.len() >= 2 && lane.points.iter().all(|p| p.value == 3.0), "{:?}", lane.points);
     }
 
     #[test]

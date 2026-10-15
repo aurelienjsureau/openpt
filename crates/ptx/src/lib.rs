@@ -36,6 +36,15 @@ pub struct Track {
     pub output: Option<String>,
     pub volume_db: f32,
     pub pan: Vec<f32>,
+    pub sends: Vec<Send>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Send {
+    pub slot: usize,
+    pub target: String,
+    pub level_db: f32,
+    pub pan: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +74,23 @@ pub struct PtxSession {
     pub placements: Vec<Placement>,
     pub busses: Vec<(String, bool)>,
     pub hardware: Vec<String>,
+    pub tempos: Vec<(u64, f64)>,
+    pub meters: Vec<(u32, u32, u32)>,
+    pub markers: Vec<Marker>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Marker {
+    pub number: u16,
+    pub name: String,
+    pub start: Position,
+    pub end: Position,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    Ticks(u64),
+    Samples(u64),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,6 +212,53 @@ fn three_point(d: &[u8], at: usize) -> Option<(u64, u64, u64)> {
     Some((offset, length, start))
 }
 
+const TICK_ZERO: u64 = 1_000_000_000_000;
+
+fn u64_at(d: &[u8], at: usize) -> Option<u64> {
+    d.get(at..at + 8).map(|b| b.iter().rev().fold(0u64, |v, x| v << 8 | u64::from(*x)))
+}
+
+fn position_at(d: &[u8], at: usize) -> Option<Position> {
+    let raw = u64_at(d, at)?;
+    let low = raw & 0xFFFF_FFFF_FFFF;
+    Some(if raw >> 56 & 0x40 != 0 { Position::Ticks(low.saturating_sub(TICK_ZERO)) } else { Position::Samples(low) })
+}
+
+fn timeline(d: &[u8], all: &[&Block], s: &mut PtxSession) {
+    if let Some(b) = all.iter().find(|b| b.content_type == 0x2028 && d.get(b.start..b.start + 5) == Some(b"Tempo")) {
+        let mut at = b.start;
+        while let Some(k) = d.get(at..b.end).and_then(|w| w.windows(3).position(|x| x == b"TMS")) {
+            let t = at + k + 3;
+            if let (Some(pos), Some(bpm)) = (u64_at(d, t + 16), u64_at(d, t + 26).map(f64::from_bits))
+                && bpm.is_finite()
+                && (5.0..=1000.0).contains(&bpm)
+            {
+                s.tempos.push((pos.saturating_sub(TICK_ZERO), bpm));
+            }
+            at = t;
+        }
+    }
+    if let Some(b) = all.iter().find(|b| b.content_type == 0x2029 && d.get(b.start..b.start + 5) == Some(b"Meter")) {
+        let after = b.start + 5;
+        let n = u32_at(d, after + 6).unwrap_or(0).min(10_000) as usize;
+        for k in 0..n {
+            let e = after + 10 + 36 * k;
+            if let (Some(bar), Some(num), Some(den)) = (u32_at(d, e + 8), u32_at(d, e + 12), u32_at(d, e + 16))
+                && e + 36 <= b.end
+            {
+                s.meters.push((bar, num, den));
+            }
+        }
+    }
+    for b in all.iter().filter(|b| b.content_type == 0x2077) {
+        let Some((name, after)) = string_at(d, b.start + 6) else { continue };
+        let (Some(number), Some(start), Some(end)) = (u16_at(d, b.start), position_at(d, after), position_at(d, after + 8)) else { continue };
+        if !s.markers.iter().any(|m| m.number == number) {
+            s.markers.push(Marker { number, name, start, end });
+        }
+    }
+}
+
 fn regions(d: &[u8], all: &[&Block], s: &mut PtxSession) {
     for list in all.iter().filter(|b| b.content_type == 0x262A) {
         for r in list.children.iter().filter(|b| b.content_type == 0x2629) {
@@ -295,6 +368,7 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
             output: None,
             volume_db: 0.0,
             pan: Vec::new(),
+            sends: Vec::new(),
         });
     }
     let rulers = ["Tempo", "Meter", "Key Signature", "Chord Symbols", "Markers"];
@@ -308,15 +382,32 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
             continue;
         }
         let inserts: Vec<Insert> = inner.iter().filter(|b| b.content_type == 0x1038).filter_map(|b| insert_at(&d, b)).collect();
-        let out_section = ch.children.iter().find(|b| b.content_type == 0x260D);
-        let output = out_section
-            .and_then(|o| o.children.iter().find(|b| b.content_type == 0x260E))
-            .and_then(|b| path_name(&d, b.start, b.end).or_else(|| last_string(&d, b.start, b.end)));
-        let input = out_section.and_then(|o| path_ref(&d, o.end, ch.end));
-        let mix = out_section.and_then(|o| o.children.iter().find(|b| b.content_type == 0x1029)).and_then(|b| {
-            let f = |k: usize| u32_at(&d, b.start + k).map(|v| v as i32 as f32);
-            Some((f(1)? / 10.0, f(13)? / 100.0, f(41)? / 100.0))
-        });
+        let outs: Vec<&Block> = ch.children.iter().filter(|b| b.content_type == 0x260D).collect();
+        let target = |o: &Block| {
+            o.children
+                .iter()
+                .find(|b| b.content_type == 0x260E)
+                .and_then(|b| path_name(&d, b.start, b.end).or_else(|| last_string(&d, b.start, b.end)))
+        };
+        let levels = |o: &Block| {
+            o.children.iter().find(|b| b.content_type == 0x1029).and_then(|b| {
+                let f = |k: usize| u32_at(&d, b.start + k).map(|v| v as i32 as f32);
+                Some((f(1)? / 10.0, f(13)? / 100.0, f(41)? / 100.0))
+            })
+        };
+        let output = outs.first().and_then(|o| target(o));
+        let input = outs.last().and_then(|o| path_ref(&d, o.end, ch.end));
+        let mix = outs.first().and_then(|o| levels(o));
+        let sends: Vec<Send> = outs
+            .iter()
+            .skip(1)
+            .take(10)
+            .enumerate()
+            .filter_map(|(slot, o)| {
+                let (level_db, pan, _) = levels(o).unwrap_or((0.0, 0.0, 0.0));
+                Some(Send { slot, target: target(o)?, level_db: level_db.max(-144.0), pan })
+            })
+            .collect();
         let at = if name.is_empty() { Some(next) } else { s.tracks.iter().position(|t| t.name == name) };
         if let Some(i) = at
             && let Some(t) = s.tracks.get_mut(i)
@@ -326,6 +417,7 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
             t.inserts = inserts;
             t.output = output;
             t.input = input;
+            t.sends = sends;
             if let Some(m) = mix {
                 (t.volume_db, t.pan) = (m.0, if t.stereo { vec![m.1, m.2] } else { vec![m.1] });
             }
@@ -349,7 +441,7 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
         .collect();
     for p in &paths {
         let sub_of_hardware = s.hardware.iter().any(|h| p.starts_with(h.trim_end_matches(|c: char| c.is_ascii_digit() || c == '-')));
-        let used = s.tracks.iter().any(|t| t.input.as_ref() == Some(p) || t.output.as_ref() == Some(p));
+        let used = s.tracks.iter().any(|t| t.input.as_ref() == Some(p) || t.output.as_ref() == Some(p) || t.sends.iter().any(|x| &x.target == p));
         if !used || sub_of_hardware || p.ends_with(".L") || p.ends_with(".R") || s.hardware.contains(p) || s.busses.iter().any(|b| &b.0 == p) {
             continue;
         }
@@ -361,7 +453,9 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
         let mut folder: Option<String> = None;
         while at + 8 < b.end {
             match string_at(&d, at) {
-                Some((name, after)) if after + 4 <= b.end && matches!(d.get(after..after + 4), Some(b"EVAW" | b"FFIA")) => {
+                Some((name, after))
+                    if !name.chars().any(char::is_control) && after + 4 <= b.end && matches!(d.get(after..after + 4), Some(b"EVAW" | b"FFIA")) =>
+                {
                     s.audio_files.push(name);
                     s.audio_folders.push(folder.clone());
                     at = after + 4;
@@ -375,12 +469,21 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
         }
     }
     regions(&d, &all, &mut s);
+    timeline(&d, &all, &mut s);
     Ok(s)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn positions_are_musical_when_flagged_and_count_from_ten_to_the_twelfth() {
+        let mut d = (TICK_ZERO + 61_440_000).to_le_bytes();
+        d[7] = 0x40;
+        assert_eq!(position_at(&d, 0), Some(Position::Ticks(61_440_000)));
+        assert_eq!(position_at(&630_000u64.to_le_bytes(), 0), Some(Position::Samples(630_000)));
+    }
 
     fn block(ct: u16, content: &[u8]) -> Vec<u8> {
         let mut v = vec![0x5A, 1, 0];

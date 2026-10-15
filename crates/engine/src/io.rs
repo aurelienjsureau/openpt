@@ -269,6 +269,17 @@ pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: b
         if smf.meters.len() > MAX_MIDI_METERS {
             return Err(EngineError::Io(format!("MIDI file: more than {MAX_MIDI_METERS} meter changes")));
         }
+        if !smf.tempos.is_empty() || !smf.meters.is_empty() {
+            let keep = s.tempo.clone();
+            s.tempo = openpt_time::TempoMap::default();
+            if smf.tempos.is_empty() {
+                let _ = s.tempo.set_tempo(0, keep.tempo_at_tick(0));
+            }
+            if smf.meters.is_empty() {
+                let m = keep.meter_at_tick(0);
+                let _ = s.tempo.set_meter(0, m.numerator, m.denominator);
+            }
+        }
         for (tick, bpm) in &smf.tempos {
             let _ = s.tempo.set_tempo(*tick, *bpm);
         }
@@ -2157,6 +2168,37 @@ pub fn ptx_session_media(path: &str) -> Result<(Session, Vec<String>)> {
             if let Some(r) = output {
                 tr.mixer.output = r;
             }
+            for x in &t.sends {
+                if let (Some(target), Some(cell)) = (route(&Some(x.target.clone())), tr.mixer.sends.get_mut(x.slot)) {
+                    let mut send = openpt_model::SendSlot::new(target);
+                    send.level_db = x.level_db;
+                    send.pan = if t.stereo { 0.0 } else { x.pan };
+                    *cell = Some(send);
+                }
+            }
+        }
+    }
+    let mut meters = p.meters.clone();
+    meters.sort_by_key(|m| m.0);
+    for (bar, num, den) in meters {
+        let tick = s.tempo.bar_start_tick(i64::from(bar.max(1)));
+        let _ = s.tempo.set_meter(tick, num, den);
+    }
+    for (at, bpm) in &p.tempos {
+        let _ = s.tempo.set_tempo(i64::try_from(at / 1000).unwrap_or(0), *bpm);
+    }
+    let sr = s.sample_rate;
+    let at = |x: openpt_ptx::Position, s: &Session| match x {
+        openpt_ptx::Position::Ticks(t) => s.tempo.tick_to_samples(i64::try_from(t / 1000).unwrap_or(0), sr),
+        openpt_ptx::Position::Samples(n) => i64::try_from(n).unwrap_or(0),
+    };
+    for m in &p.markers {
+        let (start, end) = (at(m.start, &s), at(m.end, &s));
+        let kind = if end > start { openpt_model::MarkerKind::Selection } else { openpt_model::MarkerKind::Marker };
+        let id = s.add_marker(&m.name, kind, start, end);
+        let taken = s.markers.iter().any(|x| x.number == u32::from(m.number));
+        if let Some(x) = s.markers.iter_mut().find(|x| x.id == id).filter(|_| !taken) {
+            x.number = u32::from(m.number);
         }
     }
     let mut media = Vec::new();

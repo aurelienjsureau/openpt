@@ -4,6 +4,11 @@ fn main() {
     match openpt_ptx::read(&bytes) {
         Ok(s) => {
             println!("{} · {:?} Hz · {:?} bit", s.app, s.sample_rate, s.bit_depth);
+            println!("tempos {:?}", s.tempos.iter().take(12).collect::<Vec<_>>());
+            println!("meters {} {:?}", s.meters.len(), s.meters.iter().take(6).collect::<Vec<_>>());
+            for m in &s.markers {
+                println!("marker {} {} {:?} {:?}", m.number, m.name, m.start, m.end);
+            }
             for t in &s.tracks {
                 println!(
                     "  {:?} {} {}  in={:?} out={:?} vol={} pan={:?}",
@@ -15,6 +20,9 @@ fn main() {
                     t.volume_db,
                     t.pan
                 );
+                for x in &t.sends {
+                    println!("      send {} -> {} {} dB pan {}", (b'A' + x.slot as u8) as char, x.target, x.level_db, x.pan);
+                }
                 for i in &t.inserts {
                     println!("      {}{} {:?} ({} bytes)", i.manufacturer, i.product, i.name, i.state.len());
                 }

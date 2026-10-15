@@ -505,6 +505,7 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                         &json!({"track": tid.0, "slot": slot, "param": id, "value": v}),
                         &format!("param:{}:{slot}:{id}", tid.0),
                     );
+                    app.touch_param(tid, slot, &id, v);
                 }
                 return;
             }
@@ -597,6 +598,7 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                                 &json!({"track": tid.0, "slot": slot, "param": p.id, "value": x}),
                                 &format!("param:{}:{slot}:{}", tid.0, p.id),
                             );
+                            app.touch_param(tid, slot, p.id, x);
                             if let Some(pl) = &app.player {
                                 pl.editor_set_param(tid, slot, p.id, x);
                             }
