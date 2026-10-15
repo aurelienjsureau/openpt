@@ -1031,13 +1031,16 @@ fn store_wav(dir: &Path, stem: &str, bytes: &[u8]) -> Result<(String, bool)> {
 
 pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
     if is_ptx_path(path) {
-        let s = ptx_session(path)?;
+        let (s, media) = ptx_session_media(path)?;
         let n = s.tracks.len();
         let clips: usize = s.tracks.iter().map(|t| t.clips().len()).sum();
         e.replace_session(s);
         e.path = None;
-        e.message(format!("Opened from Pro Tools: {n} tracks, {clips} clips (routing is not imported yet). Save to keep it as an OpenPT session."));
-        return Ok(Vec::new());
+        e.message(format!("Opened from Pro Tools: {n} tracks, {clips} clips. Save to keep it as an OpenPT session."));
+        for m in &media {
+            e.message(format!("missing media: {m}"));
+        }
+        return Ok(media);
     }
     let text = read_text(path)?;
     let mut s = Session::from_json(&text).map_err(|err| EngineError::Io(err.to_string()))?;
@@ -2066,6 +2069,10 @@ mod bundle_tests {
 }
 
 pub fn ptx_session(path: &str) -> Result<Session> {
+    ptx_session_media(path).map(|x| x.0)
+}
+
+pub fn ptx_session_media(path: &str) -> Result<(Session, Vec<String>)> {
     let bytes = std::fs::read(path).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
     let p = openpt_ptx::read(&bytes).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
     let name = Path::new(path).file_stem().map_or_else(|| "Pro Tools Session".to_string(), |s| s.to_string_lossy().into_owned());
@@ -2152,7 +2159,10 @@ pub fn ptx_session(path: &str) -> Result<Session> {
             }
         }
     }
-    ptx_clips(&mut s, &p, Path::new(path).parent().unwrap_or(Path::new(".")), &mut missing);
+    let mut media = Vec::new();
+    ptx_clips(&mut s, &p, Path::new(path).parent().unwrap_or(Path::new(".")), &mut media);
+    media.sort();
+    media.dedup();
     if p.bit_depth == Some(16) {
         s.bit_depth = openpt_model::BitDepthSetting::Int16;
     }
@@ -2161,7 +2171,7 @@ pub fn ptx_session(path: &str) -> Result<Session> {
     if !missing.is_empty() {
         log::warn!("Pro Tools session: no VST3 found for {}", missing.join(", "));
     }
-    Ok(s)
+    Ok((s, media))
 }
 
 fn ptx_find_audio(
@@ -2192,7 +2202,8 @@ fn ptx_find_audio(
             found.insert(key.clone(), hit);
         }
         if let Some(Some(d)) = found.get(&key) {
-            dirs.insert(0, d.clone());
+            let inner = std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir());
+            dirs.splice(0..0, std::iter::once(d.clone()).chain(inner));
         }
     }
     dirs.into_iter().map(|d| d.join(name)).find(|p| p.is_file())

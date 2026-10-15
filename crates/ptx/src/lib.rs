@@ -218,7 +218,9 @@ fn regions(d: &[u8], all: &[&Block], s: &mut PtxSession) {
                 }
                 for p in e.children.iter().filter(|b| b.content_type == 0x104F) {
                     let (Some(region), Some(start)) = (u32_at(d, p.start + 2), u32_at(d, p.start + 7)) else { continue };
-                    s.placements.push(Placement { track: track.clone(), channel, region: region as usize, start: u64::from(start) });
+                    let wide = d.get(p.start + 7..p.start + 13).map_or(0, |b| b.iter().rev().fold(0u64, |v, x| v << 8 | u64::from(*x)));
+                    let start = if wide >= 1_000_000_000_000 { wide - 1_000_000_000_000 } else { u64::from(start) };
+                    s.placements.push(Placement { track: track.clone(), channel, region: region as usize, start });
                 }
             }
         }
