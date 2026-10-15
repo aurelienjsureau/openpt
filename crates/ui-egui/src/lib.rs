@@ -1387,6 +1387,15 @@ impl SoundApp {
         self.ara_requests();
         self.note_recent_session();
         self.apply_editor_edits();
+        let press = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::PointerButton { pressed: true, modifiers, .. } => Some(*modifiers | i.modifiers),
+                _ => None,
+            })
+        });
+        if let Some(m) = press {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("press_modifiers"), m));
+        }
         self.sync_editor_headers();
         bounce::step(self, ctx);
         if !ctx.input(|i| i.pointer.any_down()) {

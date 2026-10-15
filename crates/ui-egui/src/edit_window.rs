@@ -1515,11 +1515,11 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
             let alt_click = resp.clicked() && crate::mix_window::click_mods(&ui).alt;
             if alt_click {
                 if i == 0 {
-                    let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": 0.0}), &format!("fader:{}", id.0));
+                    crate::mix_window::ui_volume(app, &ui, id, 0.0);
                 } else {
                     for k in 0..pan.len().min(2) {
                         let v = if pan.len() == 2 { [-1.0, 1.0][k] } else { 0.0 };
-                        let _ = app.engine.execute_merged("mix.pan", &json!({"track": id.0, "pan": v, "index": k}), &format!("pan:{}:{k}", id.0));
+                        crate::mix_window::ui_pan(app, &ui, id, k, v);
                     }
                 }
                 continue;
@@ -1541,11 +1541,11 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
                 let k = dx / MINI_FADER_TRAVEL * if ui.input(|x| x.modifiers.command || x.modifiers.ctrl) { 0.1 } else { 1.0 };
                 if i == 0 {
                     let db = openpt_model::fader_pos_to_db((openpt_model::fader_db_to_pos(vol) + k).clamp(0.0, 1.0)).clamp(-144.0, 12.0);
-                    let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
+                    crate::mix_window::ui_volume(app, &ui, id, db);
                 } else {
                     for (n, p0) in pan.iter().enumerate().take(2) {
                         let v = (p0 + 2.0 * k).clamp(-1.0, 1.0);
-                        let _ = app.engine.execute_merged("mix.pan", &json!({"track": id.0, "pan": v, "index": n}), &format!("pan:{}:{n}", id.0));
+                        crate::mix_window::ui_pan(app, &ui, id, n, v);
                     }
                 }
             }
@@ -1642,13 +1642,9 @@ pub(crate) fn io_mini_fader(app: &mut SoundApp, ctx: &egui::Context) {
                     if let Some(np) = new_pos {
                         if which == 0 {
                             let db = openpt_model::fader_pos_to_db(np).clamp(-144.0, 12.0);
-                            let _ = app.engine.execute_merged("mix.volume", &json!({"track": tid, "db": db}), &format!("fader:{tid}"));
+                            crate::mix_window::ui_volume(app, ui, TrackId(tid), db);
                         } else {
-                            let _ = app.engine.execute_merged(
-                                "mix.pan",
-                                &json!({"track": tid, "pan": np * 2.0 - 1.0, "index": k}),
-                                &format!("pan:{tid}:{k}"),
-                            );
+                            crate::mix_window::ui_pan(app, ui, TrackId(tid), k, np * 2.0 - 1.0);
                         }
                     }
                     crate::widgets::value_box(ui, |ui| {

@@ -12,7 +12,7 @@ pub fn specs() -> Vec<CommandSpec> {
             s.edit.set_flag("groups.suspended", v);
             Ok(json!({"value": v}))
         }),
-        cmd!("mix.pan", "Set Pan", [], None, "{tracks?, pan: -1..1, index?: 0|1}", has_selection, pan),
+        cmd!("mix.pan", "Set Pan", [], None, "{tracks?, pan: -1..1 | delta, index?: 0|1}", has_selection, pan),
         cmd!(noundo "mix.mute", "Mute", [], Some("Shift+M"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
             p,
@@ -254,6 +254,13 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 fn set_grouped(s: &mut Session, t: TrackId, attr: &str, f: impl Fn(&mut openpt_model::Track)) {
+    set_grouped_once(s, t, attr, &mut Vec::new(), f);
+}
+
+fn set_grouped_once(s: &mut Session, t: TrackId, attr: &str, done: &mut Vec<TrackId>, f: impl Fn(&mut openpt_model::Track)) {
+    if done.contains(&t) {
+        return;
+    }
     let mut targets = vec![t];
     let loose = s.edit.flag("groups.suspended") || s.edit.flag("groups.isolate");
     for g in s.groups.iter().filter(|_| !loose) {
@@ -265,10 +272,12 @@ fn set_grouped(s: &mut Session, t: TrackId, attr: &str, f: impl Fn(&mut openpt_m
             }
         }
     }
+    targets.retain(|x| !done.contains(x));
     for id in targets {
         if let Some(tr) = s.track_mut(id) {
             f(tr);
         }
+        done.push(id);
     }
 }
 
@@ -294,6 +303,7 @@ fn volume(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let isolate = bool_or(p, "isolate", false);
     s.edit.set_flag("groups.isolate", isolate);
+    let mut done = Vec::new();
     for t in &tracks {
         let cur = s.track(*t).map_or(0.0, |tr| tr.mixer.volume_db);
         let new = match (abs, delta) {
@@ -303,7 +313,9 @@ fn volume(e: &mut Engine, p: &Value) -> Result<Value> {
         };
         let new = if new.is_finite() { new.clamp(-144.0, 12.0) } else { cur };
         let d = new - cur;
-        set_grouped(s, *t, "volume", |tr| tr.mixer.volume_db = if tr.id == *t { new } else { (tr.mixer.volume_db + d).clamp(-144.0, 12.0) });
+        set_grouped_once(s, *t, "volume", &mut done, |tr| {
+            tr.mixer.volume_db = if tr.id == *t { new } else { (tr.mixer.volume_db + d).clamp(-144.0, 12.0) }
+        });
     }
     s.edit.set_flag("groups.isolate", false);
     Ok(json!({"tracks": tracks.len()}))
@@ -313,12 +325,13 @@ fn pan(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "mix.pan", p)?;
     let v = f32_or(p, "pan", 0.0).clamp(-1.0, 1.0);
     let idx = i64_or(p, "index", 0).clamp(0, 1) as usize;
+    let delta = p.get("delta").and_then(Value::as_f64).filter(|d| d.is_finite()).map(|d| d as f32);
     let s = e.session_mut();
     for t in &tracks {
         if let Some(tr) = s.track_mut(*t)
             && let Some(slot) = tr.mixer.pan.get_mut(idx)
         {
-            *slot = v;
+            *slot = delta.map_or(v, |d| (*slot + d).clamp(-1.0, 1.0));
         }
     }
     Ok(json!({"pan": v}))
@@ -932,6 +945,22 @@ mod tests {
     use openpt_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
     use openpt_time::Range;
     use std::sync::Arc;
+
+    #[test]
+    fn a_selection_moves_by_the_same_amount_once_each_even_when_grouped() {
+        let mut e = crate::demo::demo_engine();
+        let (kick, snare) = (e.session().track_by_name("Kick").unwrap().id, e.session().track_by_name("Snare").unwrap().id);
+        e.execute("track.group", &json!({"tracks": [kick.0, snare.0]})).unwrap();
+        e.execute("mix.volume", &json!({"track": snare.0, "db": -6.0, "isolate": true})).unwrap();
+        let vol = |e: &Engine, t: TrackId| e.session().track(t).unwrap().mixer.volume_db;
+        let (k0, s0) = (vol(&e, kick), vol(&e, snare));
+        e.execute("mix.volume", &json!({"tracks": [kick.0, snare.0], "delta_db": -2.0})).unwrap();
+        assert_eq!((vol(&e, kick), vol(&e, snare)), (k0 - 2.0, s0 - 2.0));
+        e.execute("mix.pan", &json!({"tracks": [kick.0], "pan": -0.5})).unwrap();
+        e.execute("mix.pan", &json!({"tracks": [kick.0, snare.0], "delta": 0.25})).unwrap();
+        let pan = |e: &Engine, t: TrackId| e.session().track(t).unwrap().mixer.pan[0];
+        assert_eq!(pan(&e, kick), -0.25);
+    }
 
     #[test]
     fn a_grouped_fader_moves_alone_when_isolated_or_with_groups_suspended() {

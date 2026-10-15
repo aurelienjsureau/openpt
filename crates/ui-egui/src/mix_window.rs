@@ -466,7 +466,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
             let before = v;
             let resp = pan_knob(&mut c, ks, &mut v, "Pan (drag; double-click centres)");
             if (v - before).abs() > f32::EPSILON {
-                let _ = app.engine.execute_merged("mix.pan", &json!({"track": id.0, "pan": v, "index": i}), &format!("pan:{}:{i}", id.0));
+                ui_pan(app, &c, id, i, v);
             }
             let _ = resp;
             let pr = Rect::from_center_size(pos2(cx, y + 42.0), vec2(ks + 8.0, 13.0));
@@ -520,7 +520,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     let shown_db = openpt_mix::volume_db_at(track, app.position());
     if let Some(db) = crate::widgets::fader_with(ui, fr, shown_db, ui.id().with(("fader", id.0)), !narrow) {
         app.gesture = Some(crate::Gesture::Fader { track: id, start_db: track.mixer.volume_db });
-        let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db, "isolate": group_override(ui)}), &format!("fader:{}", id.0));
+        ui_volume(app, ui, id, db);
     }
     let md = app.meters.get(&id).copied().unwrap_or_default();
     let slot = fader_slot(fr);
@@ -974,6 +974,40 @@ pub(crate) fn track_button(app: &mut SoundApp, ui: &Ui, cmd: &str, id: TrackId) 
     if let Err(e) = r {
         app.ui.status = e;
     }
+}
+
+fn selection_drive(app: &SoundApp, ui: &Ui, id: TrackId) -> Option<Vec<u64>> {
+    let m = click_mods(ui);
+    let sel = &app.engine.session().edit.selected_tracks;
+    let now = m.alt && m.shift;
+    let at_press = ui.ctx().data(|d| d.get_temp::<egui::Modifiers>(egui::Id::new("press_modifiers"))).unwrap_or_default();
+    let held = ui.input(|i| i.pointer.any_down()) && at_press.alt && at_press.shift;
+    ((now || held) && sel.len() > 1 && sel.contains(&id)).then(|| sel.iter().map(|t| t.0).collect())
+}
+
+pub(crate) fn ui_volume(app: &mut SoundApp, ui: &Ui, id: TrackId, db: f32) {
+    let isolate = group_override(ui);
+    let p = match selection_drive(app, ui, id) {
+        Some(tracks) if ui.input(|i| i.pointer.is_decidedly_dragging()) => {
+            let cur = app.engine.session().track(id).map_or(db, |t| t.mixer.volume_db);
+            json!({"tracks": tracks, "delta_db": db - cur, "isolate": isolate})
+        }
+        Some(tracks) => json!({"tracks": tracks, "db": db, "isolate": isolate}),
+        None => json!({"track": id.0, "db": db, "isolate": isolate}),
+    };
+    let _ = app.engine.execute_merged("mix.volume", &p, &format!("fader:{}", id.0));
+}
+
+pub(crate) fn ui_pan(app: &mut SoundApp, ui: &Ui, id: TrackId, index: usize, v: f32) {
+    let p = match selection_drive(app, ui, id) {
+        Some(tracks) if ui.input(|i| i.pointer.is_decidedly_dragging()) => {
+            let cur = app.engine.session().track(id).and_then(|t| t.mixer.pan.get(index).copied()).unwrap_or(v);
+            json!({"tracks": tracks, "delta": v - cur, "index": index})
+        }
+        Some(tracks) => json!({"tracks": tracks, "pan": v, "index": index}),
+        None => json!({"track": id.0, "pan": v, "index": index}),
+    };
+    let _ = app.engine.execute_merged("mix.pan", &p, &format!("pan:{}:{index}", id.0));
 }
 
 pub(crate) fn group_override(ui: &Ui) -> bool {
