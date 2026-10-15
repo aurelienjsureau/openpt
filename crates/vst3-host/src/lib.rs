@@ -46,6 +46,23 @@ pub(crate) fn wake_ui() {
     }
 }
 
+pub fn start_key_down() -> bool {
+    keys::start_down()
+}
+
+#[allow(unsafe_code)]
+mod keys {
+    #[cfg(windows)]
+    pub fn start_down() -> bool {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LWIN, VK_RWIN};
+        unsafe { (GetAsyncKeyState(i32::from(VK_LWIN)) as u16 | GetAsyncKeyState(i32::from(VK_RWIN)) as u16) & 0x8000 != 0 }
+    }
+    #[cfg(not(windows))]
+    pub fn start_down() -> bool {
+        false
+    }
+}
+
 pub const ID_PREFIX: &str = "vst3:";
 
 pub const AUDIO_MODULE_CLASS: &str = "Audio Module Class";

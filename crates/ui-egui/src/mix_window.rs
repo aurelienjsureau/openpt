@@ -520,7 +520,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     let shown_db = openpt_mix::volume_db_at(track, app.position());
     if let Some(db) = crate::widgets::fader_with(ui, fr, shown_db, ui.id().with(("fader", id.0)), !narrow) {
         app.gesture = Some(crate::Gesture::Fader { track: id, start_db: track.mixer.volume_db });
-        let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db}), &format!("fader:{}", id.0));
+        let _ = app.engine.execute_merged("mix.volume", &json!({"track": id.0, "db": db, "isolate": group_override(ui)}), &format!("fader:{}", id.0));
     }
     let md = app.meters.get(&id).copied().unwrap_or_default();
     let slot = fader_slot(fr);
@@ -957,8 +957,8 @@ pub(crate) fn track_button(app: &mut SoundApp, ui: &Ui, cmd: &str, id: TrackId) 
     let m = click_mods(ui);
     let Some(mx) = app.engine.session().track(id).map(|t| t.mixer.clone()) else { return };
     let (cmd, on) = match cmd {
-        "mix.solo" if m.command || m.ctrl => ("mix.solo_safe", mx.solo_safe),
-        "mix.record_arm" if m.command || m.ctrl => ("mix.record_safe", mx.record_safe),
+        "mix.solo" if m.command => ("mix.solo_safe", mx.solo_safe),
+        "mix.record_arm" if m.command => ("mix.record_safe", mx.record_safe),
         "mix.solo" => (cmd, mx.solo),
         "mix.mute" => (cmd, mx.mute),
         "mix.record_arm" => (cmd, mx.record_arm),
@@ -967,13 +967,17 @@ pub(crate) fn track_button(app: &mut SoundApp, ui: &Ui, cmd: &str, id: TrackId) 
     };
     let tracks = scoped_tracks(app, ui, id);
     let r = if tracks.len() > 1 {
-        app.run(cmd, json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "value": !on}))
+        app.run(cmd, json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "value": !on, "isolate": group_override(ui)}))
     } else {
-        app.run(cmd, json!({"track": id.0}))
+        app.run(cmd, json!({"track": id.0, "isolate": group_override(ui)}))
     };
     if let Err(e) = r {
         app.ui.status = e;
     }
+}
+
+pub(crate) fn group_override(ui: &Ui) -> bool {
+    if ui.ctx().os().is_mac() { click_mods(ui).ctrl } else { openpt_vst3_host::start_key_down() }
 }
 
 pub(crate) fn scoped_tracks(app: &SoundApp, ui: &Ui, id: TrackId) -> Vec<TrackId> {

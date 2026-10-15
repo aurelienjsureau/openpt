@@ -6,6 +6,12 @@ use serde_json::json;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("mix.volume", "Set Volume", [], None, "{tracks?, db: -144..12 | delta_db}", has_selection, volume),
+        cmd!("mix.suspend_groups", "Suspend All Groups", [], Some("Cmd+Shift+G"), "{value?}", always, |e, p| {
+            let s = e.session_mut();
+            let v = p.get("value").and_then(Value::as_bool).unwrap_or(!s.edit.flag("groups.suspended"));
+            s.edit.set_flag("groups.suspended", v);
+            Ok(json!({"value": v}))
+        }),
         cmd!("mix.pan", "Set Pan", [], None, "{tracks?, pan: -1..1, index?: 0|1}", has_selection, pan),
         cmd!(noundo "mix.mute", "Mute", [], Some("Shift+M"), "{tracks?, value?: bool}", has_selection, |e, p| toggle(
             e,
@@ -249,7 +255,8 @@ pub fn specs() -> Vec<CommandSpec> {
 
 fn set_grouped(s: &mut Session, t: TrackId, attr: &str, f: impl Fn(&mut openpt_model::Track)) {
     let mut targets = vec![t];
-    for g in &s.groups {
+    let loose = s.edit.flag("groups.suspended") || s.edit.flag("groups.isolate");
+    for g in s.groups.iter().filter(|_| !loose) {
         if g.active && g.mix && g.members.contains(&t) && g.attributes.iter().any(|a| a == attr) {
             for m in &g.members {
                 if !targets.contains(m) {
@@ -269,9 +276,11 @@ fn toggle(e: &mut Engine, p: &Value, cmd: &str, set: fn(&mut Session, TrackId, b
     let tracks = tracks_required(e, cmd, p)?;
     let s = e.session_mut();
     let v = p.get("value").and_then(Value::as_bool).unwrap_or_else(|| !tracks.iter().all(|t| s.track(*t).is_some_and(get)));
+    s.edit.set_flag("groups.isolate", bool_or(p, "isolate", false));
     for t in &tracks {
         set(s, *t, v);
     }
+    s.edit.set_flag("groups.isolate", false);
     Ok(json!({"value": v}))
 }
 
@@ -283,6 +292,8 @@ fn volume(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad("mix.volume", "`db` or `delta_db` required"));
     }
     let s = e.session_mut();
+    let isolate = bool_or(p, "isolate", false);
+    s.edit.set_flag("groups.isolate", isolate);
     for t in &tracks {
         let cur = s.track(*t).map_or(0.0, |tr| tr.mixer.volume_db);
         let new = match (abs, delta) {
@@ -294,6 +305,7 @@ fn volume(e: &mut Engine, p: &Value) -> Result<Value> {
         let d = new - cur;
         set_grouped(s, *t, "volume", |tr| tr.mixer.volume_db = if tr.id == *t { new } else { (tr.mixer.volume_db + d).clamp(-144.0, 12.0) });
     }
+    s.edit.set_flag("groups.isolate", false);
     Ok(json!({"tracks": tracks.len()}))
 }
 
@@ -322,9 +334,11 @@ fn solo(e: &mut Engine, p: &Value) -> Result<Value> {
             tr.mixer.solo = false;
         }
     }
+    s.edit.set_flag("groups.isolate", bool_or(p, "isolate", false));
     for t in &tracks {
         set_grouped(s, *t, "solo", |tr| tr.mixer.solo = v);
     }
+    s.edit.set_flag("groups.isolate", false);
     Ok(json!({"value": v}))
 }
 
@@ -918,6 +932,23 @@ mod tests {
     use openpt_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
     use openpt_time::Range;
     use std::sync::Arc;
+
+    #[test]
+    fn a_grouped_fader_moves_alone_when_isolated_or_with_groups_suspended() {
+        let mut e = crate::demo::demo_engine();
+        let (kick, snare) = (e.session().track_by_name("Kick").unwrap().id, e.session().track_by_name("Snare").unwrap().id);
+        e.execute("track.group", &json!({"tracks": [kick.0, snare.0]})).unwrap();
+        let vol = |e: &Engine, t: TrackId| e.session().track(t).unwrap().mixer.volume_db;
+        let snare0 = vol(&e, snare);
+        e.execute("mix.volume", &json!({"track": kick.0, "delta_db": -3.0, "isolate": true})).unwrap();
+        assert_eq!(vol(&e, snare), snare0, "isolated: the group does not follow");
+        e.execute("mix.suspend_groups", &json!({})).unwrap();
+        e.execute("mix.volume", &json!({"track": kick.0, "delta_db": -3.0})).unwrap();
+        assert_eq!(vol(&e, snare), snare0, "suspended: the group does not follow");
+        e.execute("mix.suspend_groups", &json!({})).unwrap();
+        e.execute("mix.volume", &json!({"track": kick.0, "delta_db": -3.0})).unwrap();
+        assert_eq!(vol(&e, snare), snare0 - 3.0, "back on: the group follows");
+    }
 
     #[test]
     fn new_aux_track_listens_to_the_bus_the_tracks_feed() {

@@ -105,8 +105,22 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
                 let _ = app.dialogs.open_for_command(&app.engine, "track.group");
                 ui.close();
             }
+            let suspended = app.engine.session().edit.flag("groups.suspended");
+            if ui
+                .add(
+                    egui::Button::new("Suspend All Groups")
+                        .selected(suspended)
+                        .shortcut_text(crate::shortcuts::shortcut_label("Cmd+Shift+G", ui.ctx().os().is_mac())),
+                )
+                .clicked()
+            {
+                let _ = app.run("mix.suspend_groups", json!({}));
+                ui.close();
+            }
         });
+        let suspended = app.engine.session().edit.flag("groups.suspended");
         for (id, letter, name, active, color) in groups {
+            let active = active && !suspended;
             let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), Sense::click());
             if active {
                 ui.painter().rect_filled(Rect::from_min_size(pos2(r.min.x + 4.0, r.min.y + 2.0), vec2(14.0, 13.0)), 1.0, rgb(color));
