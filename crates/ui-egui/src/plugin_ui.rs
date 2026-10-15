@@ -240,11 +240,13 @@ pub fn key_input(app: &mut SoundApp, ui: &mut Ui, tid: TrackId, slot: usize, ins
     }
     resp.on_hover_text("Key Input");
     ui.menu_button(egui::RichText::new(current).font(regular(11.0)), |ui| key_menu(app, ui, tid, slot, ins, &busses));
-    let ext = ui.add_enabled(ins.key.is_some(), egui::Button::new(egui::RichText::new("External Key").font(regular(10.0))).fill(lit(ins.key_on)).small());
+    let ext =
+        ui.add_enabled(ins.key.is_some(), egui::Button::new(egui::RichText::new("External Key").font(regular(10.0))).fill(lit(ins.key_on)).small());
     if ext.clicked() {
         let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "on": !ins.key_on}));
     }
-    let listen = ui.add_enabled(ins.key_on, egui::Button::new(egui::RichText::new("Key Listen").font(regular(10.0))).fill(lit(ins.key_listen)).small());
+    let listen =
+        ui.add_enabled(ins.key_on, egui::Button::new(egui::RichText::new("Key Listen").font(regular(10.0))).fill(lit(ins.key_listen)).small());
     if listen.clicked() {
         let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "listen": !ins.key_listen}));
     }

@@ -53,7 +53,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "I/O...",
             ["Setup"],
             None,
-            "{action?: list|create_bus|rename_bus|delete_bus|create_output|rename_output|delete_output|set_output|create_input|rename_input|delete_input|set_input, name?, new_name?, format?: stereo, first_channel?: 0}",
+            "{action?: list|create_bus|create_busses|set_bus|rename_bus|delete_bus|create_output|rename_output|delete_output|set_output|create_input|rename_input|delete_input|set_input, name?, new_name?, format?: stereo, first_channel?: 0, count?: 1 (create_busses: `name` is the prefix)}",
             always,
             io_setup
         ),
@@ -236,6 +236,24 @@ fn io_setup(e: &mut Engine, p: &Value) -> Result<Value> {
                 return Err(bad(id, format!("a bus named `{name}` exists")));
             }
             s.add_bus(&name, format);
+        }
+        "set_bus" => {
+            let b = s.busses.iter_mut().find(|b| b.name.eq_ignore_ascii_case(&name)).ok_or_else(|| bad(id, format!("no bus `{name}`")))?;
+            b.format = format;
+        }
+        "create_busses" => {
+            let count = i64_or(p, "count", 1).clamp(1, 64);
+            let mut made = Vec::new();
+            let mut k = 1;
+            while (made.len() as i64) < count && k < 10_000 {
+                let n = format!("{name} {k}");
+                if s.bus_by_name(&n).is_none() {
+                    s.add_bus(&n, format);
+                    made.push(n);
+                }
+                k += 1;
+            }
+            return Ok(json!({"created": made}));
         }
         "rename_bus" => {
             let to = new_name.ok_or_else(|| bad(id, "`new_name` required"))?;
@@ -548,6 +566,17 @@ mod tests {
         assert!(!e.session().edit.flag("options.midi_thru"));
     }
 
+    #[test]
+    fn busses_are_created_several_at_once_in_any_format() {
+        let mut e = Engine::default();
+        let r = e.execute("setup.io", &json!({"action": "create_busses", "name": "FX", "count": 3, "format": "mono"})).unwrap();
+        assert_eq!(r["created"], json!(["FX 1", "FX 2", "FX 3"]));
+        assert_eq!(e.session().bus_by_name("FX 2").map(|b| b.format), Some(ChannelFormat::Mono));
+        e.execute("setup.io", &json!({"action": "set_bus", "name": "FX 2", "format": "5.1"})).unwrap();
+        assert_eq!(e.session().bus_by_name("FX 2").map(|b| b.format.channels()), Some(6));
+        let r = e.execute("setup.io", &json!({"action": "create_busses", "name": "FX", "count": 1})).unwrap();
+        assert_eq!(r["created"], json!(["FX 4"]));
+    }
     #[test]
     fn input_paths_route_recording_and_follow_renames() {
         let mut e = Engine::default();

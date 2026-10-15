@@ -740,7 +740,14 @@ pub(crate) fn recall_preset(app: &mut SoundApp, tid: openpt_model::TrackId, slot
     let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": name}));
 }
 
-pub(crate) fn save_preset(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, ins: &openpt_model::Insert, name: &str) {
+pub(crate) fn save_preset(
+    app: &mut SoundApp,
+    tid: openpt_model::TrackId,
+    slot: usize,
+    info: &openpt_dsp::PluginInfo,
+    ins: &openpt_model::Insert,
+    name: &str,
+) {
     let Some(dir) = preset_dir(app, info.id) else { return };
     let clean = openpt_engine::io::sanitize_name(name);
     let mut body = json!({"format": "openpt-plugin-preset", "plugin": info.id, "params": ins.params});

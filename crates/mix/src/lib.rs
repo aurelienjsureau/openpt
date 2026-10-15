@@ -1308,7 +1308,12 @@ fn order_keyed<T>(s: &Session, work: &mut [(usize, T)]) -> usize {
     for k in n_free..n {
         let waits_on_later = |at: usize| {
             let Some(t) = work.get(at).and_then(|(i, _)| s.tracks.get(*i)) else { return false };
-            key_busses(t).any(|b| work.iter().skip(k).filter(|(j, _)| s.tracks.get(*j).is_some_and(|u| u.id != t.id)).any(|(j, _)| s.tracks.get(*j).is_some_and(|u| feeds_bus(u, b))))
+            key_busses(t).any(|b| {
+                work.iter()
+                    .skip(k)
+                    .filter(|(j, _)| s.tracks.get(*j).is_some_and(|u| u.id != t.id))
+                    .any(|(j, _)| s.tracks.get(*j).is_some_and(|u| feeds_bus(u, b)))
+            })
         };
         if let Some(ready) = (k..n).find(|&at| !waits_on_later(at))
             && let Some(w) = work.get_mut(k..=ready)

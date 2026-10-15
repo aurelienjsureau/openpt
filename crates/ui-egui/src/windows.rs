@@ -680,14 +680,17 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(interface).color(t.text_dim));
                 io_grid(ui, &paths, n, dev.map_or(n, |d| usize::from(d.max_channels)), inputs, &mut runs);
                 ui.horizontal(|ui| {
-                    if ui.button("New Path…").clicked() {
+                    if let Some((count, fmt)) = new_paths(ui, if inputs { "io_new_in" } else { "io_new_out" }, if inputs { "input" } else { "output" }) {
                         let prefix = if inputs { "In" } else { "Out" };
-                        let name = (1..1000)
-                            .map(|k| format!("{prefix} {k}"))
-                            .find(|c| !paths.iter().any(|p| p.name.eq_ignore_ascii_case(c)))
-                            .unwrap_or_default();
-                        let first = used.min(n.saturating_sub(1));
-                        runs.push(json!({"action": if inputs { "create_input" } else { "create_output" }, "name": name, "first_channel": first, "format": "mono"}));
+                        let mut taken: Vec<String> = paths.iter().map(|p| p.name.to_ascii_lowercase()).collect();
+                        let mut first = used;
+                        for _ in 0..count {
+                            let Some(name) = (1..1000).map(|k| format!("{prefix} {k}")).find(|c| !taken.contains(&c.to_ascii_lowercase())) else { break };
+                            taken.push(name.to_ascii_lowercase());
+                            let at = first.min(n.saturating_sub(fmt.channels()));
+                            runs.push(json!({"action": if inputs { "create_input" } else { "create_output" }, "name": name, "first_channel": at, "format": fmt.label()}));
+                            first += fmt.channels();
+                        }
                     }
                     if !inputs {
                         ui.separator();
@@ -704,34 +707,13 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
                 });
             }
             _ => {
-                let busses: Vec<(String, String)> = s.busses.iter().map(|b| (b.name.clone(), b.format.label().to_string())).collect();
-                egui::Grid::new("busses").num_columns(3).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Name").strong());
-                    ui.label(egui::RichText::new("Format").strong());
-                    ui.end_row();
-                    for (name, fmt) in busses {
-                        if let Some(to) = name_field(ui, ("bus_name", &name), &name) {
-                            runs.push(json!({"action": "rename_bus", "name": name, "new_name": to}));
-                        }
-                        ui.label(fmt);
-                        if ui.small_button("Delete").clicked() {
-                            runs.push(json!({"action": "delete_bus", "name": name}));
-                        }
-                        ui.end_row();
-                    }
-                });
-                if ui.button("New Bus…").clicked() {
-                    let n = (1..1000).find(|k| app.engine.session().bus_by_name(&format!("Bus {k}")).is_none()).unwrap_or(1);
-                    runs.push(json!({"new_bus": format!("Bus {n}")}));
-                }
+                bus_page(ui, s, &mut runs);
             }
         }
     });
     for p in runs {
         let r = if let Some(f) = p.get("main_format").and_then(Value::as_str) {
             app.run("setup.main_format", json!({"format": f}))
-        } else if let Some(name) = p.get("new_bus").and_then(Value::as_str) {
-            app.run("mix.new_bus", json!({"name": name}))
         } else {
             app.run("setup.io", p)
         };
@@ -917,6 +899,110 @@ pub fn clip_effects(app: &mut SoundApp, ctx: &egui::Context) {
         });
     });
     app.ui.show_clip_effects = open;
+}
+
+fn path_formats() -> impl Iterator<Item = openpt_model::ChannelFormat> {
+    openpt_model::ChannelFormat::ALL.into_iter().filter(|f| f.channels() <= 10)
+}
+
+fn new_paths(ui: &mut egui::Ui, id: &str, what: &str) -> Option<(usize, openpt_model::ChannelFormat)> {
+    let key = egui::Id::new((id, "new_paths"));
+    let (mut count, mut fmt): (usize, openpt_model::ChannelFormat) = ui
+        .data(|d| d.get_temp(key))
+        .unwrap_or((1, if what == "bus" { openpt_model::ChannelFormat::Stereo } else { openpt_model::ChannelFormat::Mono }));
+    let mut go = false;
+    egui::Frame::new().fill(Tokens::current().group_header).inner_margin(egui::Margin::symmetric(10, 6)).corner_radius(3).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Create");
+            ui.add(egui::DragValue::new(&mut count).range(1..=64).speed(0.1));
+            ui.label("new");
+            egui::ComboBox::from_id_salt((id, "fmt")).width(90.0).selected_text(fmt.label()).show_ui(ui, |ui| {
+                for f in path_formats() {
+                    ui.selectable_value(&mut fmt, f, f.label());
+                }
+            });
+            ui.label(if count > 1 { format!("{what}{}", if what == "bus" { "ses" } else { "s" }) } else { what.to_string() });
+            ui.add_space(8.0);
+            go = ui.add(egui::Button::new(egui::RichText::new("Create").strong()).min_size(vec2(70.0, 0.0))).clicked();
+        });
+    });
+    ui.data_mut(|d| d.insert_temp(key, (count, fmt)));
+    go.then_some((count, fmt))
+}
+
+fn bus_page(ui: &mut egui::Ui, s: &openpt_model::Session, runs: &mut Vec<Value>) {
+    const COLS: [f32; 4] = [170.0, 112.0, 70.0, 90.0];
+    let t = Tokens::current();
+    let uses = |b: openpt_model::BusId| {
+        let r = openpt_model::Route::Bus(b);
+        s.tracks.iter().filter(|x| x.mixer.input == r || x.mixer.output == r || x.mixer.sends.iter().flatten().any(|sn| sn.target == r)).count()
+    };
+    let rows: Vec<(String, openpt_model::ChannelFormat, usize)> = s.busses.iter().map(|b| (b.name.clone(), b.format, uses(b.id))).collect();
+    let cell = |ui: &mut egui::Ui, w: f32, f: &mut dyn FnMut(&mut egui::Ui)| {
+        ui.allocate_ui_with_layout(vec2(w, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_width(w);
+            f(ui);
+        });
+    };
+    egui::Frame::new().fill(t.group_header).inner_margin(egui::Margin::symmetric(8, 3)).corner_radius(2).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.horizontal(|ui| {
+            for (text, w) in ["Name", "Format", "Channels", "Used by"].into_iter().zip(COLS) {
+                cell(ui, w, &mut |ui| {
+                    ui.label(egui::RichText::new(text).font(bold(11.5)).color(t.text_dim));
+                });
+            }
+        });
+    });
+    egui::ScrollArea::vertical().max_height(300.0).auto_shrink([false, true]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        if rows.is_empty() {
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("No busses yet.").color(t.text_dim));
+        }
+        for (i, (name, fmt, used)) in rows.into_iter().enumerate() {
+            let fill = if i % 2 == 0 { t.field_bg } else { t.group_bg };
+            egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    cell(ui, COLS[0], &mut |ui| {
+                        if let Some(to) = name_field(ui, ("bus_name", &name), &name) {
+                            runs.push(json!({"action": "rename_bus", "name": name, "new_name": to}));
+                        }
+                    });
+                    cell(ui, COLS[1], &mut |ui| {
+                        egui::ComboBox::from_id_salt(("bus_fmt", &name)).width(100.0).selected_text(fmt.label()).show_ui(ui, |ui| {
+                            for f in path_formats() {
+                                if ui.selectable_label(f == fmt, f.label()).clicked() && f != fmt {
+                                    runs.push(json!({"action": "set_bus", "name": name, "format": f.label()}));
+                                }
+                            }
+                        });
+                    });
+                    cell(ui, COLS[2], &mut |ui| {
+                        ui.label(fmt.channels().to_string());
+                    });
+                    cell(ui, COLS[3], &mut |ui| {
+                        let label = match used {
+                            0 => "unused".to_string(),
+                            1 => "1 track".to_string(),
+                            n => format!("{n} tracks"),
+                        };
+                        ui.label(egui::RichText::new(label).color(t.text_dim));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Delete").on_hover_text("Delete this bus (tracks using it lose the route)").clicked() {
+                            runs.push(json!({"action": "delete_bus", "name": name}));
+                        }
+                    });
+                });
+            });
+        }
+    });
+    ui.add_space(8.0);
+    if let Some((count, fmt)) = new_paths(ui, "io_new_bus", "bus") {
+        runs.push(json!({"action": "create_busses", "name": "Bus", "count": count, "format": fmt.label()}));
+    }
 }
 
 #[cfg(test)]

@@ -424,11 +424,8 @@ fn insert_key(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         Some(_) => return Err(bad("mix.insert_key", "`bus` must be a name, an id or null")),
     };
-    let ins = s
-        .track_mut(t)
-        .and_then(|tr| tr.mixer.inserts.get_mut(slot))
-        .and_then(Option::as_mut)
-        .ok_or_else(|| bad("mix.insert_key", "empty slot"))?;
+    let ins =
+        s.track_mut(t).and_then(|tr| tr.mixer.inserts.get_mut(slot)).and_then(Option::as_mut).ok_or_else(|| bad("mix.insert_key", "empty slot"))?;
     if let Some(b) = bus {
         ins.key = b;
         ins.key_on = b.is_some();

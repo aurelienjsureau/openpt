@@ -1917,8 +1917,8 @@ mod window {
     use vst3::Steinberg::{self as sb, IPlugViewTrait};
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, ClientToScreen, CreateFontW, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-        DrawTextW, EndPaint, FillRect, HDC, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
+        BeginPaint, ClientToScreen, CreateFontW, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
+        DeleteObject, DrawTextW, EndPaint, FillRect, HDC, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -1928,8 +1928,8 @@ mod window {
         DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW,
         MF_CHECKED, MF_SEPARATOR, MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
         SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu,
-        WM_CLOSE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT, WNDCLASSEXW,
-        WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+        WM_CLOSE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT,
+        WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
     };
 
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeHWND);
@@ -2057,7 +2057,10 @@ mod window {
         fill(hdc, &RECT { top: strip.bottom - 1, ..strip }, rgb(20, 21, 23));
         let face = wide("Segoe UI");
         let (font, small) = unsafe {
-            (CreateFontW(-px(12.0), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()), CreateFontW(-px(10.0), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()))
+            (
+                CreateFontW(-px(12.0), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()),
+                CreateFontW(-px(10.0), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()),
+            )
         };
         let old = unsafe {
             SetBkMode(hdc, TRANSPARENT as i32);
@@ -2093,7 +2096,13 @@ mod window {
                 Item::Key => {
                     fill(hdc, r, rgb(14, 16, 16));
                     let name = h.key.and_then(|i| h.busses.get(i)).map_or("no key input", String::as_str);
-                    text(hdc, name, &RECT { right: inner.right - px(12.0), ..inner }, if h.key.is_some() { bright } else { dim }, DT_LEFT | DT_END_ELLIPSIS);
+                    text(
+                        hdc,
+                        name,
+                        &RECT { right: inner.right - px(12.0), ..inner },
+                        if h.key.is_some() { bright } else { dim },
+                        DT_LEFT | DT_END_ELLIPSIS,
+                    );
                     text(hdc, "▾", &inner, dim, DT_RIGHT);
                 }
                 Item::ExtKey | Item::Listen => {
@@ -2101,7 +2110,19 @@ mod window {
                     let enabled = if *item == Item::ExtKey { h.key.is_some() } else { h.key_on };
                     fill(hdc, r, if on { lit_key } else { rgb(70, 72, 76) });
                     let label = if *item == Item::ExtKey { "External Key" } else { "Key Listen" };
-                    text(hdc, label, r, if on { rgb(20, 20, 20) } else if enabled { bright } else { rgb(110, 112, 116) }, DT_CENTER);
+                    text(
+                        hdc,
+                        label,
+                        r,
+                        if on {
+                            rgb(20, 20, 20)
+                        } else if enabled {
+                            bright
+                        } else {
+                            rgb(110, 112, 116)
+                        },
+                        DT_CENTER,
+                    );
                 }
                 Item::Bypass => {
                     fill(hdc, r, if h.bypass { rgb(40, 110, 200) } else { rgb(70, 72, 76) });
