@@ -185,6 +185,39 @@ fn events(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"events": events, "markers": markers}))
 }
 
+pub(crate) fn quantize(s: &mut Session, id: &str, cid: ClipId, grid_ticks: i64, strength: f32) -> Result<usize> {
+    let (t, c) = s.find_clip(cid).map(|(t, c)| (t, c.clone())).ok_or_else(|| bad(id, "no such clip"))?;
+    let algo = algorithm(s, id, t)?;
+    let mut w = warp_of(id, &c)?;
+    let audio = s.pool.get(w.source).cloned().ok_or_else(|| bad(id, "the clip's audio is not loaded"))?;
+    let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
+    let n = usize::try_from(w.length.max(0)).unwrap_or(0);
+    let seg: Vec<Vec<f32>> = audio.buffer.channels.iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
+    let sr = s.sample_rate;
+    let hits = openpt_dsp::offline::detect_transients(&seg, sr.as_f64() as f32, 0.5);
+    let grid = grid_ticks.max(1) as f64;
+    let mut markers: Vec<WarpMarker> = Vec::new();
+    for h in hits {
+        let src = h as Samples;
+        let at = w.to_clip(c.length, src);
+        let ticks = s.tempo.samples_to_ticks_f(c.start + at, sr);
+        let target = s.tempo.tick_to_samples(((ticks / grid).round() * grid) as i64, sr) - c.start;
+        let to = at + ((target - at) as f64 * f64::from(strength)).round() as Samples;
+        let floor = markers.last().map_or(0, |m| m.at);
+        if src <= 0 || src >= w.length || to <= floor || to >= c.length || markers.last().is_some_and(|m| src <= m.src) {
+            continue;
+        }
+        markers.push(WarpMarker { src, at: to });
+    }
+    let count = markers.len();
+    if count == 0 {
+        return Ok(0);
+    }
+    w.markers = markers;
+    render(s, id, cid, w, c.length, &algo)?;
+    Ok(count)
+}
+
 pub(crate) fn stretch(s: &mut Session, id: &str, cid: ClipId, ratio: f64, algo: &str) -> Result<()> {
     let c = s.find_clip(cid).map(|(_, c)| c.clone()).ok_or_else(|| bad(id, "no such clip"))?;
     let mut w = warp_of(id, &c)?;
@@ -239,6 +272,19 @@ mod tests {
         let t = e.execute("track.new", &json!({"format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
         let clip = e.execute("clip.place_source", &json!({"source": src.0, "track": t, "at": 0})).unwrap()["clip"].as_u64().unwrap();
         (e, clip, t as i64)
+    }
+
+    #[test]
+    fn quantize_moves_each_event_of_an_elastic_clip_onto_the_grid() {
+        let (mut e, clip, t) = warped_clip();
+        e.session_mut().find_clip_mut(openpt_model::ClipId(clip)).unwrap().start = 1440;
+        assert!(e.execute("event.quantize", &json!({"clips": [clip], "grid": "1/8"})).unwrap()["audio_events"] == 0, "needs Elastic Audio");
+        e.execute("track.elastic", &json!({"track": t, "algorithm": "rhythmic"})).unwrap();
+        let r = e.execute("event.quantize", &json!({"clips": [clip], "grid": "1/8"})).unwrap();
+        assert!(r["audio_events"].as_u64().unwrap() >= 5, "{r}");
+        let ev = e.execute("clip.warp_events", &json!({"clip": clip})).unwrap();
+        let off: Vec<i64> = ev["events"].as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).filter(|x| *x > 6000).map(|x| (x + 6000) % 12_000 - 6000).collect();
+        assert!(off.len() >= 5 && off.iter().all(|d| d.abs() < 300), "events off the 1/8 grid by {off:?}");
     }
 
     #[test]

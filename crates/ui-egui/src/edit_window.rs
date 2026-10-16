@@ -3168,6 +3168,15 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
         }
         return;
     };
+    let s = app.engine.session();
+    let elastic = s.find_clip(c).and_then(|(t, _)| s.track(t)).and_then(|t| t.elastic.as_deref()).is_some_and(|a| a != "none");
+    let grid = match s.edit.grid {
+        openpt_time::GridValue::Note { value, dotted, triplet } => {
+            let t = value.ticks();
+            if triplet { t * 2 / 3 } else if dotted { t * 3 / 2 } else { t }
+        }
+        _ => openpt_time::NoteValue::Sixteenth.ticks(),
+    };
     let ids = json!([c.0]);
     for (label, cmd) in [
         ("Mute/Unmute", "edit.mute_clips"),
@@ -3179,6 +3188,10 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
         ("Send to Back", "clip.send_to_back"),
     ] {
         if ui.button(label).clicked() {
+            if cmd == "clip.quantize_to_grid" && elastic {
+                let _ = app.run("event.quantize", json!({"clips": ids, "grid": grid}));
+                continue;
+            }
             let _ = app.run(cmd, json!({"clips": ids}));
         }
     }

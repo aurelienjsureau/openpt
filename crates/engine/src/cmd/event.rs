@@ -278,7 +278,24 @@ fn quantize(e: &mut Engine, p: &Value) -> Result<Value> {
         opts.grid_ticks = grid.parse::<i64>().ok().filter(|g| *g > 0).ok_or_else(|| bad("event.quantize", "damaged groove template"))?;
         opts.groove = offsets.split(',').filter_map(|o| o.trim().parse::<i64>().ok()).collect();
     }
-    midi_op(e, p, move |n| openpt_midi::ops::quantize(n, &opts))
+    let audio: Vec<openpt_model::ClipId> = {
+        let s = e.session();
+        clip_ids_param(e, p)
+            .into_iter()
+            .filter(|id| {
+                s.find_clip(*id).is_some_and(|(t, c)| {
+                    matches!(c.content, ClipContent::Audio { .. }) && s.track(t).and_then(|x| x.elastic.as_deref()).is_some_and(|a| a != "none")
+                })
+            })
+            .collect()
+    };
+    let mut events = 0;
+    for id in audio {
+        events += super::warp::quantize(e.session_mut(), "event.quantize", id, opts.grid_ticks, opts.strength)?;
+    }
+    let mut out = midi_op(e, p, move |n| openpt_midi::ops::quantize(n, &opts))?;
+    out["audio_events"] = json!(events);
+    Ok(out)
 }
 
 fn velocity(e: &mut Engine, p: &Value) -> Result<Value> {
