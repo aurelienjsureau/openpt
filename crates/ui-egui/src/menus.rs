@@ -145,6 +145,7 @@ pub const AUDIOSUITE: &[(&str, &str)] = &[
 ];
 
 const DIALOG_COMMANDS: &[&str] = &[
+    "clip.warp_conform",
     "clip.clear",
     "track.new",
     "file.bounce_mix",

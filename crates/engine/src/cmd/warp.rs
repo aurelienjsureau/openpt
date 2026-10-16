@@ -10,8 +10,8 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("clip.warp_remove", "Remove Warp Marker", [], None, "{clip: id, index: n}", always, remove),
         cmd!(
             "clip.warp_conform",
-            "Conform to Tempo",
-            [],
+            "Conform Song to Tempo...",
+            ["Event"],
             None,
             "{reference: [clip], clips: [clip], bpm?: mean of the playing, from_tick?: 0, grid?: 240 ticks}",
             always,

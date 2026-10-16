@@ -18,7 +18,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("track.ungroup", "Delete Group", [], None, "{group: id|name}", always, delete_group),
         cmd!("track.group_toggle", "Toggle Group Active", [], None, "{group: id|name}", always, toggle_group),
         cmd!("track.group_color", "Group Color", [], None, "{group: id|name, color: [r,g,b]}", always, group_color),
-        cmd!("track.group_modify", "Modify Group...", [], None, "{group: id|name, add?: [track], remove?: [track]}", always, group_modify),
+        cmd!(
+            "track.group_modify",
+            "Modify Group...",
+            [],
+            None,
+            "{group: id|name, tracks?: [track] (the whole membership), add?: [track], remove?: [track], name?, edit?: bool, mix?: bool}",
+            always,
+            group_modify
+        ),
         cmd!(
             "track.duplicate",
             "Duplicate...",
@@ -466,6 +474,14 @@ fn group_modify(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let order: Vec<openpt_model::TrackId> = s.tracks.iter().map(|t| t.id).collect();
     let Some(gr) = s.groups.iter_mut().find(|x| x.id == g) else { return Err(bad("track.group_modify", "unknown `group`")) };
+    if p.get("tracks").is_some() {
+        gr.members = list("tracks").into_iter().filter(|t| order.contains(t)).collect();
+    }
+    if let Some(n) = str_param(p, "name").filter(|n| !n.trim().is_empty()) {
+        gr.name = n.to_string();
+    }
+    gr.edit = bool_or(p, "edit", gr.edit);
+    gr.mix = bool_or(p, "mix", gr.mix);
     for t in add.into_iter().filter(|t| order.contains(t)) {
         if !gr.members.contains(&t) {
             gr.members.push(t);

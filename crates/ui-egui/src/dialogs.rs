@@ -84,6 +84,14 @@ pub enum Dialog {
         edit: bool,
         mix: bool,
         members: Vec<(u64, String, bool)>,
+        modify: Option<u64>,
+    },
+    Conform {
+        bpm: String,
+        bar: i64,
+        grid: String,
+        refs: Vec<(u64, String, bool)>,
+        all_tracks: bool,
     },
     Session {
         frame_rate: String,
@@ -125,11 +133,18 @@ impl Dialogs {
             Dialog::Fades { .. } => "fades",
             Dialog::StripSilence { .. } => "strip_silence",
             Dialog::Group { .. } => "group",
+            Dialog::Conform { .. } => "conform",
             Dialog::Session { .. } => "session",
             Dialog::ScoreSetup { .. } => "score_setup",
             Dialog::MidiInputDevices { .. } => "midi_input_devices",
             Dialog::SaveChanges { .. } => "save_changes",
         })
+    }
+
+    pub fn open_modify_group(&mut self, s: &openpt_model::Session, group: u64) {
+        let Some(g) = s.groups.iter().find(|g| g.id.0 == group) else { return };
+        let members = s.tracks.iter().map(|t| (t.id.0, t.name.clone(), g.members.contains(&t.id))).collect();
+        self.open = Some(Dialog::Group { name: g.name.clone(), edit: g.edit, mix: g.mix, members, modify: Some(group) });
     }
 
     pub fn open_rename_track(&mut self, id: TrackId, name: &str) {
@@ -211,10 +226,23 @@ impl Dialogs {
             }
             "edit.fades_create" => Dialog::Fades { shape: "equal power".into() },
             "edit.strip_silence" => Dialog::StripSilence { threshold: -48.0, min_ms: 50.0, pre_ms: 5.0, post_ms: 20.0 },
+            "clip.warp_conform" => {
+                let s = e.session();
+                let refs = s
+                    .tracks
+                    .iter()
+                    .filter(|t| t.kind == openpt_model::TrackKind::Audio)
+                    .map(|t| {
+                        let n = t.name.to_lowercase();
+                        (t.id.0, t.name.clone(), n.contains("kick") || n.contains("snare"))
+                    })
+                    .collect();
+                Dialog::Conform { bpm: String::new(), bar: 1, grid: "1/16".into(), refs, all_tracks: true }
+            }
             "track.group" => {
                 let s = e.session();
                 let members = s.tracks.iter().map(|t| (t.id.0, t.name.clone(), s.edit.selected_tracks.contains(&t.id))).collect();
-                Dialog::Group { name: format!("Group {}", s.groups.len() + 1), edit: true, mix: true, members }
+                Dialog::Group { name: format!("Group {}", s.groups.len() + 1), edit: true, mix: true, members, modify: None }
             }
             "setup.session" => Dialog::Session { frame_rate: e.session().frame_rate.label().into(), bit_depth: "24".into() },
             "file.score_setup" => {
@@ -373,7 +401,9 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         Dialog::Spot(_) => "Spot",
         Dialog::Fades { .. } => "Fades",
         Dialog::StripSilence { .. } => "Strip Silence",
+        Dialog::Group { modify: Some(_), .. } => "Modify Group",
         Dialog::Group { .. } => "Create Group",
+        Dialog::Conform { .. } => "Conform Song to Tempo",
         Dialog::Session { .. } => "Session Setup",
         Dialog::ScoreSetup { .. } => "Score Setup",
         Dialog::MidiInputDevices { .. } => "MIDI Input Devices",
@@ -632,7 +662,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         ));
                     }
                 }
-                Dialog::Group { name, edit, mix, members } => {
+                Dialog::Group { name, edit, mix, members, modify } => {
                     ui.horizontal(|ui| {
                         ui.label("Name");
                         ui.text_edit_singleline(name);
@@ -649,7 +679,42 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     });
                     if buttons(ui, "OK", enter) {
                         let ids: Vec<u64> = members.iter().filter(|m| m.2).map(|m| m.0).collect();
-                        action = Some(("track.group".into(), json!({"name": name, "edit": edit, "mix": mix, "tracks": ids})));
+                        action = Some(match modify {
+                            Some(g) => ("track.group_modify".into(), json!({"group": g, "name": name, "edit": edit, "mix": mix, "tracks": ids})),
+                            None => ("track.group".into(), json!({"name": name, "edit": edit, "mix": mix, "tracks": ids})),
+                        });
+                    }
+                }
+                Dialog::Conform { bpm, bar, grid, refs, all_tracks } => {
+                    ui.set_min_width(420.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Tempo");
+                        ui.add(egui::TextEdit::singleline(bpm).hint_text("mean of the playing").desired_width(130.0));
+                        ui.label("BPM, from bar");
+                        crate::widgets::value_box(ui, |ui| ui.add_sized([50.0, 20.0], egui::DragValue::new(bar).range(1..=9999)));
+                    });
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_label("Grid").selected_text(grid.as_str()).show_ui(ui, |ui| {
+                            for g in ["1/4", "1/8", "1/8t", "1/16", "1/16t", "1/32"] {
+                                ui.selectable_value(grid, g.to_string(), g);
+                            }
+                        });
+                    });
+                    ui.label("Hits are read on these tracks");
+                    egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                        for (_, n, on) in refs.iter_mut() {
+                            crate::widgets::checkbox(ui, on, n.as_str());
+                        }
+                    });
+                    crate::widgets::checkbox(ui, all_tracks, "Every audio track follows (Elastic Audio is turned on where it is off)");
+                    ui.label(
+                        egui::RichText::new("The current tempo map places each hit on its beat; the song then plays at the new tempo.")
+                            .small()
+                            .color(Tokens::current().text_dim),
+                    );
+                    if buttons(ui, "Conform", enter) {
+                        conform(app, bpm, *bar, grid, refs, *all_tracks);
+                        keep = false;
                     }
                 }
                 Dialog::Session { frame_rate, bit_depth } => {
@@ -970,5 +1035,57 @@ mod tests {
         assert!(d.open_for_command(&e, "setup.midi_input_devices"));
         assert_eq!(d.open_name(), Some("midi_input_devices"));
         assert!(matches!(d.open, Some(Dialog::MidiInputDevices { .. })));
+    }
+}
+
+fn conform(app: &mut SoundApp, bpm: &str, bar: i64, grid: &str, refs: &[(u64, String, bool)], all_tracks: bool) {
+    let s = app.engine.session_arc();
+    let ref_tracks: Vec<TrackId> = refs.iter().filter(|r| r.2).map(|r| TrackId(r.0)).collect();
+    if ref_tracks.is_empty() {
+        app.ui.status = "Conform Song to Tempo: tick at least one track to read the hits from".into();
+        return;
+    }
+    let drums: Vec<TrackId> = s
+        .groups
+        .iter()
+        .filter(|g| g.edit && g.members.iter().any(|m| ref_tracks.contains(m)))
+        .flat_map(|g| g.members.clone())
+        .chain(ref_tracks.iter().copied())
+        .collect();
+    let audio: Vec<&openpt_model::Track> = s.tracks.iter().filter(|t| t.kind == openpt_model::TrackKind::Audio).collect();
+    let elastic = |t: &openpt_model::Track| t.elastic.as_deref().is_some_and(|a| a != "none");
+    if all_tracks {
+        let (mut rhythmic, mut poly) = (Vec::new(), Vec::new());
+        for t in audio.iter().filter(|t| !elastic(t)) {
+            if drums.contains(&t.id) { rhythmic.push(t.id.0) } else { poly.push(t.id.0) }
+        }
+        for (ids, algo) in [(rhythmic, "rhythmic"), (poly, "polyphonic")] {
+            if !ids.is_empty() {
+                let _ = app.run("track.elastic", json!({"tracks": ids, "algorithm": algo}));
+            }
+        }
+    }
+    let s = app.engine.session_arc();
+    let clips_of = |pred: &dyn Fn(&openpt_model::Track) -> bool| -> Vec<u64> {
+        s.tracks.iter().filter(|t| t.kind == openpt_model::TrackKind::Audio && pred(t)).flat_map(|t| t.clips().iter().map(|c| c.id.0)).collect()
+    };
+    let reference = clips_of(&|t| ref_tracks.contains(&t.id));
+    let clips = clips_of(&|t| elastic(t));
+    let grid_ticks = match grid {
+        "1/4" => 960,
+        "1/8" => 480,
+        "1/8t" => 320,
+        "1/16t" => 160,
+        "1/32" => 120,
+        _ => 240,
+    };
+    let from_tick = s.tempo.bar_start_tick(bar.max(1));
+    let mut p = json!({"reference": reference, "clips": clips, "from_tick": from_tick, "grid": grid_ticks});
+    if let Ok(b) = bpm.trim().replace(',', ".").parse::<f64>() {
+        p["bpm"] = json!(b);
+    }
+    match app.run("clip.warp_conform", p) {
+        Ok(v) => app.ui.status = format!("Conformed {} clips to {:.2} BPM ({} points)", v["clips"], v["bpm"].as_f64().unwrap_or(0.0), v["points"]),
+        Err(e) => app.ui.status = e,
     }
 }

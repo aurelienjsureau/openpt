@@ -143,6 +143,11 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
                 let _ = app.run("edit.select", json!({"tracks": members, "exact": true}));
             }
             resp.context_menu(|ui| {
+                if ui.button("Modify Group...").clicked() {
+                    let s = app.engine.session_arc();
+                    app.dialogs.open_modify_group(&s, id);
+                    ui.close();
+                }
                 if ui.button("Select Tracks in Group").clicked() {
                     let _ = app.run("edit.select", json!({"tracks": members, "exact": true}));
                     ui.close();

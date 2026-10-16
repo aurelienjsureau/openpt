@@ -3178,6 +3178,10 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
         _ => openpt_time::NoteValue::Sixteenth.ticks(),
     };
     let ids = json!([c.0]);
+    if elastic && ui.button("Conform Song to Tempo...").clicked() {
+        let _ = app.dialogs.open_for_command(&app.engine, "clip.warp_conform");
+        ui.close();
+    }
     for (label, cmd) in [
         ("Mute/Unmute", "edit.mute_clips"),
         ("Edit Lock/Unlock", "clip.edit_lock"),
