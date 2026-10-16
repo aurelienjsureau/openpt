@@ -26,7 +26,8 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 BourrinAudio and the OpenPT
 !define MUI_ICON "${ROOT}\assets\app-icon\openpt.ico"
 !define MUI_UNICON "${ROOT}\assets\app-icon\openpt.ico"
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\openpt.exe"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchAsUser
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${ROOT}\LICENSE-MIT"
@@ -45,6 +46,10 @@ Function .onInit
     Abort
   ${EndIf}
   SetRegView 64
+FunctionEnd
+
+Function LaunchAsUser
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\openpt.exe"'
 FunctionEnd
 
 Function un.onInit
