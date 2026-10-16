@@ -9,6 +9,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("clip.warp_move", "Move Warp Marker", [], None, "{clip: id, index: n, to: position}", always, move_marker),
         cmd!("clip.warp_remove", "Remove Warp Marker", [], None, "{clip: id, index: n}", always, remove),
         cmd!(
+            "clip.warp_conform",
+            "Conform to Tempo",
+            [],
+            None,
+            "{reference: [clip], clips: [clip], bpm?: mean of the playing, from_tick?: 0, grid?: 240 ticks}",
+            always,
+            conform
+        ),
+        cmd!(
             query "clip.warp_events",
             "Warp Events",
             [],
@@ -74,6 +83,8 @@ pub(crate) fn render(s: &mut Session, id: &str, cid: ClipId, mut w: Warp, clip_l
             .collect();
         let done = if n == want {
             seg
+        } else if algo == "rhythmic" {
+            rhythmic(&seg, n, want, sr.samples(0.03) as usize, sr.as_f64() as f32)
         } else if algo == "varispeed" {
             openpt_dsp::offline::resample(&seg, u32::try_from(n).unwrap_or(u32::MAX), u32::try_from(want).unwrap_or(u32::MAX))
         } else {
@@ -99,6 +110,35 @@ pub(crate) fn render(s: &mut Session, id: &str, cid: ClipId, mut w: Warp, clip_l
         drop_if_unused(s, old);
     }
     Ok(())
+}
+
+fn rhythmic(seg: &[Vec<f32>], n: usize, want: usize, attack: usize, sr: f32) -> Vec<Vec<f32>> {
+    let a = attack.min(n).min(want);
+    let (rest_in, rest_out) = (n - a, want - a);
+    seg.iter()
+        .map(|ch| {
+            let mut out: Vec<f32> = ch[..a.min(ch.len())].to_vec();
+            if rest_out > 0 {
+                let tail: Vec<Vec<f32>> = vec![ch.get(a..n).map_or_else(Vec::new, <[f32]>::to_vec)];
+                let mut t = if rest_in < 2048 {
+                    let mut v = tail[0].clone();
+                    v.resize(rest_out, 0.0);
+                    let keep = rest_in.min(rest_out);
+                    let f = 64.min(keep);
+                    for (i, x) in v[keep - f..keep].iter_mut().enumerate() {
+                        *x *= 1.0 - i as f32 / f as f32;
+                    }
+                    v
+                } else {
+                    openpt_dsp::offline::time_stretch(&tail, rest_out as f64 / rest_in as f64, sr).swap_remove(0)
+                };
+                t.resize(rest_out, 0.0);
+                out.extend(t);
+            }
+            out.resize(want, 0.0);
+            out
+        })
+        .collect()
 }
 
 pub(crate) fn drop_if_unused(s: &mut Session, src: SourceId) {
@@ -287,6 +327,118 @@ pub(crate) fn partners(s: &Session, track: TrackId, at: Samples) -> Vec<ClipId> 
         }
     }
     out
+}
+
+fn merged_events(s: &Session, id: &str, clips: &[ClipId]) -> Result<Vec<Samples>> {
+    let sr = s.sample_rate;
+    let mut all = Vec::new();
+    for cid in clips {
+        let (_, c) = s.find_clip(*cid).ok_or_else(|| bad(id, "no such clip"))?;
+        let w = warp_of(id, c)?;
+        let audio = s.pool.get(w.source).cloned().ok_or_else(|| bad(id, "the clip's audio is not loaded"))?;
+        let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
+        let n = usize::try_from(w.length.max(0)).unwrap_or(0);
+        let seg: Vec<Vec<f32>> = audio.buffer.channels.iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
+        all.extend(openpt_dsp::offline::detect_transients(&seg, sr.as_f64() as f32, 0.5).into_iter().map(|h| c.start + w.to_clip(c.length, h as Samples)));
+    }
+    all.sort_unstable();
+    let gap = sr.samples(0.02);
+    let mut out: Vec<Samples> = Vec::new();
+    for e in all {
+        if out.last().is_none_or(|l| e - l >= gap) {
+            out.push(e);
+        }
+    }
+    Ok(out)
+}
+
+fn map_through(pairs: &[(Samples, Samples)], t: Samples) -> Samples {
+    let Some(&(f0, _)) = pairs.first() else { return t };
+    if t <= f0 {
+        return t + pairs[0].1 - f0;
+    }
+    for w in pairs.windows(2) {
+        let [(a, a2), (b, b2)] = [w[0], w[1]];
+        if t <= b {
+            return a2 + ((t - a) as f64 * (b2 - a2) as f64 / (b - a).max(1) as f64).round() as Samples;
+        }
+    }
+    let &(l, l2) = pairs.last().unwrap_or(&(0, 0));
+    t + l2 - l
+}
+
+fn conform(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.warp_conform";
+    let ids = |k: &str| -> Vec<ClipId> { p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(ClipId).collect()).unwrap_or_default() };
+    let (reference, clips) = (ids("reference"), ids("clips"));
+    if reference.is_empty() || clips.is_empty() {
+        return Err(bad(id, "`reference` and `clips` required"));
+    }
+    let grid = p.get("grid").and_then(Value::as_i64).unwrap_or(240).max(1);
+    let from_tick = p.get("from_tick").and_then(Value::as_i64).unwrap_or(0).max(0);
+    let s = e.session();
+    let sr = s.sample_rate;
+    let old = s.tempo.clone();
+    let end_tick = old.tempos().last().map_or(from_tick, |t| t.tick).max(from_tick + 960);
+    let bpm = p.get("bpm").and_then(Value::as_f64).unwrap_or_else(|| {
+        let secs = (old.tick_to_samples(end_tick, sr) - old.tick_to_samples(from_tick, sr)) as f64 / sr.as_f64();
+        (end_tick - from_tick) as f64 / 960.0 * 60.0 / secs.max(1e-6)
+    });
+    let events = merged_events(s, id, &reference)?;
+    let mut new = old.clone();
+    let later: Vec<i64> = new.tempos().iter().map(|t| t.tick).filter(|t| *t > from_tick).collect();
+    for t in later {
+        new.remove_tempo(t);
+    }
+    new.set_tempo(from_tick, bpm).map_err(|err| bad(id, err.to_string()))?;
+    let start = old.tick_to_samples(from_tick, sr);
+    let mut pairs: Vec<(Samples, Samples)> = vec![(start, start)];
+    let mut last_tick = from_tick;
+    for ev in events {
+        let tick = old.samples_to_ticks_f(ev, sr);
+        let q = ((tick / grid as f64).round() * grid as f64) as i64;
+        if ev <= start || q <= last_tick {
+            continue;
+        }
+        let to = new.tick_to_samples(q, sr);
+        if pairs.last().is_some_and(|l| ev <= l.0 || to <= l.1) {
+            continue;
+        }
+        pairs.push((ev, to));
+        last_tick = q;
+    }
+    let s = e.session_mut();
+    s.tempo = new;
+    let mut warped = 0;
+    for cid in clips {
+        let Some((t, c)) = s.find_clip(cid).map(|(t, c)| (t, c.clone())) else { continue };
+        let algo = algorithm(s, id, t)?;
+        let mut w = warp_of(id, &c)?;
+        let (ns, ne) = (map_through(&pairs, c.start), map_through(&pairs, c.end()));
+        let len = (ne - ns).max(1);
+        let mut markers: Vec<WarpMarker> = Vec::new();
+        for &(f, to) in pairs.iter().filter(|(f, _)| *f > c.start && *f < c.end()) {
+            let src = w.to_src(c.length, f - c.start);
+            let at = to - ns;
+            if at <= markers.last().map_or(0, |m| m.at) || at >= len || src <= markers.last().map_or(0, |m| m.src) || src >= w.length {
+                continue;
+            }
+            markers.push(WarpMarker { src, at });
+        }
+        if markers.is_empty() && len == c.length {
+            if let Some(cm) = s.find_clip_mut(cid) {
+                cm.start = ns;
+            }
+            continue;
+        }
+        w.markers = markers;
+        render(s, id, cid, w, len, &algo)?;
+        if let Some(cm) = s.find_clip_mut(cid) {
+            cm.start = ns;
+        }
+        warped += 1;
+    }
+    Ok(json!({"bpm": bpm, "points": pairs.len(), "clips": warped}))
 }
 
 pub(crate) fn stretch(s: &mut Session, id: &str, cid: ClipId, ratio: f64, algo: &str) -> Result<()> {

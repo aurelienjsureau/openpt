@@ -18,6 +18,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("track.ungroup", "Delete Group", [], None, "{group: id|name}", always, delete_group),
         cmd!("track.group_toggle", "Toggle Group Active", [], None, "{group: id|name}", always, toggle_group),
         cmd!("track.group_color", "Group Color", [], None, "{group: id|name, color: [r,g,b]}", always, group_color),
+        cmd!("track.group_modify", "Modify Group...", [], None, "{group: id|name, add?: [track], remove?: [track]}", always, group_modify),
         cmd!(
             "track.duplicate",
             "Duplicate...",
@@ -456,6 +457,23 @@ fn toggle_group(e: &mut Engine, p: &Value) -> Result<Value> {
         active = gr.active;
     }
     Ok(json!({"active": active}))
+}
+
+fn group_modify(e: &mut Engine, p: &Value) -> Result<Value> {
+    let g = find_group(e, p, "track.group_modify")?;
+    let list = |k: &str| -> Vec<openpt_model::TrackId> { p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(openpt_model::TrackId).collect()).unwrap_or_default() };
+    let (add, remove) = (list("add"), list("remove"));
+    let s = e.session_mut();
+    let order: Vec<openpt_model::TrackId> = s.tracks.iter().map(|t| t.id).collect();
+    let Some(gr) = s.groups.iter_mut().find(|x| x.id == g) else { return Err(bad("track.group_modify", "unknown `group`")) };
+    for t in add.into_iter().filter(|t| order.contains(t)) {
+        if !gr.members.contains(&t) {
+            gr.members.push(t);
+        }
+    }
+    gr.members.retain(|t| !remove.contains(t));
+    gr.members.sort_by_key(|t| order.iter().position(|o| o == t).unwrap_or(usize::MAX));
+    Ok(json!({"members": gr.members}))
 }
 
 fn group_color(e: &mut Engine, p: &Value) -> Result<Value> {
