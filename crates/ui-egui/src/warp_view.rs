@@ -71,6 +71,13 @@ pub fn draw(app: &mut SoundApp, ctx: &egui::Context, painter: &Painter, s: &Sess
 pub fn lane(app: &mut SoundApp, ui: &Ui, resp: &Response, track: &Track, tl: Rect) -> bool {
     let s = app.engine.session_arc();
     let Some(p) = resp.interact_pointer_pos().or_else(|| resp.hover_pos()) else { return false };
+    let y = ui.input(|i| i.pointer.press_origin()).filter(|_| resp.is_pointer_button_down_on() || resp.drag_stopped() || resp.clicked()).map_or(p.y, |o| o.y);
+    let upper = y < resp.rect.center().y;
+    if (s.edit.tool == openpt_model::Tool::Selector || (s.edit.tool == openpt_model::Tool::Smart && upper))
+        && ui.ctx().data(|d| d.get_temp::<(u64, usize)>(drag_id())).is_none()
+    {
+        return false;
+    }
     let at = sample_at(&s, tl, p.x).max(0);
     let clip = track.clips().iter().find(|c| c.is_audio() && at >= c.start && at < c.start + c.length).cloned();
     let gx = if resp.drag_started() { ui.input(|i| i.pointer.press_origin()).map_or(p.x, |o| o.x) } else { p.x };
