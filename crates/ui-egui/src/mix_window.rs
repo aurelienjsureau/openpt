@@ -14,6 +14,7 @@ pub fn strip_width(narrow: bool) -> f32 {
 }
 
 pub fn show(app: &mut SoundApp, ui: &mut Ui) {
+    let _prof = crate::prof::scope("mix");
     crate::docking::show(app, ui, crate::MainWindow::Mix);
 }
 
@@ -74,7 +75,8 @@ fn heat_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
 }
 
 fn strips(app: &mut SoundApp, ui: &mut Ui) {
-    let ids: Vec<TrackId> = app.engine.session().tracks.iter().filter(|x| !x.hidden && x.kind != TrackKind::Video).map(|x| x.id).collect();
+    let s0 = app.engine.session();
+    let ids: Vec<TrackId> = s0.tracks.iter().filter(|x| openpt_engine::edit::shown(s0, x) && x.kind != TrackKind::Video).map(|x| x.id).collect();
     let snap = app.player.as_ref().filter(|_| app.meters_live()).map(|p| p.meters());
     let old_bar = ui.spacing().scroll.floating_allocated_width;
     ui.spacing_mut().scroll.floating_allocated_width = ui.spacing().scroll.bar_width;

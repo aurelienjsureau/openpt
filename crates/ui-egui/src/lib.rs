@@ -19,6 +19,7 @@ pub mod palette;
 pub mod panels;
 pub mod peripherals;
 pub mod plugin_ui;
+pub mod prof;
 pub mod preferences;
 mod recent;
 pub mod recovery;
@@ -1376,6 +1377,7 @@ impl SoundApp {
     }
 
     pub fn logic(&mut self, ctx: &egui::Context) {
+        let _prof = crate::prof::scope("logic");
         self.engine.history_limit = self.ui.undo_levels.clamp(1, 10_000);
         openpt_midi::set_middle_c(match self.ui.note_names.as_str() {
             "c4" => openpt_midi::MiddleC::C4,
@@ -1489,6 +1491,8 @@ impl SoundApp {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        crate::prof::frame();
+        let _prof = crate::prof::scope("ui_total");
         let ctx = ui.ctx().clone();
         ui.set_style(ctx.global_style());
         if !self.fonts_ready {
@@ -1505,12 +1509,16 @@ impl SoundApp {
             menus::menu_bar(self, ui);
         }
         match if self.ui.mix_separate { MainWindow::Edit } else { self.ui.window } {
-            MainWindow::Edit => edit_window::show(self, ui),
+            MainWindow::Edit => {
+                let _p = crate::prof::scope("edit_window");
+                edit_window::show(self, ui)
+            }
             MainWindow::Mix => mix_window::show(self, ui),
         }
         if self.ui.mix_separate {
             mix_window::show_separate(self, &ctx);
         }
+        let _pw = crate::prof::scope("windows");
         panels::floating(self, &ctx);
         windows::show(self, &ctx);
         video_window::show(self, &ctx);
@@ -1546,6 +1554,7 @@ impl SoundApp {
             "dialog": self.dialogs.open_name(),
             "frame_ms": self.frame_ms,
             "cpu_ms": self.cpu_ms,
+            "profile": crate::prof::last(),
             "audio_device": self.player.as_ref().map(|p| p.device_name.clone()),
             "status": self.ui.status,
         })

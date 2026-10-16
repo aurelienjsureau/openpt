@@ -118,6 +118,7 @@ pub fn show(app: &mut SoundApp, ui: &mut Ui) {
 }
 
 fn universe(app: &mut SoundApp, ui: &mut Ui) {
+    let _prof = crate::prof::scope("universe");
     let r = ui.max_rect().shrink2(vec2(8.0, 4.0));
     let s = app.engine.session();
     let total = (s.content_end() + s.sample_rate.samples(10.0)).max(1) as f32;
@@ -555,6 +556,7 @@ fn nice_step(spp: f64, sr: f64, min_px: f64) -> i64 {
 }
 
 fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[String]) {
+    let _prof = crate::prof::scope("rulers");
     let t = Tokens::current();
     let s = app.engine.session_arc();
     ui.painter().rect_filled(area, 0.0, t.ruler_bg);
@@ -950,6 +952,7 @@ fn views_button(app: &mut SoundApp, ui: &mut Ui, rulers: Rect) {
 }
 
 fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect, tl: Rect, cols: &[Column]) {
+    let _prof = crate::prof::scope("track_row");
     let t = Tokens::current();
     let s = app.engine.session_arc();
     let Some(track) = s.track(id) else { return };
@@ -981,6 +984,9 @@ fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect, tl: Rect, 
         draw_clip(app, &painter, &s, track, clip, tl, lane, auto_view.is_some());
     }
     draw_live_take(app, &painter, &s, track, tl, lane);
+    if track.is_folder() {
+        folder_overview(&painter, &s, track, tl, lane, view);
+    }
     crate::video_track::draw_lane(app, &painter, &s, track, tl, lane);
     if crate::warp_view::is_warp_view(track) {
         crate::warp_view::draw(app, ui.ctx(), &painter, &s, track, tl, lane);
@@ -1009,6 +1015,41 @@ fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect, tl: Rect, 
     lane_interaction(app, ui, track, lane, tl);
     if track.view == "playlists" {
         playlist_lanes(app, ui, track, row, main_h, tl);
+    }
+}
+
+fn folder_overview(painter: &egui::Painter, s: &Session, folder: &Track, tl: Rect, lane: Rect, view: Range) {
+    let inside = |t: &Track| {
+        let mut cur = t.folder;
+        for _ in 0..64 {
+            match cur {
+                Some(f) if f == folder.id => return true,
+                Some(f) => cur = s.track(f).and_then(|x| x.folder),
+                None => return false,
+            }
+        }
+        false
+    };
+    let members: Vec<&Track> = s.tracks.iter().filter(|t| !t.is_folder() && inside(t)).collect();
+    if members.is_empty() {
+        return;
+    }
+    let body = lane.shrink2(vec2(0.0, 3.0));
+    let h = (body.height() / members.len() as f32).max(2.0);
+    for (i, m) in members.iter().enumerate() {
+        let y0 = body.min.y + i as f32 * h;
+        if y0 >= body.max.y {
+            break;
+        }
+        let col = rgb(m.color);
+        for c in m.clips().iter().filter(|c| c.range().overlaps(&view)) {
+            let x0 = x_of(s, tl, c.start).max(lane.min.x);
+            let x1 = x_of(s, tl, c.end()).min(lane.max.x);
+            if x1 > x0 {
+                let r = Rect::from_min_max(pos2(x0, y0 + 0.5), pos2(x1.max(x0 + 1.0), (y0 + h - 0.5).min(body.max.y)));
+                painter.rect_filled(r, 1.0, col.gamma_multiply(if c.muted { 0.3 } else { 0.85 }));
+            }
+        }
     }
 }
 
@@ -1049,6 +1090,7 @@ fn playlist_lanes(app: &mut SoundApp, ui: &mut Ui, track: &Track, row: Rect, mai
 }
 
 fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, selected: bool, head_bg: Color32) {
+    let _prof = crate::prof::scope("header");
     let t = Tokens::current();
     let id = track.id;
     let edge = Rect::from_min_max(pos2(head.min.x, head.max.y - 4.0), pos2(head.max.x, head.max.y + 2.0));
@@ -1447,6 +1489,7 @@ fn column_ui(ui: &mut Ui, col: &str, r: Rect) -> Ui {
 }
 
 fn header_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, col: &str, r: Rect, head_bg: Color32) {
+    let _prof = crate::prof::scope("header_cols");
     match col {
         "io" => io_column(app, ui, track, r),
         "comments" => {
@@ -1860,6 +1903,7 @@ fn beat_triggers(app: &SoundApp, painter: &egui::Painter, s: &Session, tl: Rect,
     }
 }
 fn grid_lines(painter: &egui::Painter, s: &Session, tl: Rect, lane: Rect) {
+    let _prof = crate::prof::scope("grid");
     let t = Tokens::current();
     let view = Range::new(sample_at(s, tl, tl.min.x).max(0), sample_at(s, tl, tl.max.x));
     let sr = s.sample_rate;
@@ -1984,6 +2028,7 @@ fn grid_veil(line: Color32, bg: Color32) -> Color32 {
 }
 
 fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track, clip: &Clip, tl: Rect, lane: Rect, dim: bool) {
+    let _prof = crate::prof::scope("clip");
     let x0 = x_of(s, tl, clip.start);
     let x1 = x_of(s, tl, clip.end()).max(x0 + 1.0);
     let r = Rect::from_min_max(pos2(x0, lane.min.y + 1.0), pos2(x1, lane.max.y - 1.0));
@@ -2500,6 +2545,7 @@ fn clip_gain_popup(ctx: &egui::Context, fader_bottom: Pos2, pos: f32) {
 }
 
 fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, tl: Rect) {
+    let _prof = crate::prof::scope("lane_ui");
     let id = ui.id().with(("lane", track.id.0));
     let resp = ui.interact(lane, id, Sense::click_and_drag());
     let menu_clip_id = id.with("menu_clip");
@@ -3233,6 +3279,7 @@ fn follow_update(
 }
 
 fn overlay(app: &mut SoundApp, ui: &mut Ui, tl: Rect, area: Rect) {
+    let _prof = crate::prof::scope("overlay");
     let t = Tokens::current();
     let mut scroll_to: Option<Samples> = None;
     let s = app.engine.session();

@@ -484,6 +484,19 @@ fn select(e: &mut Engine, p: &Value) -> Result<Value> {
                     t.push(m);
                 }
             }
+            let inside = |id: openpt_model::TrackId| {
+                let mut cur = s.track(id).and_then(|x| x.folder);
+                for _ in 0..64 {
+                    match cur {
+                        Some(f) if t.contains(&f) && s.track(f).is_some_and(|x| x.is_folder()) => return true,
+                        Some(f) => cur = s.track(f).and_then(|x| x.folder),
+                        None => return false,
+                    }
+                }
+                false
+            };
+            let members: Vec<openpt_model::TrackId> = s.tracks.iter().map(|x| x.id).filter(|id| !t.contains(id) && inside(*id)).collect();
+            t.extend(members);
             let order: Vec<openpt_model::TrackId> = s.tracks.iter().map(|x| x.id).collect();
             t.sort_by_key(|x| order.iter().position(|o| o == x).unwrap_or(usize::MAX));
         }

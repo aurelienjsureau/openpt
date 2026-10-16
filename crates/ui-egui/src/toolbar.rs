@@ -18,6 +18,7 @@ fn group(ui: &mut Ui, w: f32, h: f32, add: impl FnOnce(&mut Ui, Rect)) {
 }
 
 pub fn show(app: &mut SoundApp, ui: &mut Ui) {
+    let _prof = crate::prof::scope("toolbar");
     let t = Tokens::current();
     let full = ui.max_rect();
     ui.painter().rect_filled(full, 0.0, t.toolbar_bg);

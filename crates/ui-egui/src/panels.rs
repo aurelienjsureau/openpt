@@ -44,6 +44,7 @@ fn panel_header(ui: &mut Ui, title: &str) {
 const GUTTER_W: f32 = 10.0;
 
 pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
+    let _prof = crate::prof::scope("tracks_list");
     let t = Tokens::current();
     let full = ui.max_rect();
     let gutter = full.with_min_x(full.max.x - GUTTER_W);
@@ -59,15 +60,30 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
     if crate::widgets::icon_button(&mut ui.new_child(egui::UiBuilder::new().max_rect(plus)), plus.size(), "plus", false, &tip).clicked() {
         let _ = app.dialogs.open_for_command(&app.engine, "track.new");
     }
-    let tracks: Vec<(u64, String, bool, [u8; 3], bool)> = {
+    let tracks: Vec<(u64, String, bool, [u8; 3], bool, usize, Option<bool>)> = {
         let s = app.engine.session();
-        s.tracks.iter().map(|x| (x.id.0, x.name.clone(), !x.hidden, x.color, s.edit.selected_tracks.contains(&x.id))).collect()
+        let chain = |x: &openpt_model::Track| {
+            let (mut depth, mut open, mut cur) = (0, true, x.folder);
+            while let Some(f) = cur.and_then(|f| s.track(f)).filter(|_| depth < 64) {
+                depth += 1;
+                open &= f.folder_open;
+                cur = f.folder;
+            }
+            (depth, open)
+        };
+        s.tracks
+            .iter()
+            .filter_map(|x| {
+                let (depth, open) = chain(x);
+                open.then(|| (x.id.0, x.name.clone(), !x.hidden, x.color, s.edit.selected_tracks.contains(&x.id), depth, x.is_folder().then_some(x.folder_open)))
+            })
+            .collect()
     };
     let hidden = egui::scroll_area::ScrollBarVisibility::AlwaysHidden;
     let lists =
         egui::ScrollArea::vertical().id_salt("tracks_scroll").max_height(total * 0.62).auto_shrink([false, false]).scroll_bar_visibility(hidden);
     let out = lists.show(ui, |ui| {
-        for (id, name, shown, color, sel) in tracks {
+        for (id, name, shown, color, sel, depth, folder) in tracks {
             let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), Sense::click_and_drag());
             if sel {
                 ui.painter().rect_filled(r, 0.0, t.row_selected);
@@ -78,8 +94,19 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
             if dresp.clicked() {
                 let _ = app.run("track.hide", json!({"tracks": [id], "hidden": shown}));
             }
-            ui.painter().rect_filled(Rect::from_min_size(pos2(r.min.x + 20.0, r.min.y + 3.0), vec2(4.0, 11.0)), 0.0, rgb(color));
-            ui.painter().text(pos2(r.min.x + 30.0, r.center().y), Align2::LEFT_CENTER, &name, regular(11.5), if shown { t.text } else { t.text_dim });
+            let ind = depth as f32 * 12.0;
+            if let Some(open) = folder {
+                let tri = Rect::from_center_size(pos2(r.min.x + 22.0 + ind, r.center().y), vec2(10.0, 10.0));
+                let c = tri.center();
+                let pts = if open { vec![c + vec2(-4.0, -2.5), c + vec2(4.0, -2.5), c + vec2(0.0, 3.0)] } else { vec![c + vec2(-2.5, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.5, 4.0)] };
+                ui.painter().add(egui::Shape::convex_polygon(pts, t.text_dim, Stroke::NONE));
+                if ui.interact(tri.expand(2.0), ui.id().with(("folder-open", id)), Sense::click()).clicked() {
+                    let _ = app.run("track.folder_toggle", json!({"track": id}));
+                }
+            }
+            let ind = ind + if folder.is_some() { 12.0 } else { 0.0 };
+            ui.painter().rect_filled(Rect::from_min_size(pos2(r.min.x + 20.0 + ind, r.min.y + 3.0), vec2(4.0, 11.0)), 0.0, rgb(color));
+            ui.painter().text(pos2(r.min.x + 30.0 + ind, r.center().y), Align2::LEFT_CENTER, &name, regular(11.5), if shown { t.text } else { t.text_dim });
             if resp.clicked() {
                 crate::edit_window::click_track(app, openpt_model::TrackId(id), ui.input(|i| i.modifiers), |_, _| true);
                 app.edit_layout.reveal(openpt_model::TrackId(id));
@@ -199,12 +226,14 @@ fn gutter_scroll<R>(ui: &Ui, gutter: Rect, out: &egui::scroll_area::ScrollAreaOu
 }
 
 pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
+    let _prof = crate::prof::scope("clip_list");
     let t = Tokens::current();
     panel_header(ui, "CLIPS");
     let items: Vec<(u64, String, bool, [u8; 3], bool)> = {
         let s = app.engine.session();
+        let sel_clips: std::collections::HashSet<openpt_model::ClipId> = s.edit.selected_clips.iter().copied().collect();
         let mut v = Vec::new();
-        let renders: Vec<openpt_model::SourceId> = s
+        let renders: std::collections::HashSet<openpt_model::SourceId> = s
             .tracks
             .iter()
             .flat_map(|t| t.playlists.iter())
@@ -216,7 +245,7 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
         }
         for tr in &s.tracks {
             for c in tr.clips() {
-                v.push((c.id.0, c.name.clone(), false, c.color.unwrap_or(tr.color), s.edit.selected_clips.contains(&c.id)));
+                v.push((c.id.0, c.name.clone(), false, c.color.unwrap_or(tr.color), sel_clips.contains(&c.id)));
             }
         }
         v
@@ -233,8 +262,9 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
     let files: Vec<u64> = items.iter().filter(|i| i.2).map(|i| i.0).collect();
     let chosen: Vec<u64> = items.iter().filter(|i| i.2 && i.4).map(|i| i.0).collect();
     let anchor_id = egui::Id::new("clip_list_anchor");
-    egui::ScrollArea::vertical().id_salt("clips_scroll").auto_shrink([false, false]).show(ui, |ui| {
-        for (id, name, whole, color, selected) in items {
+    let row_h = 17.0;
+    egui::ScrollArea::vertical().id_salt("clips_scroll").auto_shrink([false, false]).show_rows(ui, row_h, items.len(), |ui, rows| {
+        for (id, name, whole, color, selected) in items[rows].iter().cloned() {
             let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), if whole { Sense::click_and_drag() } else { Sense::click() });
             resp.context_menu(|ui| {
                 if whole {

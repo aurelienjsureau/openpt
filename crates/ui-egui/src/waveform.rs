@@ -3,6 +3,7 @@ use openpt_model::{Clip, Session, SourceAudio};
 use openpt_time::Samples;
 
 pub fn draw(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, audio: &SourceAudio, channels: usize, body: Rect, wave: Color32) {
+    let _prof = crate::prof::scope("waveform");
     for (ch, band) in bands(body, channels.min(audio.peaks.len()).max(1)).enumerate() {
         channel(painter, s, tl, clip, audio, ch, band, wave);
     }
@@ -31,14 +32,18 @@ fn channel(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, audio: &Source
         return;
     }
     let (start, overlap) = (g.start() - origin, g.overlap());
-    let spans = if power {
-        peaks.rms_spans(samples, start, g.step, overlap, g.cols).into_iter().map(|r| r.map(|r| (-r, r))).collect()
-    } else {
-        peaks.spans(samples, start, g.step, overlap, g.cols)
-    };
+    let key = (samples.as_ptr() as usize, samples.len(), start.to_bits(), g.step.to_bits(), overlap.to_bits(), g.cols, power);
+    let spans = cached_spans(painter.ctx().cumulative_pass_nr(), key, || {
+        if power {
+            peaks.rms_spans(samples, start, g.step, overlap, g.cols).into_iter().map(|r| r.map(|r| (-r, r))).collect()
+        } else {
+            peaks.spans(samples, start, g.step, overlap, g.cols)
+        }
+    });
     let base = g.cy + g.half;
     let ys: Vec<Option<(f32, f32)>> = spans
-        .into_iter()
+        .iter()
+        .copied()
         .enumerate()
         .map(|(c, span)| {
             let (lo, hi) = span?;
@@ -187,4 +192,28 @@ impl Grid {
             }
         }
     }
+}
+
+type SpanKey = (usize, usize, u64, u64, u64, usize, bool);
+
+fn cached_spans(frame: u64, key: SpanKey, make: impl FnOnce() -> Vec<Option<(f32, f32)>>) -> std::rc::Rc<Vec<Option<(f32, f32)>>> {
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    type Map = HashMap<SpanKey, Rc<Vec<Option<(f32, f32)>>>>;
+    thread_local! {
+        static CACHE: std::cell::RefCell<(u64, Map, Map)> = std::cell::RefCell::new((0, HashMap::new(), HashMap::new()));
+    }
+    CACHE.with(|c| {
+        let (at, cur, prev) = &mut *c.borrow_mut();
+        if *at != frame {
+            *at = frame;
+            *prev = std::mem::take(cur);
+        }
+        if let Some(v) = cur.get(&key) {
+            return Rc::clone(v);
+        }
+        let v = prev.remove(&key).unwrap_or_else(|| Rc::new(make()));
+        cur.insert(key, Rc::clone(&v));
+        v
+    })
 }
