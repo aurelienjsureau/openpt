@@ -2879,7 +2879,7 @@ dependencies = [
 
 [[package]]
 name = "openpt"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "eframe",
  "egui",
@@ -2898,7 +2898,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-au-host"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "log",
  "openpt-dsp",
@@ -2908,7 +2908,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-audio-io"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "log",
  "mp3lame-encoder",
@@ -2921,7 +2921,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-automation"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "log",
  "openpt-engine",
@@ -2931,7 +2931,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-cli"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "openpt-audio-io",
  "openpt-automation",
@@ -2943,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-dsp"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "log",
  "proptest",
@@ -2954,7 +2954,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-engine"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "log",
  "openpt-au-host",
@@ -2976,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-midi"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "proptest",
  "serde",
@@ -2986,7 +2986,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-mix"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "log",
  "openpt-au-host",
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-model"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "openpt-audio-io",
  "openpt-midi",
@@ -3014,7 +3014,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-playback"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "cpal",
  "log",
@@ -3031,11 +3031,11 @@ dependencies = [
 
 [[package]]
 name = "openpt-ptx"
-version = "0.6.2"
+version = "0.6.3"
 
 [[package]]
 name = "openpt-time"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "proptest",
  "serde",
@@ -3045,7 +3045,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-ui-egui"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "egui",
  "egui_kittest",
@@ -3069,7 +3069,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-ui-kit"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "egui",
  "egui_extras",
@@ -3081,7 +3081,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-video"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "image",
  "proptest",
@@ -3092,7 +3092,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-vst3-host"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "libloading 0.8.9",
  "log",
@@ -3108,7 +3108,7 @@ dependencies = [
 
 [[package]]
 name = "openpt-web"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "eframe",
  "egui",
@@ -5712,7 +5712,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "serde_json",
 ]
