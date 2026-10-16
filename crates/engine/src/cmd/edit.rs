@@ -472,8 +472,8 @@ fn select(e: &mut Engine, p: &Value) -> Result<Value> {
     let sources =
         p.get("sources").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(openpt_model::SourceId).collect::<Vec<_>>());
     let list_changes = clips.is_some() || sources.is_some() || st.is_some();
-    let exact = bool_or(p, "exact", false);
     let s = e.session();
+    let exact = bool_or(p, "exact", false) || s.edit.flag("groups.suspended");
     let mut ed = s.edit.clone();
     if let Some(mut t) = tracks {
         if !exact {
@@ -494,7 +494,22 @@ fn select(e: &mut Engine, p: &Value) -> Result<Value> {
         (Some(a), None) => ed.selection = openpt_time::Range::point(a.max(0)),
         _ => {}
     }
-    if let Some(c) = clips {
+    if let Some(mut c) = clips {
+        if !exact {
+            let picked: Vec<(openpt_model::TrackId, openpt_time::Range)> = c.iter().filter_map(|id| s.find_clip(*id).map(|(t, cl)| (t, cl.range()))).collect();
+            for (t, r) in picked {
+                for g in s.groups.iter().filter(|g| g.active && g.edit && g.members.contains(&t)) {
+                    for m in g.members.iter().filter(|m| **m != t) {
+                        let Some(tr) = s.track(*m) else { continue };
+                        for cl in tr.clips().iter().filter(|cl| cl.start < r.end && cl.end() > r.start) {
+                            if !c.contains(&cl.id) {
+                                c.push(cl.id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let mut range: Option<openpt_time::Range> = None;
         let mut trs = Vec::new();
         for id in &c {
