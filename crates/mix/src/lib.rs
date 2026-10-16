@@ -1909,6 +1909,13 @@ pub enum AraRequest {
     EnableCycle(bool),
 }
 
+pub fn ara_select_clips(clips: &[openpt_model::ClipId]) {
+    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    openpt_vst3_host::ara_select_clips(&clips.iter().map(|c| c.0).collect::<Vec<_>>());
+    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    let _ = clips;
+}
+
 pub fn ara_bindings() -> Vec<(TrackId, String)> {
     #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
     {

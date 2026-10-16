@@ -83,8 +83,9 @@ struct Sequence {
 }
 
 impl Sequence {
-    fn notify_selection(&self) {
-        let regions: Vec<a::ARAPlaybackRegionRef> = self.regions.iter().map(|r| r.araref).collect();
+    fn notify_selection(&self, clips: &[u64]) {
+        let picked = self.regions.iter().any(|r| clips.contains(&r.clip));
+        let regions: Vec<a::ARAPlaybackRegionRef> = self.regions.iter().filter(|r| !picked || clips.contains(&r.clip)).map(|r| r.araref).collect();
         let sequences = [self.araref];
         let sel = a::ARAViewSelection {
             structSize: std::mem::size_of::<a::ARAViewSelection>(),
@@ -591,7 +592,7 @@ impl Doc {
             }
         }
         if let Some(seq) = self.tracks.get(&t.track) {
-            seq.notify_selection();
+            seq.notify_selection(&[]);
         }
     }
 }
@@ -657,7 +658,7 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
             }
         }
         seq.renderers.push(rd);
-        seq.notify_selection();
+        seq.notify_selection(&[]);
     }
     Some(Binding { factory: factory_key(factory), track: track.track, renderer: rd })
 }
@@ -754,4 +755,13 @@ pub fn finish_restores() {
 pub fn bindings() -> Vec<(u64, String)> {
     let docs = DOCS.lock().unwrap_or_else(PoisonError::into_inner);
     docs.iter().flat_map(|(_, d)| d.tracks.iter().filter(|(_, s)| !s.renderers.is_empty()).map(|(t, _)| (*t, d.name.clone()))).collect()
+}
+
+pub fn select_clips(clips: &[u64]) {
+    let docs = DOCS.lock().unwrap_or_else(PoisonError::into_inner);
+    for (_, d) in docs.iter() {
+        for seq in d.tracks.values().filter(|s| !s.renderers.is_empty()) {
+            seq.notify_selection(clips);
+        }
+    }
 }

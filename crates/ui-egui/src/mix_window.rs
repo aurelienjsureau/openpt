@@ -916,6 +916,7 @@ pub(crate) fn pending_editor(app: &mut SoundApp, ctx: &egui::Context) {
             app.ui.status = format!("Plugin editor: {e}");
             show_controls(app, id, slot);
         }
+        app.ara_selection = None;
     } else if left == 0 {
         show_controls(app, id, slot);
     } else {

@@ -399,6 +399,7 @@ pub struct SoundApp {
     pub video: video_track::VideoPool,
     pub bounce: Option<openpt_engine::io::Bounce>,
     pub(crate) rt_bounce: Option<bounce::RealtimeBounce>,
+    pub(crate) ara_selection: Option<Vec<openpt_model::ClipId>>,
     #[cfg(test)]
     _palette_lock: theme::TestPaletteGuard,
 }
@@ -484,6 +485,7 @@ impl SoundApp {
             video: video_track::VideoPool::default(),
             bounce: None,
             rt_bounce: None,
+            ara_selection: None,
             #[cfg(test)]
             _palette_lock: theme::lock_test_palette(),
         }
@@ -1415,6 +1417,11 @@ impl SoundApp {
         self.sync_editor_headers();
         bounce::step(self, ctx);
         bounce::step_realtime(self, ctx);
+        let clips = &self.engine.session().edit.selected_clips;
+        if self.ara_selection.as_ref() != Some(clips) {
+            openpt_mix::ara_select_clips(clips);
+            self.ara_selection = Some(clips.clone());
+        }
         if !ctx.input(|i| i.pointer.any_down()) {
             if matches!(self.gesture, Some(Gesture::Fader { .. })) {
                 self.gesture = None;

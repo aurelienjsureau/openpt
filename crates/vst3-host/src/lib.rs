@@ -19,7 +19,7 @@ mod ffi;
 #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
 pub use ara::{
     PlaybackRequest, bindings as ara_bindings, bound_tracks as ara_bound_tracks, finish_restores as ara_finish_restores,
-    set_pending_archives as ara_set_pending_archives, store_documents as ara_store_documents, sync_track as ara_sync_track,
+    select_clips as ara_select_clips, set_pending_archives as ara_set_pending_archives, store_documents as ara_store_documents, sync_track as ara_sync_track,
     take_playback_requests as ara_playback_requests,
 };
 #[cfg(not(target_arch = "wasm32"))]
