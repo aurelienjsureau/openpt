@@ -133,6 +133,11 @@ fn add(e: &mut Engine, p: &Value) -> Result<Value> {
     if let Some(cm) = e.session_mut().find_clip_mut(c.id) {
         cm.warp = Some(w);
     }
+    if !bool_or(p, "exact", false) {
+        for pc in partners(e.session(), t, c.start + at) {
+            let _ = add(e, &json!({"clip": pc.0, "at": c.start + at, "exact": true}));
+        }
+    }
     Ok(json!({"index": index}))
 }
 
@@ -149,9 +154,15 @@ fn move_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     if hi < lo {
         return Err(bad(id, "no room to move this marker"));
     }
+    let old = c.start + m.at;
     m.at = to.clamp(lo, hi);
     let at = m.at;
     render(e.session_mut(), id, c.id, w, c.length, &algo)?;
+    if !bool_or(p, "exact", false) {
+        for (pc, i) in partner_markers(e.session(), t, old) {
+            let _ = move_marker(e, &json!({"clip": pc.0, "index": i, "to": c.start + at, "exact": true}));
+        }
+    }
     Ok(json!({"at": c.start + at}))
 }
 
@@ -164,8 +175,14 @@ fn remove(e: &mut Engine, p: &Value) -> Result<Value> {
     if index >= w.markers.len() {
         return Err(bad(id, "no such warp marker"));
     }
+    let old = c.start + w.markers[index].at;
     w.markers.remove(index);
     render(e.session_mut(), id, c.id, w, c.length, &algo)?;
+    if !bool_or(p, "exact", false) {
+        for (pc, i) in partner_markers(e.session(), t, old) {
+            let _ = remove(e, &json!({"clip": pc.0, "index": i, "exact": true}));
+        }
+    }
     Ok(json!({}))
 }
 
@@ -185,7 +202,7 @@ fn events(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"events": events, "markers": markers}))
 }
 
-pub(crate) fn quantize(s: &mut Session, id: &str, cid: ClipId, grid_ticks: i64, strength: f32) -> Result<usize> {
+pub(crate) fn quantize(s: &mut Session, id: &str, cid: ClipId, grid_ticks: i64, strength: f32) -> Result<Vec<(Samples, Samples)>> {
     let (t, c) = s.find_clip(cid).map(|(t, c)| (t, c.clone())).ok_or_else(|| bad(id, "no such clip"))?;
     let algo = algorithm(s, id, t)?;
     let mut w = warp_of(id, &c)?;
@@ -196,6 +213,7 @@ pub(crate) fn quantize(s: &mut Session, id: &str, cid: ClipId, grid_ticks: i64, 
     let sr = s.sample_rate;
     let hits = openpt_dsp::offline::detect_transients(&seg, sr.as_f64() as f32, 0.5);
     let grid = grid_ticks.max(1) as f64;
+    let mut pairs = Vec::new();
     let mut markers: Vec<WarpMarker> = Vec::new();
     for h in hits {
         let src = h as Samples;
@@ -207,15 +225,68 @@ pub(crate) fn quantize(s: &mut Session, id: &str, cid: ClipId, grid_ticks: i64, 
         if src <= 0 || src >= w.length || to <= floor || to >= c.length || markers.last().is_some_and(|m| src <= m.src) {
             continue;
         }
+        pairs.push((c.start + at, c.start + to));
         markers.push(WarpMarker { src, at: to });
     }
-    let count = markers.len();
-    if count == 0 {
-        return Ok(0);
+    if markers.is_empty() {
+        return Ok(pairs);
     }
     w.markers = markers;
     render(s, id, cid, w, c.length, &algo)?;
-    Ok(count)
+    Ok(pairs)
+}
+
+pub(crate) fn apply_pairs(s: &mut Session, id: &str, cid: ClipId, pairs: &[(Samples, Samples)]) -> Result<usize> {
+    let (t, c) = s.find_clip(cid).map(|(t, c)| (t, c.clone())).ok_or_else(|| bad(id, "no such clip"))?;
+    let algo = algorithm(s, id, t)?;
+    let mut w = warp_of(id, &c)?;
+    let mut markers: Vec<WarpMarker> = Vec::new();
+    for &(from, to) in pairs {
+        let (f, at) = (from - c.start, to - c.start);
+        if f <= 0 || f >= c.length || at <= markers.last().map_or(0, |m| m.at) || at >= c.length {
+            continue;
+        }
+        let src = w.to_src(c.length, f);
+        if src <= markers.last().map_or(0, |m| m.src) || src >= w.length {
+            continue;
+        }
+        markers.push(WarpMarker { src, at });
+    }
+    let n = markers.len();
+    if n > 0 {
+        w.markers = markers;
+        render(s, id, cid, w, c.length, &algo)?;
+    }
+    Ok(n)
+}
+
+fn partner_markers(s: &Session, track: TrackId, at: Samples) -> Vec<(ClipId, usize)> {
+    partners(s, track, at)
+        .into_iter()
+        .filter_map(|pc| {
+            let (_, c) = s.find_clip(pc)?;
+            let i = c.warp.as_ref()?.markers.iter().position(|m| (c.start + m.at - at).abs() <= 2)?;
+            Some((pc, i))
+        })
+        .collect()
+}
+
+pub(crate) fn partners(s: &Session, track: TrackId, at: Samples) -> Vec<ClipId> {
+    if s.edit.flag("groups.suspended") {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for g in s.groups.iter().filter(|g| g.active && g.edit && g.members.contains(&track)) {
+        for m in g.members.iter().filter(|m| **m != track) {
+            let Some(tr) = s.track(*m).filter(|tr| tr.elastic.as_deref().is_some_and(|a| a != "none")) else { continue };
+            for c in tr.clips().iter().filter(|c| c.is_audio() && at > c.start && at < c.end()) {
+                if !out.contains(&c.id) {
+                    out.push(c.id);
+                }
+            }
+        }
+    }
+    out
 }
 
 pub(crate) fn stretch(s: &mut Session, id: &str, cid: ClipId, ratio: f64, algo: &str) -> Result<()> {
@@ -285,6 +356,33 @@ mod tests {
         let ev = e.execute("clip.warp_events", &json!({"clip": clip})).unwrap();
         let off: Vec<i64> = ev["events"].as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).filter(|x| *x > 6000).map(|x| (x + 6000) % 12_000 - 6000).collect();
         assert!(off.len() >= 5 && off.iter().all(|d| d.abs() < 300), "events off the 1/8 grid by {off:?}");
+    }
+
+    #[test]
+    fn grouped_elastic_tracks_warp_together() {
+        let (mut e, clip, t) = warped_clip();
+        let src = match e.session().find_clip(openpt_model::ClipId(clip)).unwrap().1.content {
+            ClipContent::Audio { source, .. } => source.0,
+            _ => unreachable!(),
+        };
+        let t2 = e.execute("track.new", &json!({"format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+        let clip2 = e.execute("clip.place_source", &json!({"source": src, "track": t2, "at": 0})).unwrap()["clip"].as_u64().unwrap();
+        for tr in [t as u64, t2] {
+            e.execute("track.elastic", &json!({"track": tr, "algorithm": "rhythmic"})).unwrap();
+        }
+        e.execute("track.group", &json!({"name": "Drums", "tracks": [t, t2]})).unwrap();
+        let markers = |e: &mut Engine, c: u64| -> Vec<i64> {
+            e.execute("clip.warp_events", &json!({"clip": c})).unwrap()["markers"].as_array().unwrap().iter().map(|m| m["at"].as_i64().unwrap()).collect()
+        };
+        e.execute("clip.warp_add", &json!({"clip": clip, "at": 30_000})).unwrap();
+        assert_eq!(markers(&mut e, clip2), vec![30_000], "the add reaches the other member");
+        e.execute("clip.warp_move", &json!({"clip": clip, "index": 0, "to": 33_000})).unwrap();
+        assert_eq!((markers(&mut e, clip), markers(&mut e, clip2)), (vec![33_000], vec![33_000]));
+        e.execute("clip.warp_remove", &json!({"clip": clip, "index": 0})).unwrap();
+        assert!(markers(&mut e, clip2).is_empty());
+        e.session_mut().find_clip_mut(openpt_model::ClipId(clip2)).unwrap().start = 0;
+        e.execute("event.quantize", &json!({"clips": [clip, clip2], "grid": "1/16"})).unwrap();
+        assert_eq!(markers(&mut e, clip), markers(&mut e, clip2), "both follow the same events");
     }
 
     #[test]

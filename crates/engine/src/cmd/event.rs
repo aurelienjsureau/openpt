@@ -290,8 +290,21 @@ fn quantize(e: &mut Engine, p: &Value) -> Result<Value> {
             .collect()
     };
     let mut events = 0;
+    let mut leads: Vec<(openpt_model::TrackId, openpt_time::Range, Vec<(i64, i64)>)> = Vec::new();
     for id in audio {
-        events += super::warp::quantize(e.session_mut(), "event.quantize", id, opts.grid_ticks, opts.strength)?;
+        let s = e.session();
+        let Some((t, r)) = s.find_clip(id).map(|(t, c)| (t, c.range())) else { continue };
+        let grouped = |a: openpt_model::TrackId| {
+            !s.edit.flag("groups.suspended") && s.groups.iter().any(|g| g.active && g.edit && g.members.contains(&a) && g.members.contains(&t))
+        };
+        let lead = leads.iter().find(|(lt, lr, _)| *lt != t && lr.start < r.end && lr.end > r.start && grouped(*lt)).map(|l| l.2.clone());
+        if let Some(pairs) = lead {
+            events += super::warp::apply_pairs(e.session_mut(), "event.quantize", id, &pairs)?;
+        } else {
+            let pairs = super::warp::quantize(e.session_mut(), "event.quantize", id, opts.grid_ticks, opts.strength)?;
+            events += pairs.len();
+            leads.push((t, r, pairs));
+        }
     }
     let mut out = midi_op(e, p, move |n| openpt_midi::ops::quantize(n, &opts))?;
     out["audio_events"] = json!(events);
