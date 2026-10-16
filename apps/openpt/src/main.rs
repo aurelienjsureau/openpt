@@ -210,6 +210,7 @@ fn main() -> eframe::Result {
             let code = a.next().map_or(2, |p| openpt_vst3_host::scan_child(std::path::Path::new(&p)));
             std::process::exit(code);
         }
+        openpt_vst3_host::disable_ime();
         register_vst3_scanner();
     }
     let logger = logging::install();

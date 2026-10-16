@@ -50,6 +50,10 @@ pub fn start_key_down() -> bool {
     keys::start_down()
 }
 
+pub fn disable_ime() {
+    keys::disable_ime();
+}
+
 #[allow(unsafe_code)]
 mod keys {
     #[cfg(windows)]
@@ -61,6 +65,12 @@ mod keys {
     pub fn start_down() -> bool {
         false
     }
+    #[cfg(windows)]
+    pub fn disable_ime() {
+        unsafe { windows_sys::Win32::UI::Input::Ime::ImmDisableIME(u32::MAX) };
+    }
+    #[cfg(not(windows))]
+    pub fn disable_ime() {}
 }
 
 pub const ID_PREFIX: &str = "vst3:";
