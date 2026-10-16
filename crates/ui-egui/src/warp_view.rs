@@ -87,6 +87,20 @@ pub fn lane(app: &mut SoundApp, ui: &Ui, resp: &Response, track: &Track, tl: Rec
     if near.is_some() && track.view == "warp" {
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
+    if resp.drag_started()
+        && near.is_none()
+        && track.view == "warp"
+        && let Some(c) = &clip
+    {
+        let ev = events(app, ui.ctx(), c);
+        if let Some(e) = ev.iter().copied().filter(|e| (x_of(&s, tl, *e) - gx).abs() <= GRAB).min_by_key(|e| (x_of(&s, tl, *e) - gx).abs() as i64)
+            && let Ok(v) = app.run("clip.warp_add", json!({"clip": c.id.0, "at": e}))
+            && let Some(i) = v["index"].as_u64()
+        {
+            ui.ctx().data_mut(|d| d.insert_temp(drag_id(), (c.id.0, i as usize)));
+            return true;
+        }
+    }
     let mut run = |id: &str, params: serde_json::Value| {
         if let Err(e) = app.run(id, params) {
             app.ui.status = e;
