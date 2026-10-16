@@ -1,4 +1,4 @@
-use openpt_dsp::{create, offline, plugins};
+use openpt_dsp::{all_plugins, create, offline};
 use proptest::prelude::*;
 
 proptest! {
@@ -11,7 +11,7 @@ proptest! {
         input in proptest::collection::vec(-4.0f32..4.0, 1..700),
         block in 1usize..300,
     ) {
-        let info = plugins()[which % plugins().len()];
+        let info = all_plugins()[which % all_plugins().len()];
         let mut p = create(info.id).unwrap();
         p.prepare(44_100.0, block, 2);
         for (param, v) in info.params.iter().zip(values.iter().cycle()) {

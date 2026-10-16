@@ -372,26 +372,14 @@ Event > Identify Beat...
 Event > Renumber Bars...
 Event > All MIDI Notes Off
 Event > Retrospective Record
-AudioSuite > EQ > Channel Strip
-AudioSuite > EQ > EQ3 1-Band
-AudioSuite > EQ > EQ3 7-Band
-AudioSuite > Dynamics > BF-76
-AudioSuite > Dynamics > Channel Strip
-AudioSuite > Dynamics > Dyn3 Compressor/Limiter
-AudioSuite > Dynamics > Dyn3 De-Esser
-AudioSuite > Dynamics > Dyn3 Expander/Gate
-AudioSuite > Dynamics > Maxim
+AudioSuite > EQ > OpenEQ
+AudioSuite > Dynamics > OpenComp
+AudioSuite > Dynamics > OpenMB
 AudioSuite > Pitch Shift > Pitch II
 AudioSuite > Pitch Shift > Pitch Shift Legacy
 AudioSuite > Pitch Shift > Time Shift
 AudioSuite > Pitch Shift > Vari-Fi
-AudioSuite > Reverb > D-Verb
-AudioSuite > Delay > Mod Delay III
-AudioSuite > Modulation > Sci-Fi
-AudioSuite > Harmonic > Eleven Lite
-AudioSuite > Harmonic > Lo-Fi
-AudioSuite > Harmonic > Recti-Fi
-AudioSuite > Harmonic > SansAmp PSA-1
+AudioSuite > Harmonic > OpenSat
 AudioSuite > Other > DC Offset Removal
 AudioSuite > Other > Duplicate
 AudioSuite > Other > Gain

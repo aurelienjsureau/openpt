@@ -2,6 +2,12 @@ pub mod drums;
 pub mod dynamics;
 pub mod eq;
 pub mod harmonic;
+pub mod linmb_table;
+pub mod open_comp;
+pub mod open_drt;
+pub mod open_eq;
+pub mod open_mb;
+pub mod open_sat;
 pub mod modulation;
 pub mod pitch;
 pub mod reverb;
@@ -13,6 +19,11 @@ pub mod utility;
 use crate::{Plugin, PluginInfo};
 
 pub(crate) static REGISTRY: &[&PluginInfo] = &[
+    &open_eq::OPEN_EQ_INFO,
+    &open_comp::OPEN_COMP_INFO,
+    &open_mb::OPEN_MB_INFO,
+    &open_sat::OPEN_SAT_INFO,
+    &open_drt::OPEN_DRT_INFO,
     &eq::EQ1_INFO,
     &eq::EQ7_INFO,
     &dynamics::COMP_INFO,
@@ -40,6 +51,27 @@ pub(crate) static REGISTRY: &[&PluginInfo] = &[
     &synth::SYNTH_INFO,
     &drums::DRUM_INFO,
     &sampler::SAMPLER_INFO,
+];
+
+pub(crate) const RETIRED: &[&str] = &[
+    "eq_1band",
+    "eq_7band",
+    "compressor",
+    "expander_gate",
+    "de_esser",
+    "maximizer",
+    "channel_strip",
+    "room_reverb",
+    "plate_reverb",
+    "mod_delay",
+    "chorus",
+    "flanger",
+    "phaser",
+    "saturator",
+    "lofi",
+    "rectifier",
+    "pitch_shifter",
+    "dither",
 ];
 
 pub(crate) fn instantiate(id: &str) -> Option<Box<dyn Plugin>> {
@@ -71,6 +103,11 @@ pub(crate) fn instantiate(id: &str) -> Option<Box<dyn Plugin>> {
         "subtractive_synth" => Box::new(synth::SubtractiveSynth::new()),
         "drum_synth" => Box::new(drums::DrumSynth::new()),
         "sampler" => Box::new(sampler::Sampler::new()),
+        "open_eq" => Box::new(open_eq::OpenEq::new()),
+        "open_mb" => Box::new(open_mb::OpenMb::new()),
+        "open_sat" => Box::new(open_sat::OpenSat::new()),
+        "open_comp" => Box::new(open_comp::OpenComp::new()),
+        "open_drt" => Box::new(open_drt::OpenDrt::new()),
         _ => return None,
     })
 }

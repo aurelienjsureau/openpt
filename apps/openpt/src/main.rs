@@ -24,7 +24,10 @@ fn set_title(ctx: &egui::Context, title: String) {
 }
 
 impl eframe::App for App {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some(cpu) = frame.info().cpu_usage {
+            self.0.cpu_ms = self.0.cpu_ms * 0.9 + cpu * 1000.0 * 0.1;
+        }
         if let Some(logger) = self.1 {
             logger.report_audio_thread();
         }

@@ -516,8 +516,12 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                 let mut changes: Vec<(String, f32)> = Vec::new();
                 let room = (ui.ctx().content_rect().max.y - ui.cursor().min.y - 24.0).max(120.0);
                 egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
-                    let gr = app.meters.get(&tid).map_or(0.0, |m| m.gr);
-                    crate::plugin_ui::panel(ui, info, &ins, gr, |id, v| changes.push((id.to_string(), v)));
+                    let scope = openpt_dsp::scope::find(tid.0, slot);
+                    let salt = egui::Id::new(("open-plugin", tid.0, slot));
+                    if !crate::open_ui::panel(ui, info, &ins.params, scope, salt, &mut |id, v| changes.push((id.to_string(), v))) {
+                        let gr = app.meters.get(&tid).map_or(0.0, |m| m.gr);
+                        crate::plugin_ui::panel(ui, info, &ins, gr, |id, v| changes.push((id.to_string(), v)));
+                    }
                 });
                 for (id, v) in changes {
                     let _ = app.engine.execute_merged(
@@ -807,6 +811,16 @@ fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot
     if ui.button("<factory default>").clicked() {
         recall_preset(app, tid, slot, info, None);
         ui.close();
+    }
+    for (name, values) in openpt_dsp::factory_presets(info.id) {
+        if ui.button(name).clicked() {
+            let mut params: serde_json::Map<String, serde_json::Value> = info.params.iter().map(|p| (p.id.to_string(), json!(p.default))).collect();
+            for (k, v) in values {
+                params.insert(k.to_string(), json!(v));
+            }
+            let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": name}));
+            ui.close();
+        }
     }
     if preset_dir(app, info.id).is_none() {
         ui.label("User presets need the desktop app.");

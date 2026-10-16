@@ -898,7 +898,11 @@ fn audiosuite_window(app: &mut SoundApp, ctx: &egui::Context) {
     egui::Window::new(format!("AudioSuite · {title}")).open(&mut open).default_width(360.0).show(ctx, |ui| {
         let key = egui::Id::new(("as_params", process.clone()));
         let mut params: std::collections::BTreeMap<String, f32> = ui.ctx().memory(|m| m.data.get_temp(key)).unwrap_or_default();
-        if let Some(info) = openpt_dsp::plugin_info(&process) {
+        if let Some(info) = openpt_dsp::plugin_info(&process).filter(|i| crate::open_ui::handles(i.id)) {
+            let mut edits: Vec<(String, f32)> = Vec::new();
+            crate::open_ui::panel(ui, info, &params, None, egui::Id::new(("as-open", info.id)), &mut |id, v| edits.push((id.to_string(), v)));
+            params.extend(edits);
+        } else if let Some(info) = openpt_dsp::plugin_info(&process) {
             for p in info.params {
                 let v = params.entry(p.id.to_string()).or_insert(p.default);
                 ui.add(egui::Slider::new(v, p.min..=p.max).text(p.name));

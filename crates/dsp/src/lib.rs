@@ -9,6 +9,7 @@ pub mod pan;
 mod params;
 pub mod pitch_detect;
 pub mod plugins;
+pub mod scope;
 pub mod spectrum;
 mod util;
 
@@ -172,6 +173,9 @@ pub trait Plugin: Send {
     }
     fn gain_reduction_db(&self) -> f32 {
         0.0
+    }
+    fn scope(&self) -> Option<Arc<scope::Scope>> {
+        None
     }
     fn set_multi_output(&mut self, _on: bool) {}
     fn extra_outputs(&self) -> usize {
@@ -338,6 +342,12 @@ impl SampleSource for SampleBuffer {
 }
 
 pub fn plugins() -> &'static [&'static PluginInfo] {
+    static OFFERED: std::sync::LazyLock<Vec<&'static PluginInfo>> =
+        std::sync::LazyLock::new(|| plugins::REGISTRY.iter().copied().filter(|p| !plugins::RETIRED.contains(&p.id)).collect());
+    &OFFERED
+}
+
+pub fn all_plugins() -> &'static [&'static PluginInfo] {
     plugins::REGISTRY
 }
 
@@ -407,5 +417,12 @@ mod trait_default_tests {
         let s = SampleBuffer { sample_rate: 44_100.0, channels: vec![vec![0.0; 10], vec![0.0; 7]] };
         assert_eq!(s.frames(), 7);
         assert_eq!(SampleBuffer::default().frames(), 0);
+    }
+}
+
+pub fn factory_presets(id: &str) -> Vec<(&'static str, Vec<(&'static str, f32)>)> {
+    match id {
+        "open_mb" => plugins::open_mb::presets(),
+        _ => Vec::new(),
     }
 }

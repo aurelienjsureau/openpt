@@ -413,6 +413,9 @@ impl SlotCtx<'_> {
             let state = if third { ins.state_bytes() } else { None };
             create_instance(&ins.instance_id(), state.as_deref(), self.sr, self.mb, ch).map(|n| n.plugin)
         }?;
+        if let Some(sc) = plugin.scope() {
+            openpt_dsp::scope::publish(t.0, idx, &sc);
+        }
         Some(PluginSlot { id: ins.instance_id(), ch, plugin, applied: Vec::new(), failed: false })
     }
 }

@@ -95,6 +95,10 @@ impl Plugin for MultiMono {
         self.inner.iter().map(|p| p.gain_reduction_db()).fold(0.0, f32::max)
     }
 
+    fn scope(&self) -> Option<std::sync::Arc<openpt_dsp::scope::Scope>> {
+        self.inner.first().and_then(|p| p.scope())
+    }
+
     fn set_transport(&mut self, transport: &Transport) {
         self.inner.iter_mut().for_each(|p| p.set_transport(transport));
     }

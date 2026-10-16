@@ -770,6 +770,7 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, oc
     if search.typing() {
         if let Some(plugin) = plugin_search(ui, &search, false) {
             run_pick(app, ui, "mix.insert", json!({"track": id.0, "slot": slot, "plugin": plugin}));
+            open_new_insert(app, id, slot);
         }
         return;
     }
@@ -811,9 +812,7 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, oc
     }
     if let Some((plugin, multi_mono)) = picked {
         run_pick(app, ui, "mix.insert", json!({"track": id.0, "slot": slot, "plugin": plugin, "multi_mono": multi_mono}));
-        if openpt_mix::is_third_party(&plugin) {
-            open_plugin(app, id, slot);
-        }
+        open_new_insert(app, id, slot);
     }
 }
 
@@ -827,6 +826,7 @@ pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     if search.typing() {
         if let Some(plugin) = plugin_search(ui, &search, true) {
             run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
+            open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
         }
         return;
     }
@@ -879,6 +879,16 @@ pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     }
     if let Some(plugin) = picked {
         run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
+            open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
+    }
+}
+
+fn open_new_insert(app: &mut SoundApp, id: TrackId, slot: usize) {
+    let placed = app.engine.session().track(id).is_some_and(|t| {
+        if slot == openpt_mix::INSTRUMENT_SLOT { t.instrument.is_some() } else { t.mixer.inserts.get(slot).is_some_and(Option::is_some) }
+    });
+    if placed && !app.ui.plugin_windows.contains(&(id, slot)) {
+        open_plugin(app, id, slot);
     }
 }
 

@@ -13,6 +13,7 @@ pub mod import_jobs;
 pub mod menus;
 pub mod midi_editor;
 pub mod mix_window;
+pub mod open_ui;
 pub mod ops_windows;
 pub mod palette;
 pub mod panels;
@@ -394,6 +395,7 @@ pub struct SoundApp {
     param_touch: std::collections::HashMap<(TrackId, String), (f32, std::time::Instant)>,
     last_write_at: Samples,
     pub frame_ms: f32,
+    pub cpu_ms: f32,
     last_frame: Option<f64>,
     last_meter_poll: f64,
     pub video: video_track::VideoPool,
@@ -480,6 +482,7 @@ impl SoundApp {
             param_touch: std::collections::HashMap::new(),
             last_write_at: i64::MIN,
             frame_ms: 0.0,
+            cpu_ms: 0.0,
             last_frame: None,
             last_meter_poll: f64::NEG_INFINITY,
             video: video_track::VideoPool::default(),
@@ -1542,6 +1545,7 @@ impl SoundApp {
             "position": self.position(),
             "dialog": self.dialogs.open_name(),
             "frame_ms": self.frame_ms,
+            "cpu_ms": self.cpu_ms,
             "audio_device": self.player.as_ref().map(|p| p.device_name.clone()),
             "status": self.ui.status,
         })

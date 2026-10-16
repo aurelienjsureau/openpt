@@ -338,7 +338,7 @@ fn draw_graph(p: &egui::Painter, g: Rect, kind: Graph, info: &PluginInfo, ins: &
 }
 
 pub fn takes_key(plugin: &str) -> bool {
-    openpt_mix::is_third_party(plugin) || matches!(plugin, "compressor" | "expander_gate" | "de_esser")
+    openpt_mix::is_third_party(plugin) || matches!(plugin, "compressor" | "expander_gate" | "de_esser" | "open_eq" | "open_mb" | "open_comp")
 }
 
 pub fn key_input(app: &mut SoundApp, ui: &mut Ui, tid: TrackId, slot: usize, ins: &Insert) {
@@ -509,6 +509,9 @@ fn draw_decay(p: &egui::Painter, g: Rect, info: &PluginInfo, ins: &Insert) {
 }
 
 pub fn panel_width(info: &PluginInfo) -> f32 {
+    if crate::open_ui::handles(info.id) {
+        return crate::open_ui::width(info.id);
+    }
     match info.id {
         "eq_7band" => 9.0 * 78.0 + 24.0,
         "compressor" | "expander_gate" => (12.0 + 200.0 + 50.0 + 3.0 * CELL.x + 12.0).max(5.0 * CELL.x + 24.0),

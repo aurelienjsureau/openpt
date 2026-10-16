@@ -3,7 +3,7 @@ use std::time::Instant;
 fn main() {
     let sr = 48_000.0;
     let secs = 10usize;
-    for info in openpt_dsp::plugins() {
+    for info in openpt_dsp::all_plugins() {
         let Some(mut p) = openpt_dsp::create(info.id) else { continue };
         p.prepare(sr, 512, 2);
         let mut io = vec![vec![0.0f32; 512]; 2];

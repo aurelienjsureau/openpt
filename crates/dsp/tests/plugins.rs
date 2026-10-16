@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::f32::consts::TAU;
 
-use openpt_dsp::{Plugin, Unit, create, db_to_gain, gain_to_db, is_generator, plugin_info, plugins};
+use openpt_dsp::{Plugin, Unit, create, db_to_gain, gain_to_db, is_generator, all_plugins, plugin_info};
 
 const SR: f32 = 48_000.0;
 const BLOCK: usize = 512;
@@ -51,7 +51,7 @@ fn is_source(id: &str) -> bool {
 #[test]
 fn registry_ids_unique_and_creatable() {
     let mut ids = HashSet::new();
-    for info in plugins() {
+    for info in all_plugins() {
         assert!(ids.insert(info.id), "duplicate id {}", info.id);
         assert!(info.short_name.chars().count() <= 8, "{} short name too long", info.id);
         let p = create(info.id).unwrap_or_else(|| panic!("cannot create {}", info.id));
@@ -59,12 +59,12 @@ fn registry_ids_unique_and_creatable() {
         assert_eq!(plugin_info(info.id).unwrap().id, info.id);
     }
     assert!(create("nope").is_none());
-    assert!(plugins().len() >= 25);
+    assert!(all_plugins().len() >= 25);
 }
 
 #[test]
 fn params_well_formed() {
-    for info in plugins() {
+    for info in all_plugins() {
         let mut ids = HashSet::new();
         for p in info.params {
             assert!(ids.insert(p.id), "{}: duplicate param {}", info.id, p.id);
@@ -89,7 +89,7 @@ fn params_well_formed() {
 
 #[test]
 fn silence_in_silence_out() {
-    for info in plugins() {
+    for info in all_plugins() {
         if is_source(info.id) {
             continue;
         }
@@ -103,7 +103,7 @@ fn silence_in_silence_out() {
 
 #[test]
 fn impulse_response_finite_and_bounded() {
-    for info in plugins() {
+    for info in all_plugins() {
         let mut p = prepared(info.id);
         let mut x = vec![vec![0.0; 96_000]; 2];
         x[0][100] = 1.0;
@@ -120,7 +120,7 @@ fn impulse_response_finite_and_bounded() {
 #[test]
 fn hostile_params_never_break_processing() {
     let hostile = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1e30, 1e30, 0.0, -0.0];
-    for info in plugins() {
+    for info in all_plugins() {
         for &v in &hostile {
             let mut p = prepared(info.id);
             for param in info.params {
@@ -141,7 +141,7 @@ fn hostile_params_never_break_processing() {
 
 #[test]
 fn odd_host_calls_do_not_panic() {
-    for info in plugins() {
+    for info in all_plugins() {
         let mut p = create(info.id).unwrap();
         for (sr, block, ch) in [(0.0, 0, 0), (f32::NAN, 16, 1), (-44_100.0, 64, 2), (1e9, 64, 8), (44_100.0, 32, 2)] {
             p.prepare(sr, block, ch);
