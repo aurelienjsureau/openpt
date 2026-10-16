@@ -128,6 +128,14 @@ pub fn lane(app: &mut SoundApp, ui: &Ui, resp: &Response, track: &Track, tl: Rec
         run("clip.warp_remove", json!({"clip": clip, "index": index}));
         return true;
     }
+    if resp.clicked()
+        && s.edit.tool == openpt_model::Tool::Pencil
+        && track.view == "warp"
+        && let Some(c) = &clip
+    {
+        run("clip.warp_add", json!({"clip": c.id.0, "at": at}));
+        return true;
+    }
     if resp.double_clicked()
         && let Some(c) = &clip
     {
