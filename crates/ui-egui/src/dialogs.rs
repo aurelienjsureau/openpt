@@ -31,6 +31,7 @@ pub enum Dialog {
         bit_depth: String,
         normalize: bool,
         dither: bool,
+        realtime: bool,
     },
     RenameTrack {
         id: TrackId,
@@ -172,6 +173,7 @@ impl Dialogs {
                     bit_depth: "24".into(),
                     normalize: false,
                     dither: false,
+                    realtime: false,
                 }
             }
             "file.import_audio" => Dialog::PathPrompt { cmd: id.into(), title: "Import Audio".into(), path: home, key: "path".into() },
@@ -353,6 +355,7 @@ pub(crate) fn default_dir() -> String {
 pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     audiosuite_window(app, ctx);
     crate::bounce::show(app, ctx);
+    crate::bounce::show_realtime(app, ctx);
     let Some(mut d) = app.dialogs.open.take() else { return };
     let mut keep = true;
     let mut action: Option<(String, Value)> = None;
@@ -445,7 +448,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         action = Some(("track.new".into(), json!({"rows": list})));
                     }
                 }
-                Dialog::Bounce { path, format, bit_depth, normalize, dither } => {
+                Dialog::Bounce { path, format, bit_depth, normalize, dither, realtime } => {
                     ui.horizontal(|ui| {
                         ui.label("File");
                         ui.add(egui::TextEdit::singleline(path).desired_width(420.0));
@@ -463,6 +466,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                             }
                         }
                     });
+                    let before = format.clone();
                     ui.horizontal(|ui| {
                         egui::ComboBox::from_label("Format").selected_text(format.to_uppercase()).show_ui(ui, |ui| {
                             for f in ["wav", "aiff", "flac", "mp3"] {
@@ -479,10 +483,15 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                             ui.label("320 kb/s");
                         }
                     });
+                    if *format != before {
+                        let ext = if format == "aiff" { "aif" } else { format.as_str() };
+                        *path = std::path::Path::new(path.as_str()).with_extension(ext).to_string_lossy().into_owned();
+                    }
                     crate::widgets::checkbox(ui, normalize, "Normalize to -0.1 dBFS");
                     if bit_depth != "32f" && format != "mp3" {
                         crate::widgets::checkbox(ui, dither, "Dither (TPDF)");
                     }
+                    crate::widgets::checkbox(ui, realtime, "Real-Time (plays through the audio interface, for outboard gear)");
                     ui.label(
                         egui::RichText::new("Bounces the edit selection, or the whole session when nothing is selected.")
                             .small()
@@ -490,10 +499,12 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     );
                     if buttons(ui, "Bounce", enter) {
                         let p = std::path::Path::new(path.as_str()).with_extension(if format == "aiff" { "aif" } else { format.as_str() });
-                        crate::bounce::start(
-                            app,
-                            &json!({"path": p.to_string_lossy(), "format": format, "bit_depth": bit_depth, "normalize": normalize, "dither": *dither && bit_depth != "32f"}),
-                        );
+                        let params = json!({"path": p.to_string_lossy(), "format": format, "bit_depth": bit_depth, "normalize": normalize, "dither": *dither && bit_depth != "32f"});
+                        if *realtime {
+                            crate::bounce::start_realtime(app, &params);
+                        } else {
+                            crate::bounce::start(app, &params);
+                        }
                         keep = false;
                     }
                 }

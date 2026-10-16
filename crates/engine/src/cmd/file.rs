@@ -307,6 +307,29 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
     }))
 }
 
+pub fn write_captured_bounce(p: &Value, mut channels: Vec<Vec<f32>>, sample_rate: u32) -> Result<Value> {
+    let path = str_param(p, "path").ok_or_else(|| bad("file.bounce_mix", "`path` required"))?.to_string();
+    let ext = std::path::Path::new(&path).extension().and_then(|x| x.to_str()).unwrap_or("wav").to_ascii_lowercase();
+    let format_name = str_param(p, "format").unwrap_or(ext.as_str());
+    let format = openpt_audio_io::encode_format_for(format_name)
+        .ok_or_else(|| bad("file.bounce_mix", format!("cannot write `{format_name}` files (supported: {})", openpt_audio_io::ENCODE_EXTENSIONS)))?;
+    let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
+        Some("16") => openpt_audio_io::BitDepth::Int16,
+        Some("32") | Some("32f") => openpt_audio_io::BitDepth::Float32,
+        _ => openpt_audio_io::BitDepth::Int24,
+    };
+    let opts = openpt_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", false), bwf: None };
+    let peak = channels.iter().flatten().fold(0.0f32, |m, x| m.max(x.abs()));
+    if bool_or(p, "normalize", false) && peak > 0.0 {
+        let g = openpt_dsp::db_to_gain(-0.1) / peak;
+        channels.iter_mut().flatten().for_each(|x| *x *= g);
+    }
+    let buf = openpt_audio_io::AudioBuffer { sample_rate, channels };
+    let bytes = openpt_audio_io::encode(&buf, &opts).map_err(|err| crate::EngineError::Io(format!("{path}: {err}")))?;
+    crate::io::write_file(&path, &bytes)?;
+    Ok(json!({"path": path, "bytes": bytes.len(), "peak_db": openpt_dsp::gain_to_db(peak)}))
+}
+
 pub fn bounce_job(e: &Engine, p: &Value) -> Result<crate::io::Bounce> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.bounce_mix", "`path` required"))?.to_string();
     let r = range_param(e, "file.bounce_mix", p)?;

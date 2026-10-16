@@ -36,7 +36,7 @@ mod vst3;
 pub(crate) mod warp;
 mod zoom_toggle;
 
-pub use file::bounce_job;
+pub use file::{bounce_job, write_captured_bounce};
 
 pub(crate) use edit::remember_selection;
 

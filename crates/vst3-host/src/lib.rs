@@ -140,6 +140,9 @@ mod api {
     pub fn add_search_dir(dir: &Path) -> usize {
         registry::add_search_dir(dir)
     }
+    pub fn set_search_dirs(dirs: Vec<PathBuf>) {
+        registry::set_search_dirs(dirs)
+    }
     pub fn scan_paths(dirs: &[PathBuf]) -> Vec<Vst3Descriptor> {
         registry::scan_paths(dirs)
     }
@@ -179,6 +182,7 @@ mod api {
     pub fn add_search_dir(_dir: &Path) -> usize {
         0
     }
+    pub fn set_search_dirs(_dirs: Vec<PathBuf>) {}
     pub fn scan_paths(_dirs: &[PathBuf]) -> Vec<Vst3Descriptor> {
         Vec::new()
     }
@@ -196,6 +200,10 @@ mod api {
 
 pub fn scan() -> Vec<Vst3Descriptor> {
     api::scan()
+}
+
+pub fn set_search_dirs(dirs: Vec<PathBuf>) {
+    api::set_search_dirs(dirs)
 }
 
 pub fn rescan() -> Vec<Vst3Descriptor> {

@@ -82,6 +82,7 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
             ui.painter().text(pos2(r.min.x + 30.0, r.center().y), Align2::LEFT_CENTER, &name, regular(11.5), if shown { t.text } else { t.text_dim });
             if resp.clicked() {
                 crate::edit_window::click_track(app, openpt_model::TrackId(id), ui.input(|i| i.modifiers), |_, _| true);
+                app.edit_layout.reveal(openpt_model::TrackId(id));
             }
             if resp.dragged() || resp.drag_stopped() {
                 drag_track(app, ui, r, id, resp.drag_stopped());

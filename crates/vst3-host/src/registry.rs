@@ -138,6 +138,21 @@ pub fn rescan() -> Vec<Vst3Descriptor> {
     ensure_scanned(&mut r).clone()
 }
 
+pub fn set_search_dirs(dirs: Vec<PathBuf>) {
+    let mut r = registry().lock().unwrap_or_else(PoisonError::into_inner);
+    if r.extra_dirs == dirs {
+        return;
+    }
+    r.extra_dirs = dirs;
+    let rescan = r.scanned.take().is_some();
+    drop(r);
+    if rescan && crate::isolated::scanner().is_some() {
+        let _ = std::thread::Builder::new().name("vst3-scan".into()).spawn(|| {
+            scan();
+        });
+    }
+}
+
 pub fn add_search_dir(dir: &Path) -> usize {
     let mut r = registry().lock().unwrap_or_else(PoisonError::into_inner);
     if !r.extra_dirs.iter().any(|d| d == dir) {

@@ -17,6 +17,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("track.group", "Group...", ["Track"], Some("Cmd+G"), "{name?, tracks?, edit?: true, mix?: true}", has_selection, group),
         cmd!("track.ungroup", "Delete Group", [], None, "{group: id|name}", always, delete_group),
         cmd!("track.group_toggle", "Toggle Group Active", [], None, "{group: id|name}", always, toggle_group),
+        cmd!("track.group_color", "Group Color", [], None, "{group: id|name, color: [r,g,b]}", always, group_color),
         cmd!(
             "track.duplicate",
             "Duplicate...",
@@ -455,6 +456,21 @@ fn toggle_group(e: &mut Engine, p: &Value) -> Result<Value> {
         active = gr.active;
     }
     Ok(json!({"active": active}))
+}
+
+fn group_color(e: &mut Engine, p: &Value) -> Result<Value> {
+    let g = find_group(e, p, "track.group_color")?;
+    let Some(c) = rgb_param(p) else { return Err(bad("track.group_color", "`color` must be [r,g,b]")) };
+    if let Some(gr) = e.session_mut().groups.iter_mut().find(|x| x.id == g) {
+        gr.color = c;
+    }
+    Ok(json!({"color": c}))
+}
+
+fn rgb_param(p: &Value) -> Option<[u8; 3]> {
+    let a = p.get("color")?.as_array().filter(|a| a.len() == 3)?;
+    let g = |i: usize| a.get(i).and_then(Value::as_u64).unwrap_or(0).min(255) as u8;
+    Some([g(0), g(1), g(2)])
 }
 
 fn duplicate(e: &mut Engine, p: &Value) -> Result<Value> {

@@ -387,6 +387,14 @@ fn edit_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     if let Some(c) = str_param(p, "comments") {
         m.comments = c.to_string();
     }
+    match p.get("color") {
+        Some(Value::Null) => m.color = None,
+        Some(Value::Array(a)) if a.len() == 3 => {
+            let g = |i: usize| a.get(i).and_then(Value::as_u64).unwrap_or(0).min(255) as u8;
+            m.color = Some([g(0), g(1), g(2)]);
+        }
+        _ => {}
+    }
     if let Some(a) = at {
         let len = m.end - m.start;
         m.start = a.max(0);

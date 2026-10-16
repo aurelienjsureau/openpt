@@ -33,10 +33,38 @@ pub type PluginStates = Vec<(TrackId, usize, Vec<u8>)>;
 
 pub type EditorEdit = (TrackId, usize, String, f32);
 
+#[derive(Default)]
+pub struct CaptureRing {
+    data: Mutex<Vec<Vec<f32>>>,
+}
+
+impl CaptureRing {
+    pub fn with_capacity(channels: usize, frames: usize) -> Arc<CaptureRing> {
+        Arc::new(CaptureRing { data: Mutex::new((0..channels).map(|_| Vec::with_capacity(frames)).collect()) })
+    }
+
+    pub fn frames(&self) -> usize {
+        self.data.lock().unwrap_or_else(PoisonError::into_inner).first().map_or(0, Vec::len)
+    }
+
+    fn push(&self, block: &[Vec<f32>], n: usize) {
+        let mut d = self.data.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        d.resize_with(block.len(), Vec::new);
+        for (out, ch) in d.iter_mut().zip(block) {
+            out.extend_from_slice(&ch[..n.min(ch.len())]);
+        }
+    }
+
+    pub fn take(&self) -> Vec<Vec<f32>> {
+        std::mem::take(&mut *self.data.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
 enum Cmd {
     Session(Arc<Session>, Vec<PreparedInstance>),
     OldSessions(SyncSender<Arc<Session>>),
     Input(Arc<record::InputRing>),
+    Capture(Option<Arc<CaptureRing>>),
     MidiInput(Arc<midi::MidiInputRing>),
     MidiRecord(Arc<midi::MidiRecordRing>),
     Recording(bool),
@@ -124,6 +152,7 @@ struct AudioState {
     read: f64,
     device_rate: f64,
     input: Option<Arc<record::InputRing>>,
+    capture: Option<Arc<CaptureRing>>,
     midi_input: Option<Arc<midi::MidiInputRing>>,
     midi_record: Option<Arc<midi::MidiRecordRing>>,
     recording: bool,
@@ -161,6 +190,7 @@ impl AudioState {
             read: 0.0,
             device_rate,
             input: None,
+            capture: None,
             midi_input: None,
             midi_record: None,
             recording: false,
@@ -174,6 +204,7 @@ impl AudioState {
         while let Ok(c) = self.rx.try_recv() {
             match c {
                 Cmd::Input(r) => self.input = Some(r),
+                Cmd::Capture(c) => self.capture = c,
                 Cmd::MidiInput(r) => self.midi_input = Some(r),
                 Cmd::MidiRecord(r) => self.midi_record = Some(r),
                 Cmd::Recording(r) => self.recording = r,
@@ -311,6 +342,11 @@ impl AudioState {
         self.mix.monitor_only = !self.playing;
         self.mix.recording = self.recording;
         self.mix.render(&self.session, self.pos, n, &mut self.pending);
+        if self.playing
+            && let Some(c) = &self.capture
+        {
+            c.push(&self.pending, n);
+        }
         if self.recording
             && self.playing
             && let Some(rec_ring) = &self.midi_record
@@ -788,6 +824,10 @@ impl Player {
         self.shared.position.store(from, Ordering::Relaxed);
         self.shared.playing.store(true, Ordering::Relaxed);
         let _ = self.tx.send(Cmd::Play { from, end, looped });
+    }
+
+    pub fn set_capture(&self, ring: Option<Arc<CaptureRing>>) {
+        let _ = self.tx.send(Cmd::Capture(ring));
     }
 
     pub fn set_input(&self, ring: Arc<record::InputRing>) {

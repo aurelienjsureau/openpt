@@ -72,6 +72,7 @@ struct Region {
 struct Renderer {
     playback: (a::ARAPlaybackRendererRef, *const a::ARAPlaybackRendererInterface),
     editor: (a::ARAEditorRendererRef, *const a::ARAEditorRendererInterface),
+    view: (a::ARAEditorViewRef, *const a::ARAEditorViewInterface),
 }
 
 struct Sequence {
@@ -79,6 +80,28 @@ struct Sequence {
     _name: CString,
     regions: Vec<Region>,
     renderers: Vec<Renderer>,
+}
+
+impl Sequence {
+    fn notify_selection(&self) {
+        let regions: Vec<a::ARAPlaybackRegionRef> = self.regions.iter().map(|r| r.araref).collect();
+        let sequences = [self.araref];
+        let sel = a::ARAViewSelection {
+            structSize: std::mem::size_of::<a::ARAViewSelection>(),
+            playbackRegionRefsCount: regions.len(),
+            playbackRegionRefs: regions.as_ptr(),
+            regionSequenceRefsCount: sequences.len(),
+            regionSequenceRefs: sequences.as_ptr(),
+            timeRange: std::ptr::null(),
+        };
+        for rd in &self.renderers {
+            unsafe {
+                if let Some(f) = rd.view.1.as_ref().and_then(|x| x.notifySelection) {
+                    f(rd.view.0, &sel);
+                }
+            }
+        }
+    }
 }
 
 struct Doc {
@@ -567,6 +590,9 @@ impl Doc {
                 f(ctrl);
             }
         }
+        if let Some(seq) = self.tracks.get(&t.track) {
+            seq.notify_selection();
+        }
     }
 }
 
@@ -614,7 +640,11 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
     };
     log::info!("ARA: bound to track {}", track.track);
     let rd =
-        Renderer { playback: (ext.playbackRendererRef, ext.playbackRendererInterface), editor: (ext.editorRendererRef, ext.editorRendererInterface) };
+        Renderer {
+        playback: (ext.playbackRendererRef, ext.playbackRendererInterface),
+        editor: (ext.editorRendererRef, ext.editorRendererInterface),
+        view: (ext.editorViewRef, ext.editorViewInterface),
+    };
     if let Some(seq) = doc.tracks.get_mut(&track.track) {
         for r in &seq.regions {
             unsafe {
@@ -627,6 +657,7 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
             }
         }
         seq.renderers.push(rd);
+        seq.notify_selection();
     }
     Some(Binding { factory: factory_key(factory), track: track.track, renderer: rd })
 }

@@ -127,27 +127,103 @@ fn automation(app: &mut SoundApp, ctx: &egui::Context) {
     app.ui.show_automation = open;
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum PaletteTarget {
+    Tracks,
+    Clips,
+    Groups,
+    Markers,
+}
+
 fn color_palette(app: &mut SoundApp, ctx: &egui::Context) {
     let mut open = app.ui.show_color_palette;
-    win(ctx, &mut open, "Color Palette", vec2(300.0, 140.0), |ui| {
-        ui.label("Apply to selected tracks (Shift: selected clips)");
-        ui.horizontal_wrapped(|ui| {
-            for (i, c) in openpt_model::TRACK_COLORS.iter().enumerate() {
-                let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
-                ui.painter().rect_filled(r, 3.0, rgb(*c));
-                if resp.clicked() {
-                    if ui.input(|x| x.modifiers.shift) {
-                        let _ = app.run("clip.color", json!({"color": c}));
-                    } else {
-                        let _ = app.run("track.color", json!({"color": i}));
+    let id = egui::Id::new("color_palette_state");
+    let (mut target, mut sat, mut val) = ctx.data(|d| d.get_temp::<(u8, f32, f32)>(id)).map_or((PaletteTarget::Tracks, 0.65, 0.85), |(t, s, v)| {
+        ([PaletteTarget::Tracks, PaletteTarget::Clips, PaletteTarget::Groups, PaletteTarget::Markers][usize::from(t).min(3)], s, v)
+    });
+    win(ctx, &mut open, "Color Palette", vec2(560.0, 230.0), |ui| {
+        ui.horizontal(|ui| {
+            for (t, label) in [(PaletteTarget::Tracks, "Tracks"), (PaletteTarget::Clips, "Clips"), (PaletteTarget::Groups, "Groups"), (PaletteTarget::Markers, "Markers")] {
+                ui.selectable_value(&mut target, t, label);
+            }
+            ui.separator();
+            if ui.button("None").on_hover_text("Back to the default color").clicked() {
+                apply_color(app, target, None);
+            }
+        });
+        let mut picked = None;
+        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+        for shade in 0..3 {
+            ui.horizontal(|ui| {
+                for h in 0..24 {
+                    let v = val * [1.0, 0.75, 0.5][shade];
+                    let c = egui::ecolor::Hsva::new(h as f32 / 24.0, sat, v, 1.0).to_srgb();
+                    let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                    ui.painter().rect_filled(r, 2.0, rgb([c[0], c[1], c[2]]));
+                    if resp.hovered() {
+                        ui.painter().rect_stroke(r, 2.0, egui::Stroke::new(1.5, egui::Color32::WHITE), egui::StrokeKind::Inside);
                     }
+                    if resp.clicked() {
+                        picked = Some([c[0], c[1], c[2]]);
+                    }
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            for c in openpt_model::TRACK_COLORS {
+                let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                ui.painter().rect_filled(r, 2.0, rgb(c));
+                if resp.clicked() {
+                    picked = Some(c);
                 }
             }
         });
-        ui.separator();
+        if let Some(c) = picked {
+            apply_color(app, target, Some(c));
+        }
+        ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+        ui.add(egui::Slider::new(&mut sat, 0.15..=1.0).show_value(false).text("Saturation"));
+        ui.add(egui::Slider::new(&mut val, 0.3..=1.0).show_value(false).text("Brightness"));
         ui.add(egui::Slider::new(&mut app.ui.track_tint, 0.0..=1.0).show_value(false).text("Track tint in the Edit window"));
     });
+    ctx.data_mut(|d| d.insert_temp(id, (target as u8, sat, val)));
     app.ui.show_color_palette = open;
+}
+
+fn apply_color(app: &mut SoundApp, target: PaletteTarget, c: Option<[u8; 3]>) {
+    let s = app.engine.session();
+    match target {
+        PaletteTarget::Tracks => {
+            let tracks: Vec<(u64, usize)> =
+                s.tracks.iter().enumerate().filter(|(_, t)| s.edit.selected_tracks.contains(&t.id)).map(|(i, t)| (t.id.0, i)).collect();
+            for (t, i) in tracks {
+                let color = c.unwrap_or(openpt_model::TRACK_COLORS[i % openpt_model::TRACK_COLORS.len()]);
+                let _ = app.run("track.color", json!({"tracks": [t], "color": color}));
+            }
+        }
+        PaletteTarget::Clips => {
+            let _ = app.run("clip.color", json!({"color": c}));
+        }
+        PaletteTarget::Groups => {
+            let Some(c) = c else { return };
+            let groups: Vec<u64> = s.groups.iter().filter(|g| g.members.iter().any(|m| s.edit.selected_tracks.contains(m))).map(|g| g.id.0).collect();
+            for g in groups {
+                let _ = app.run("track.group_color", json!({"group": g, "color": c}));
+            }
+        }
+        PaletteTarget::Markers => {
+            let sel = s.edit.selection;
+            let ids: Vec<u64> = s
+                .markers
+                .iter()
+                .filter(|m| if sel.end > sel.start { m.start >= sel.start && m.start < sel.end } else { m.start == sel.start })
+                .map(|m| m.id.0)
+                .collect();
+            for m in ids {
+                let _ = app.run("markers.edit", json!({"id": m, "color": c}));
+            }
+        }
+    }
 }
 
 fn disk_usage(app: &mut SoundApp, ctx: &egui::Context) {

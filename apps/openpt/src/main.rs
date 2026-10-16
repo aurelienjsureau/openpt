@@ -248,10 +248,13 @@ fn main() -> eframe::Result {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    openpt_vst3_host::scan_in_background();
-    let engine = if demo { openpt_engine::demo::demo_engine() } else { Engine::default() };
     let prefs = load_prefs().unwrap_or_default();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        openpt_vst3_host::set_search_dirs(prefs.vst3_folders.iter().map(std::path::PathBuf::from).collect());
+        openpt_vst3_host::scan_in_background();
+    }
+    let engine = if demo { openpt_engine::demo::demo_engine() } else { Engine::default() };
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenPT")

@@ -116,6 +116,7 @@ struct App {
     meter_clip_hold: String,
     meter_decay_db_s: f32,
     note_names: String,
+    vst3_folders: Vec<String>,
 }
 
 impl App {
@@ -136,6 +137,7 @@ impl App {
             meter_clip_hold: u.meter_clip_hold.clone(),
             meter_decay_db_s: u.meter_decay_db_s,
             note_names: u.note_names.clone(),
+            vst3_folders: u.vst3_folders.clone(),
         }
     }
 
@@ -154,6 +156,10 @@ impl App {
         u.meter_clip_hold = self.meter_clip_hold;
         u.meter_decay_db_s = self.meter_decay_db_s.clamp(1.0, 300.0);
         u.note_names = self.note_names;
+        if u.vst3_folders != self.vst3_folders {
+            u.vst3_folders = self.vst3_folders;
+            openpt_vst3_host::set_search_dirs(u.vst3_folders.iter().map(std::path::PathBuf::from).collect());
+        }
         app.extra.ui_scale = self.ui_scale.clamp(0.75, 1.5);
     }
 }
@@ -181,7 +187,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         let opts = Opts::read(app);
         Draft { page: Page::Display, search: String::new(), focused: false, app: App::read(app), opts_before: opts.clone(), opts }
     });
-    let (mut ok, mut cancel, mut open_window) = (false, ctx.input(|i| i.key_pressed(egui::Key::Escape)), None);
+    let (mut ok, mut cancel, mut open_window, mut add_folder) = (false, ctx.input(|i| i.key_pressed(egui::Key::Escape)), None, false);
     egui::Modal::new(egui::Id::new("preferences")).show(ctx, |ui| {
         let t = Tokens::current();
         ui.set_width(880.0);
@@ -201,7 +207,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
             ui.set_min_height(520.0);
             let pages: Vec<Page> = if q.is_empty() { vec![d.page] } else { PAGES.iter().map(|p| p.0).collect() };
             for page in pages {
-                page_body(ui, page, &q, &mut d.app, &mut d.opts, &mut open_window);
+                page_body(ui, page, &q, &mut d.app, &mut d.opts, &mut open_window, &mut add_folder);
             }
         });
         ui.add_space(6.0);
@@ -214,6 +220,13 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
             }
         });
     });
+    if add_folder
+        && let Some(pick) = &app.services.pick_folder
+        && let Some(dir) = pick(d.app.vst3_folders.last().map_or("", String::as_str))
+        && !d.app.vst3_folders.contains(&dir)
+    {
+        d.app.vst3_folders.push(dir);
+    }
     if let Some(cmd) = open_window {
         let _ = app.run(cmd, json!({"value": true}));
     }
@@ -313,7 +326,7 @@ fn radios(ui: &mut Ui, value: &mut String, options: &[(&str, &str)]) {
     }
 }
 
-fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_window: &mut Option<&'static str>) {
+fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_window: &mut Option<&'static str>, add_folder: &mut bool) {
     ui.columns(2, |cols| {
         let [left, right] = cols else { return };
         match page {
@@ -404,6 +417,24 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                 });
                 group(right, q, "Delay Compensation", &["Delay Compensation", "latency"], |ui| {
                     check(ui, q, &mut o.delay_compensation, "Delay Compensation");
+                });
+                group(right, q, "VST3 Plug-in Folders", &["VST3 Plug-in Folders", "plugin folder"], |ui| {
+                    ui.label(egui::RichText::new("Searched after the standard VST3 folders.").small().color(Tokens::current().text_dim));
+                    let mut remove = None;
+                    for (i, dir) in a.vst3_folders.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            if ui.small_button("✕").on_hover_text("Remove").clicked() {
+                                remove = Some(i);
+                            }
+                            ui.label(dir);
+                        });
+                    }
+                    if let Some(i) = remove {
+                        a.vst3_folders.remove(i);
+                    }
+                    if ui.button("Add Folder…").clicked() {
+                        *add_folder = true;
+                    }
                 });
             }
             Page::Metering => {

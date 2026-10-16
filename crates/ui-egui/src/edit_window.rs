@@ -71,6 +71,15 @@ impl EditLayout {
     pub fn scroll_by(&mut self, dy: f32, view_h: f32) {
         self.scroll_y = (self.scroll_y + dy).clamp(0.0, (self.content_h - view_h + 40.0).max(0.0));
     }
+
+    pub fn reveal(&mut self, track: TrackId) {
+        let [_, top, _, bottom] = self.timeline;
+        if let Some((_, r)) = self.rows.iter().find(|(id, _)| *id == track.0)
+            && (r[1] < top || r[3] > bottom)
+        {
+            self.scroll_by(r[1] - top, bottom - top);
+        }
+    }
 }
 
 pub fn rect([x0, y0, x1, y1]: [f32; 4]) -> Rect {
@@ -284,6 +293,10 @@ fn main_area_content(app: &mut SoundApp, ui: &mut Ui) {
         content_h += h + 1.0;
     }
     app.edit_layout.content_h = content_h;
+    let max_scroll = (content_h - tl.height() + 40.0).max(0.0);
+    if app.edit_layout.scroll_y > max_scroll {
+        app.edit_layout.scroll_y = max_scroll;
+    }
     let clip_rect = Rect::from_min_max(pos2(full.min.x, tl.min.y), pos2(full.max.x, tl.max.y));
     for (id, r) in app.edit_layout.rows.clone() {
         let row = rect(r);
@@ -2721,7 +2734,9 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
                 if let Some(c) = &hit {
                     let mut ids = if mods.shift { s.edit.selected_clips.iter().map(|x| x.0).collect::<Vec<_>>() } else { Vec::new() };
                     ids.push(c.id.0);
+                    let before = app.grab_anchor.filter(|(clip_sel, _)| *clip_sel == s.edit.selection).map_or(s.edit.selection, |(_, b)| b);
                     let _ = app.run("edit.select", json!({"clips": ids}));
+                    app.grab_anchor = Some((app.engine.session().edit.selection, before));
                     if s.edit.edit_mode == EditMode::Spot {
                         app.dialogs.open = Spot::clips(&s, vec![c.id], None, 0).map(Dialog::Spot);
                     }
@@ -3246,6 +3261,13 @@ fn overlay(app: &mut SoundApp, ui: &mut Ui, tl: Rect, area: Rect) {
             }
         }
         ui.ctx().request_repaint_after_secs(((1.0 - phase.fract()) / 2.0) as f32);
+    }
+    if !app.is_playing()
+        && let Some((clip_sel, before)) = app.grab_anchor
+        && clip_sel == sel
+    {
+        let x = x_of(s, tl, before.start);
+        painter.line_segment([pos2(x, area.min.y), pos2(x, area.max.y)], Stroke::new(1.5, t.playhead));
     }
     if app.is_playing() {
         let x = x_of(s, tl, app.position());

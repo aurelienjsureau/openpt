@@ -120,6 +120,7 @@ pub struct UiState {
     pub show_peripherals: bool,
     pub peripherals: Vec<peripherals::Controller>,
     pub plugin_native_editor: bool,
+    pub vst3_folders: Vec<String>,
     pub plugin_menu_org: String,
     pub dashboard_after_close: bool,
     pub autosave_enabled: bool,
@@ -197,6 +198,7 @@ impl Default for UiState {
             show_peripherals: false,
             peripherals: Vec::new(),
             plugin_native_editor: true,
+            vst3_folders: Vec::new(),
             plugin_menu_org: "manufacturer".into(),
             dashboard_after_close: false,
             autosave_enabled: true,
@@ -341,6 +343,7 @@ pub struct SoundApp {
     pub player: Option<Player>,
     pub(crate) surfaces: peripherals::Surfaces,
     play_sel: Option<Range>,
+    pub(crate) grab_anchor: Option<(Range, Range)>,
     pub recorder: Option<openpt_playback::record::Recorder>,
     pub midi_recorder: Option<openpt_playback::midi::MidiRecorder>,
     pub midi_manager: Option<openpt_playback::midi::MidiManager>,
@@ -395,6 +398,7 @@ pub struct SoundApp {
     last_meter_poll: f64,
     pub video: video_track::VideoPool,
     pub bounce: Option<openpt_engine::io::Bounce>,
+    pub(crate) rt_bounce: Option<bounce::RealtimeBounce>,
     #[cfg(test)]
     _palette_lock: theme::TestPaletteGuard,
 }
@@ -425,6 +429,7 @@ impl SoundApp {
             player,
             surfaces: Default::default(),
             play_sel: None,
+            grab_anchor: None,
             recorder: None,
             midi_recorder: None,
             record_start: 0,
@@ -478,6 +483,7 @@ impl SoundApp {
             last_meter_poll: f64::NEG_INFINITY,
             video: video_track::VideoPool::default(),
             bounce: None,
+            rt_bounce: None,
             #[cfg(test)]
             _palette_lock: theme::lock_test_palette(),
         }
@@ -545,7 +551,14 @@ impl SoundApp {
     }
 
     pub fn position(&self) -> Samples {
-        if self.engine.transport.playing { self.engine.transport.position } else { self.engine.session().edit.selection.start }
+        if self.engine.transport.playing {
+            return self.engine.transport.position;
+        }
+        let sel = self.engine.session().edit.selection;
+        match self.grab_anchor {
+            Some((clip_sel, before)) if clip_sel == sel => before.start,
+            _ => sel.start,
+        }
     }
 
     fn start_play(&mut self, from: Samples, end: Option<Samples>, looped: Option<Range>) {
@@ -1215,7 +1228,10 @@ impl SoundApp {
 
     pub fn play_from_selection(&mut self) {
         let s = self.engine.session();
-        let sel = s.edit.selection;
+        let sel = match self.grab_anchor {
+            Some((clip_sel, before)) if clip_sel == s.edit.selection => before,
+            _ => s.edit.selection,
+        };
         self.play_sel = Some(sel);
         let preroll = if s.edit.pre_post_roll { s.edit.pre_roll } else { 0 };
         let postroll = if s.edit.pre_post_roll { s.edit.post_roll } else { 0 };
@@ -1398,6 +1414,7 @@ impl SoundApp {
         }
         self.sync_editor_headers();
         bounce::step(self, ctx);
+        bounce::step_realtime(self, ctx);
         if !ctx.input(|i| i.pointer.any_down()) {
             if matches!(self.gesture, Some(Gesture::Fader { .. })) {
                 self.gesture = None;
