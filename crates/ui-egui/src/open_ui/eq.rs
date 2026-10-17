@@ -118,7 +118,7 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         pos2(fa.x(s.freq), y.clamp(g.min.y + 6.0, g.max.y - 6.0))
     };
     let hover = resp.hover_pos();
-    let hit = |cx: &Ctx, at: Pos2| (0..BANDS).filter(|&b| used(cx, b)).find(|&b| node(b).distance(at) < 10.0);
+    let hit = |cx: &Ctx, at: Pos2| (0..BANDS).filter(|&b| used(cx, b)).map(|b| (b, node(b).distance(at))).filter(|(_, d)| *d < 16.0).min_by(|a, c| a.1.total_cmp(&c.1)).map(|(b, _)| b);
     let hovered = hover.and_then(|at| hit(cx, at));
     for b in (0..BANDS).filter(|&b| used(cx, b)) {
         let c = node(b);
@@ -149,7 +149,7 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
     }
     let shift = ui.input(|i| i.modifiers.shift);
     if resp.drag_started()
-        && let Some(at) = resp.interact_pointer_pos()
+        && let Some(at) = ui.input(|i| i.pointer.press_origin()).or_else(|| resp.interact_pointer_pos())
     {
         if let Some(b) = hit(cx, at) {
             st.selected = Some(b);

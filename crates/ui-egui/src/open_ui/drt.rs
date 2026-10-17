@@ -77,7 +77,7 @@ fn scope_view(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect, now: f64) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     if resp.drag_started()
-        && let Some(at) = resp.interact_pointer_pos()
+        && let Some(at) = ui.input(|i| i.pointer.press_origin()).or_else(|| resp.interact_pointer_pos())
     {
         st.drag = ((at.y - fy).abs() < 8.0).then_some((at.y, floor));
     }

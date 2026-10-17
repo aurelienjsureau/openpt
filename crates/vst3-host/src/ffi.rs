@@ -1301,6 +1301,7 @@ impl Instance {
         ok(unsafe { c.getParamStringByValue(id, normalized.clamp(0.0, 1.0), &mut s) }).then(|| read_c16(&s)).filter(|t| !t.is_empty())
     }
 
+    #[cfg(test)]
     pub fn reports_gain_reduction(&self) -> bool {
         self.gain_reduction.is_some()
     }

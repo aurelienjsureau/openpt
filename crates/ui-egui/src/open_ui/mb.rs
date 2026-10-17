@@ -144,19 +144,19 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
     p.add(egui::Shape::line(pts, Stroke::new(2.0, Color32::from_rgb(236, 232, 255))));
     let hit_test = |cx: &Ctx, at: Pos2, sel: Option<usize>| -> Option<(usize, Hit)> {
         for b in (0..BANDS).filter(|&b| used(cx, b)) {
-            if pos2(fa.x(centre(cx, b)), dot_y(cx, b)).distance(at) < 11.0 {
+            if pos2(fa.x(centre(cx, b)), dot_y(cx, b)).distance(at) < 16.0 {
                 return Some((b, Hit::Dot));
             }
         }
         if let Some(b) = sel.filter(|&b| used(cx, b)) {
             let (xl, xh) = (fa.x(cx.get(k(b, dsp::K_LO))), fa.x(cx.get(k(b, dsp::K_HI))));
-            if at.x > xl && at.x < xh && (at.y - range_y(cx, b)).abs() < 5.0 {
+            if at.x > xl && at.x < xh && (at.y - range_y(cx, b)).abs() < 8.0 {
                 return Some((b, Hit::RangeLine));
             }
-            if cx.get(k(b, dsp::K_LO)) > dsp::OPEN_LO && (at.x - xl).abs() < 5.0 {
+            if cx.get(k(b, dsp::K_LO)) > dsp::OPEN_LO && (at.x - xl).abs() < 8.0 {
                 return Some((b, Hit::EdgeLo));
             }
-            if cx.get(k(b, dsp::K_HI)) < dsp::OPEN_HI && (at.x - xh).abs() < 5.0 {
+            if cx.get(k(b, dsp::K_HI)) < dsp::OPEN_HI && (at.x - xh).abs() < 8.0 {
                 return Some((b, Hit::EdgeHi));
             }
         }
@@ -170,7 +170,7 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         _ => {}
     }
     if resp.drag_started()
-        && let Some(at) = resp.interact_pointer_pos()
+        && let Some(at) = ui.input(|i| i.pointer.press_origin()).or_else(|| resp.interact_pointer_pos())
     {
         st.drag = None;
         if let Some((b, h)) = hit_test(cx, at, st.selected) {

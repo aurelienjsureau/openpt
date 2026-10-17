@@ -94,13 +94,13 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         let pos = dsp::POSITIONS[cx.idx(k(b, dsp::K_POS)).min(2)];
         p.text(pos2(c.x, c.y - 16.0), Align2::CENTER_CENTER, format!("{} · {pos}", dsp::TYPES[cx.idx(k(b, dsp::K_TYPE)).min(3)]), regular(9.5), col);
     }
-    let hit = |cx: &Ctx, at: Pos2| (0..BANDS).filter(|&b| used(cx, b)).find(|&b| node(cx, b).distance(at) < 10.0);
+    let hit = |cx: &Ctx, at: Pos2| (0..BANDS).filter(|&b| used(cx, b)).map(|b| (b, node(cx, b).distance(at))).filter(|(_, d)| *d < 16.0).min_by(|a, c| a.1.total_cmp(&c.1)).map(|(b, _)| b);
     let hovered = resp.hover_pos().and_then(|at| hit(cx, at));
     if hovered.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
     if resp.drag_started()
-        && let Some(at) = resp.interact_pointer_pos()
+        && let Some(at) = ui.input(|i| i.pointer.press_origin()).or_else(|| resp.interact_pointer_pos())
     {
         st.drag = hit(cx, at).map(|b| (b, at, cx.get(k(b, dsp::K_FREQ)), cx.get(k(b, dsp::K_DRIVE))));
         if let Some(d) = st.drag {
