@@ -309,6 +309,20 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs an installed plug-in (OPENPT_PROBE)"]
+    fn probe_installed_plugin() {
+        let Ok(path) = std::env::var("OPENPT_PROBE") else { return };
+        let b = Bundle::load(Path::new(&path)).unwrap();
+        for c in b.classes().into_iter().filter(|c| c.category == AUDIO_MODULE_CLASS) {
+            let inst = b.instantiate(&c.cid).unwrap();
+            println!("{} — PreSonus GR: {}", c.name, inst.reports_gain_reduction());
+            for p in inst.params() {
+                println!("{:>11} {:#06x} {:?} [{}]", p.id, p.flags, p.title, p.units);
+            }
+        }
+    }
+
+    #[test]
     fn unit_labels_map() {
         assert_eq!(unit_from_label("dB"), Unit::Db);
         assert_eq!(unit_from_label(" Hz "), Unit::Hz);

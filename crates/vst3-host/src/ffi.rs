@@ -1301,6 +1301,10 @@ impl Instance {
         ok(unsafe { c.getParamStringByValue(id, normalized.clamp(0.0, 1.0), &mut s) }).then(|| read_c16(&s)).filter(|t| !t.is_empty())
     }
 
+    pub fn reports_gain_reduction(&self) -> bool {
+        self.gain_reduction.is_some()
+    }
+
     pub fn gain_reduction_db(&self) -> f32 {
         self.gain_reduction.as_ref().map_or(0.0, GainReduction::db)
     }
