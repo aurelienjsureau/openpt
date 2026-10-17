@@ -784,11 +784,11 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
 }
 
 pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, occupied: bool) {
+    let instrument_track = app.engine.session().track(id).is_some_and(|t| t.kind == TrackKind::Instrument);
     let search = MenuSearch::show(ui, egui::Id::new(("plugin-search", id.0, slot)), "Search plugins…");
     if search.typing() {
-        if let Some(plugin) = plugin_search(ui, &search, false) {
-            run_pick(app, ui, "mix.insert", json!({"track": id.0, "slot": slot, "plugin": plugin}));
-            open_new_insert(app, id, slot);
+        if let Some(plugin) = plugin_search(ui, &search, if instrument_track { None } else { Some(false) }) {
+            pick_insert(app, ui, id, slot, &plugin, false);
         }
         return;
     }
@@ -828,10 +828,29 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, oc
     } else {
         picked = effect_menus(ui, &org).map(|p| (p, false));
     }
-    if let Some((plugin, multi_mono)) = picked {
-        run_pick(app, ui, "mix.insert", json!({"track": id.0, "slot": slot, "plugin": plugin, "multi_mono": multi_mono}));
-        open_new_insert(app, id, slot);
+    if instrument_track {
+        ui.menu_button("instrument", |ui| {
+            if let Some(p) = plugin_menus(ui, true, &org) {
+                picked = Some((p, false));
+            }
+        });
     }
+    if let Some((plugin, multi_mono)) = picked {
+        pick_insert(app, ui, id, slot, &plugin, multi_mono);
+    }
+}
+
+fn pick_insert(app: &mut SoundApp, ui: &Ui, id: TrackId, slot: usize, plugin: &str, multi_mono: bool) {
+    if plugin_info(plugin).is_some_and(|p| p.is_instrument) || openpt_vst3_host::cached().is_some_and(|l| l.iter().any(|d| d.id == plugin && d.is_instrument)) {
+        run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
+        if !app.ui.mix_views.iter().any(|v| v == "instruments") {
+            app.ui.mix_views.push("instruments".into());
+        }
+        open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
+        return;
+    }
+    run_pick(app, ui, "mix.insert", json!({"track": id.0, "slot": slot, "plugin": plugin, "multi_mono": multi_mono}));
+    open_new_insert(app, id, slot);
 }
 
 fn effect_menus(ui: &mut Ui, org: &str) -> Option<String> {
@@ -842,7 +861,7 @@ pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     let slot = openpt_mix::INSTRUMENT_SLOT;
     let search = MenuSearch::show(ui, egui::Id::new(("instrument-search", id.0)), "Search instruments…");
     if search.typing() {
-        if let Some(plugin) = plugin_search(ui, &search, true) {
+        if let Some(plugin) = plugin_search(ui, &search, Some(true)) {
             run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
             open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
         }
@@ -1077,19 +1096,20 @@ pub(crate) fn run_scoped(app: &mut SoundApp, ui: &Ui, cmd: &str, params: serde_j
     }
 }
 
-fn plugin_search(ui: &mut Ui, search: &MenuSearch, instruments: bool) -> Option<String> {
+fn plugin_search(ui: &mut Ui, search: &MenuSearch, instruments: Option<bool>) -> Option<String> {
+    let kind = |is: bool| instruments.is_none_or(|want| want == is);
     let mut built_in: Vec<&openpt_dsp::PluginInfo> =
-        openpt_dsp::plugins().iter().copied().filter(|p| p.is_instrument == instruments && search.matches(p.name)).collect();
+        openpt_dsp::plugins().iter().copied().filter(|p| kind(p.is_instrument) && search.matches(p.name)).collect();
     built_in.sort_by_cached_key(|p| p.name.to_lowercase());
     let vst3 = openpt_vst3_host::cached();
     let mut hosted: Vec<(MenuPlugin, &str)> = Vec::new();
-    for d in vst3.iter().flatten().filter(|d| d.is_instrument == instruments) {
+    for d in vst3.iter().flatten().filter(|d| kind(d.is_instrument)) {
         hosted.push((
             MenuPlugin { id: d.id.clone(), name: d.name.clone(), vendor: d.vendor.clone(), category: category_label(d.category).into() },
             "VST3",
         ));
     }
-    for d in openpt_au_host::scan().into_iter().filter(|d| d.is_instrument == instruments) {
+    for d in openpt_au_host::scan().into_iter().filter(|d| kind(d.is_instrument)) {
         hosted.push((MenuPlugin { category: category_label(d.category).into(), id: d.id, name: d.name, vendor: d.vendor }, "AU"));
     }
     hosted.retain(|(p, _)| search.matches(&p.name) || search.matches(&p.vendor));
