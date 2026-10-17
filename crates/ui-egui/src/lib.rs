@@ -1271,7 +1271,6 @@ impl SoundApp {
     }
 
     fn follow_selection_while_playing(&mut self, ctx: &egui::Context) {
-        let sel = self.engine.session().edit.selection;
         if !self.engine.transport.playing || self.engine.transport.recording {
             self.play_sel = None;
             return;
@@ -1279,19 +1278,25 @@ impl SoundApp {
         if ctx.input(|i| i.pointer.any_down()) {
             return;
         }
+        let from = self.effective_play_selection();
         match self.play_sel {
-            Some(was) if was != sel => self.play_from_selection(),
-            None => self.play_sel = Some(sel),
+            Some(was) if was != from => self.play_from_selection(),
+            None => self.play_sel = Some(from),
             _ => {}
         }
     }
 
+    fn effective_play_selection(&self) -> Range {
+        let sel = self.engine.session().edit.selection;
+        match self.grab_anchor {
+            Some((clip_sel, before)) if clip_sel == sel => before,
+            _ => sel,
+        }
+    }
+
     pub fn play_from_selection(&mut self) {
+        let sel = self.effective_play_selection();
         let s = self.engine.session();
-        let sel = match self.grab_anchor {
-            Some((clip_sel, before)) if clip_sel == s.edit.selection => before,
-            _ => s.edit.selection,
-        };
         self.play_sel = Some(sel);
         let preroll = if s.edit.pre_post_roll { s.edit.pre_roll } else { 0 };
         let postroll = if s.edit.pre_post_roll { s.edit.post_roll } else { 0 };
@@ -1961,6 +1966,22 @@ mod tests {
         app.engine.execute("edit.select", &json!({"start": 96_000, "end": 144_000})).unwrap();
         app.follow_selection_while_playing(&ctx);
         assert!(matches!(app.sim, Some((96_000, None, Some(r))) if r.start == 96_000 && r.end == 144_000), "{:?}", app.sim);
+    }
+
+    #[test]
+    fn grabbing_a_clip_while_playing_does_not_restart_playback() {
+        use serde_json::json;
+        let engine = openpt_engine::Engine::default();
+        let mut app = super::SoundApp::new(engine, None, super::Services::default());
+        let ctx = egui::Context::default();
+        app.engine.execute("edit.select", &json!({"start": 1000})).unwrap();
+        app.play_from_selection();
+        app.sim.as_mut().unwrap().0 = 30_000;
+        let before = app.engine.session().edit.selection;
+        app.engine.execute("edit.select", &json!({"start": 48_000, "end": 96_000})).unwrap();
+        app.grab_anchor = Some((app.engine.session().edit.selection, before));
+        app.follow_selection_while_playing(&ctx);
+        assert_eq!(app.sim.map(|s| s.0), Some(30_000), "playback went on where it was");
     }
 
     #[test]
