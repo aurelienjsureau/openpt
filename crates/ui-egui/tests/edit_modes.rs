@@ -54,6 +54,7 @@ fn tracks(mode: &str, tool: &str, lanes: &[&[(i64, i64)]]) -> (SoundApp, egui::C
         format: openpt_audio_io::FileFormat::Wav,
         time_reference: 0,
         unsaved: false,
+        field: None,
     });
     let mut ids = Vec::new();
     for (t, spans) in tracks.iter().zip(lanes) {

@@ -3,6 +3,8 @@
 mod aiff;
 mod buffer;
 mod caf;
+mod field;
+pub use field::{FieldInfo, field_info};
 mod flac;
 mod mp3;
 mod mp4;

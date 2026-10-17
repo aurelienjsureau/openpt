@@ -8,6 +8,16 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("clip.warp_add", "Add Warp Marker", [], None, "{clip: id, at: position}", always, add),
         cmd!("clip.warp_move", "Move Warp Marker", [], None, "{clip: id, index: n, to: position}", always, move_marker),
         cmd!("clip.warp_remove", "Remove Warp Marker", [], None, "{clip: id, index: n}", always, remove),
+        cmd!("clip.warp_at_events", "Add Warp Markers at Events", ["Clip"], None, "{clip: id, sensitivity?: 0..1}", always, warp_at_events),
+        cmd!(
+            "clip.elastic_pitch",
+            "Elastic Pitch",
+            ["Clip"],
+            None,
+            "{clips?, semitones?: -24..24, cents?: -100..100} — transposes Elastic Audio clips (Polyphonic, Monophonic, X-Form) without changing their length",
+            has_selection,
+            elastic_pitch
+        ),
         cmd!(
             "clip.warp_conform",
             "Conform Song to Tempo...",
@@ -54,7 +64,7 @@ pub(crate) fn warp_of(id: &str, c: &Clip) -> Result<Warp> {
         return Ok(w.clone());
     }
     let ClipContent::Audio { source, offset } = c.content else { return Err(bad(id, "only audio clips warp")) };
-    Ok(Warp { source, offset, length: c.length.max(1), markers: Vec::new(), rendered: None })
+    Ok(Warp { source, offset, length: c.length.max(1), markers: Vec::new(), rendered: None, pitch_cents: 0 })
 }
 
 pub(crate) fn render(s: &mut Session, id: &str, cid: ClipId, mut w: Warp, clip_len: Samples, algo: &str) -> Result<()> {
@@ -66,6 +76,7 @@ pub(crate) fn render(s: &mut Session, id: &str, cid: ClipId, mut w: Warp, clip_l
     let sr = s.sample_rate;
     let nch = audio.buffer.num_channels().max(1);
     let mut out: Vec<Vec<f32>> = vec![Vec::with_capacity(usize::try_from(clip_len).unwrap_or(0)); nch];
+    let set = openpt_dsp::offline::Stretch::for_algorithm(algo, &audio.buffer.channels, sr.as_f64() as f32);
     for pair in w.anchors(clip_len).windows(2) {
         let [a, b] = pair else { continue };
         let n = usize::try_from((b.src - a.src).max(1)).unwrap_or(1);
@@ -88,11 +99,17 @@ pub(crate) fn render(s: &mut Session, id: &str, cid: ClipId, mut w: Warp, clip_l
         } else if algo == "varispeed" {
             openpt_dsp::offline::resample(&seg, u32::try_from(n).unwrap_or(u32::MAX), u32::try_from(want).unwrap_or(u32::MAX))
         } else {
-            openpt_dsp::offline::time_stretch(&seg, want as f64 / n as f64, sr.as_f64() as f32)
+            openpt_dsp::offline::time_stretch_with(&seg, want as f64 / n as f64, sr.as_f64() as f32, set)
         };
         for (o, mut d) in out.iter_mut().zip(done) {
             d.resize(want, 0.0);
             o.extend(d);
+        }
+    }
+    if w.pitch_cents != 0 && !matches!(algo, "varispeed" | "rhythmic") {
+        out = openpt_dsp::offline::pitch_shift(&out, w.pitch_cents as f32 / 100.0, sr.as_f64() as f32);
+        for o in &mut out {
+            o.resize(usize::try_from(clip_len).unwrap_or(0), 0.0);
         }
     }
     let name = s.find_clip(cid).map(|(_, c)| c.name.clone()).unwrap_or_default();
@@ -240,6 +257,58 @@ fn events(e: &mut Engine, p: &Value) -> Result<Value> {
     let events: Vec<Samples> = hits.into_iter().map(|h| c.start + w.to_clip(c.length, h as Samples)).collect();
     let markers: Vec<Value> = w.markers.iter().enumerate().map(|(i, m)| json!({"index": i, "at": c.start + m.at, "src": m.src})).collect();
     Ok(json!({"events": events, "markers": markers}))
+}
+
+fn warp_at_events(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.warp_at_events";
+    let (t, c) = clip_param(e, id, p)?;
+    algorithm(e.session(), id, t)?;
+    let mut w = warp_of(id, &c)?;
+    let s = e.session();
+    let audio = s.pool.get(w.source).cloned().ok_or_else(|| bad(id, "the clip's audio is not loaded"))?;
+    let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
+    let n = usize::try_from(w.length.max(0)).unwrap_or(0);
+    let seg: Vec<Vec<f32>> = audio.buffer.channels.iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
+    let hits = openpt_dsp::offline::detect_transients(&seg, s.sample_rate.as_f64() as f32, f64_or(p, "sensitivity", 0.5) as f32);
+    let mut added = 0;
+    for h in hits {
+        let src = h as Samples;
+        if src <= 0 || src >= w.length || w.markers.iter().any(|m| (m.src - src).abs() < 2) {
+            continue;
+        }
+        let at = w.to_clip(c.length, src);
+        w.markers.push(WarpMarker { src, at });
+        added += 1;
+    }
+    w.markers.sort_by_key(|m| m.src);
+    if let Some(cm) = e.session_mut().find_clip_mut(c.id) {
+        cm.warp = Some(w);
+    }
+    Ok(json!({"added": added}))
+}
+
+fn elastic_pitch(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.elastic_pitch";
+    let semis = f64_or(p, "semitones", 0.0);
+    let cents = f64_or(p, "cents", 0.0);
+    if !semis.is_finite() || !cents.is_finite() {
+        return Err(bad(id, "semitones and cents must be numbers"));
+    }
+    let total = (semis.clamp(-24.0, 24.0) * 100.0 + cents.clamp(-100.0, 100.0)).round() as i32;
+    let ids = clip_ids_param(e, p);
+    let mut n = 0;
+    for cid in ids {
+        let Some((t, c)) = e.session().find_clip(cid).map(|(t, c)| (t, c.clone())) else { continue };
+        let algo = algorithm(e.session(), id, t)?;
+        if matches!(algo.as_str(), "varispeed" | "rhythmic") {
+            return Err(bad(id, "Elastic Pitch needs the Polyphonic, Monophonic or X-Form algorithm"));
+        }
+        let mut w = warp_of(id, &c)?;
+        w.pitch_cents = total;
+        render(e.session_mut(), id, cid, w, c.length, &algo)?;
+        n += 1;
+    }
+    Ok(json!({"clips": n, "cents": total}))
 }
 
 pub(crate) fn quantize(s: &mut Session, id: &str, cid: ClipId, grid_ticks: i64, strength: f32) -> Result<Vec<(Samples, Samples)>> {
@@ -495,6 +564,21 @@ mod tests {
         let t = e.execute("track.new", &json!({"format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
         let clip = e.execute("clip.place_source", &json!({"source": src.0, "track": t, "at": 0})).unwrap()["clip"].as_u64().unwrap();
         (e, clip, t as i64)
+    }
+
+    #[test]
+    fn elastic_pitch_keeps_the_length_and_needs_a_pitch_preserving_algorithm() {
+        let (mut e, clip, t) = warped_clip();
+        let len = e.session().find_clip(openpt_model::ClipId(clip)).unwrap().1.length;
+        e.execute("track.elastic", &json!({"track": t, "algorithm": "rhythmic"})).unwrap();
+        assert!(e.execute("clip.elastic_pitch", &json!({"clips": [clip], "semitones": 3})).is_err());
+        e.execute("track.elastic", &json!({"track": t, "algorithm": "monophonic"})).unwrap();
+        let r = e.execute("clip.elastic_pitch", &json!({"clips": [clip], "semitones": 3, "cents": -20})).unwrap();
+        assert_eq!(r["cents"], 280);
+        let c = e.session().find_clip(openpt_model::ClipId(clip)).unwrap().1.clone();
+        assert_eq!((c.length, c.warp.map(|w| w.pitch_cents)), (len, Some(280)));
+        let added = e.execute("clip.warp_at_events", &json!({"clip": clip})).unwrap()["added"].as_u64().unwrap();
+        assert!(added >= 5, "{added}");
     }
 
     #[test]

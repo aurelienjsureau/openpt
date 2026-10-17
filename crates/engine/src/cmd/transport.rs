@@ -16,7 +16,20 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "transport.record", "Record", [], Some("Cmd+Space"), "{}", always, |e, _| { e.transport_requests.push(TransportRequest::Record); Ok(json!({})) }),
         cmd!(noundo "transport.pause", "Pause", [], None, "{}", always, |e, _| { e.transport_requests.push(TransportRequest::Pause); Ok(json!({})) }),
         cmd!(noundo "transport.half_speed", "Half-Speed Playback", [], Some("Shift+Space"), "{}", always, |e, _| { e.transport_requests.push(TransportRequest::HalfSpeed); Ok(json!({})) }),
-        cmd!(noundo "transport.play_selection", "Play Edit", ["Edit", "Selection"], Some("Alt+["), "{}", always, |e, _| { e.transport_requests.push(TransportRequest::PlaySelection); Ok(json!({})) }),
+        cmd!(noundo "transport.half_speed_record", "Half-Speed Record", [], Some("Cmd+Shift+Space"), "{}", always, |e, _| { e.transport_requests.push(TransportRequest::HalfSpeedRecord); Ok(json!({})) }),
+        cmd!(noundo "transport.shuttle", "Shuttle", [], None, "{speed: -4..4 (0 stops, negative is backwards)}", always, |e, p| {
+            let speed = p.get("speed").and_then(Value::as_f64).ok_or_else(|| bad("transport.shuttle", "`speed` required"))?;
+            if !speed.is_finite() {
+                return Err(bad("transport.shuttle", "`speed` must be a number"));
+            }
+            let milli = (speed.clamp(-4.0, 4.0) * 1000.0).round() as i32;
+            e.transport_requests.push(TransportRequest::Shuttle(milli));
+            Ok(json!({"speed": f64::from(milli) / 1000.0}))
+        }),
+        cmd!(noundo "transport.play_selection", "Play Edit", ["Edit", "Selection"], Some("Alt+["), "{loop?: bool}", always, |e, p| {
+            e.transport_requests.push(if bool_or(p, "loop", false) { TransportRequest::LoopSelection } else { TransportRequest::PlaySelection });
+            Ok(json!({}))
+        }),
         cmd!(noundo "transport.rtz", "Return to Zero", [], Some("Home"), "{}", always, |e, _| locate(e, 0)),
         cmd!(noundo "transport.go_to_end", "Go to End", [], Some("End"), "{}", always, |e, _| { let end = e.session().content_end(); locate(e, end) }),
         cmd!(noundo "transport.rewind", "Rewind", [], None, "{seconds?: 1}", always, |e, p| {

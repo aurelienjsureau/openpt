@@ -214,6 +214,7 @@ fn main() -> eframe::Result {
             std::process::exit(code);
         }
         openpt_vst3_host::disable_ime();
+        openpt_ui_egui::winkeys::install();
         register_vst3_scanner();
     }
     let logger = logging::install();

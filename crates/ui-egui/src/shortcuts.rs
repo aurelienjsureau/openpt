@@ -1,3 +1,5 @@
+use crate::winkeys::HookEvent;
+pub use crate::winkeys::{Held, PadKey};
 use crate::{MainWindow, SoundApp};
 use egui::{Key, Modifiers};
 use serde_json::json;
@@ -48,8 +50,18 @@ fn search_chord(m: Modifiers, mac: bool) -> bool {
 
 pub fn handle(app: &mut SoundApp, ctx: &egui::Context) {
     ctx.options_mut(|o| o.zoom_with_keyboard = false);
-    if ctx.egui_wants_keyboard_input() || app.modal_open() {
+    let typing = ctx.egui_wants_keyboard_input() || app.modal_open();
+    crate::winkeys::set_context(ctx);
+    crate::winkeys::set_text_focus(typing);
+    let hooked = crate::winkeys::drain();
+    if typing {
         return;
+    }
+    for e in hooked {
+        match e {
+            HookEvent::Start { key, held } => start_chord(app, key, held),
+            HookEvent::Pad { key, down, held } => pad(app, key, down, held),
+        }
     }
     let events: Vec<(Key, Modifiers)> = ctx.input(|i| {
         i.events
@@ -62,21 +74,164 @@ pub fn handle(app: &mut SoundApp, ctx: &egui::Context) {
     });
     let mac = ctx.os() == egui::os::OperatingSystem::Mac;
     for (key, mods) in events {
-        if fixed(app, key, mods, mac) {
-            continue;
-        }
-        if let Some(id) = command_for(key, mods, mac) {
-            if crate::menus::invoke_shortcut_dialog(app, id) {
-                continue;
-            }
-            let _ = app.run(id, json!({}));
-        } else if let Some(c) =
-            crate::menus::UI_COMMANDS.iter().find(|c| c.3.and_then(parse).is_some_and(|(m, k)| k == key && mods_match(m, mods, mac)))
-        {
-            let _ = app.run(c.0, json!({}));
-        }
+        dispatch(app, key, mods, mac);
     }
     ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+}
+
+fn dispatch(app: &mut SoundApp, key: Key, mods: Modifiers, mac: bool) {
+    if fixed(app, key, mods, mac) {
+        return;
+    }
+    if let Some(id) = command_for(key, mods, mac) {
+        if crate::menus::invoke_shortcut_dialog(app, id) {
+            return;
+        }
+        let _ = app.run(id, json!({}));
+    } else if let Some(c) = crate::menus::UI_COMMANDS.iter().find(|c| c.3.and_then(parse).is_some_and(|(m, k)| k == key && mods_match(m, mods, mac))) {
+        let _ = app.run(c.0, json!({}));
+    }
+}
+
+pub fn start_chord(app: &mut SoundApp, key: Key, held: Held) {
+    if key == Key::S && held.shift && !held.ctrl && !held.alt {
+        let _ = app.run("window.search", json!({}));
+        return;
+    }
+    let mods = Modifiers { ctrl: true, command: held.ctrl, shift: held.shift, alt: held.alt, mac_cmd: false };
+    dispatch(app, key, mods, true);
+}
+
+#[derive(Debug, Default)]
+pub struct Pad {
+    entry: Option<String>,
+    held: Vec<u8>,
+}
+
+fn shuttle_speed(held: &[u8]) -> Option<f32> {
+    let has = |d| held.contains(&d);
+    let way = |f: f32| if has(6) { Some(f) } else if has(4) { Some(-f) } else { None };
+    if has(5) {
+        return way(0.5);
+    }
+    if has(8) {
+        return if has(9) { Some(2.0) } else if has(7) { Some(-2.0) } else { None };
+    }
+    if has(2) {
+        return if has(3) { Some(1.0 / 16.0) } else if has(1) { Some(-1.0 / 16.0) } else { None };
+    }
+    held.last().and_then(|d| match d {
+        6 => Some(1.0),
+        4 => Some(-1.0),
+        9 => Some(4.0),
+        7 => Some(-4.0),
+        3 => Some(0.25),
+        1 => Some(-0.25),
+        _ => None,
+    })
+}
+
+pub fn pad(app: &mut SoundApp, key: PadKey, down: bool, held: Held) {
+    let mode = app.ui.numeric_keypad.clone();
+    if !down {
+        if let PadKey::Digit(d) = key
+            && app.pad.held.contains(&d)
+        {
+            app.pad.held.retain(|h| *h != d);
+            let _ = app.run("transport.shuttle", json!({"speed": shuttle_speed(&app.pad.held).unwrap_or(0.0)}));
+        }
+        return;
+    }
+    if let PadKey::Digit(d) = key {
+        if held.alt && !held.ctrl && !held.shift {
+            let id = match d {
+                1 => "window.time_ops",
+                2 => "window.tempo_ops",
+                3 => "window.midi_ops",
+                5 => "clip.quantize_to_grid",
+                _ => return,
+            };
+            let _ = app.run(id, json!({}));
+            return;
+        }
+        if held.ctrl && held.shift && !held.alt {
+            if let Some(v) = app.ui.clip_list_show.get_mut(usize::from(d).wrapping_sub(1)) {
+                *v = !*v;
+            }
+            return;
+        }
+    }
+    if held.ctrl || held.alt || held.shift {
+        let k = match key {
+            PadKey::Plus => Key::Plus,
+            PadKey::Minus => Key::Minus,
+            PadKey::Enter => Key::Enter,
+            _ => return,
+        };
+        dispatch(app, k, Modifiers { ctrl: held.ctrl, command: held.ctrl, shift: held.shift, alt: held.alt, mac_cmd: false }, false);
+        return;
+    }
+    let entry = app.pad.entry.take();
+    match (key, entry) {
+        (PadKey::Dot, None) => app.pad.entry = Some(String::new()),
+        (PadKey::Dot, Some(n)) if !n.is_empty() => {
+            let _ = app.run("markers.recall", json!({"number": n.parse::<u32>().unwrap_or(0)}));
+        }
+        (PadKey::Dot, Some(_)) => {}
+        (PadKey::Digit(d), Some(mut n)) => {
+            if n.len() < 3 {
+                n.push(char::from(b'0' + d));
+            }
+            app.pad.entry = Some(n);
+        }
+        (PadKey::Star | PadKey::Slash, Some(n)) if !n.is_empty() => {
+            let i = n.parse::<usize>().unwrap_or(0);
+            if key == PadKey::Star {
+                crate::windows::recall_configuration(app, i);
+            } else {
+                crate::windows::store_configuration(app, i);
+            }
+        }
+        (PadKey::Plus | PadKey::Minus, Some(_)) if mode == "shuttle" => {
+            let _ = app.run(if key == PadKey::Plus { "markers.next" } else { "markers.previous" }, json!({}));
+        }
+        (PadKey::Plus | PadKey::Minus, _) => {
+            let _ = app.run("edit.nudge", json!({"direction": if key == PadKey::Plus { 1 } else { -1 }}));
+        }
+        (PadKey::Enter, _) => {
+            let _ = app.run("markers.add", json!({}));
+        }
+        (PadKey::Digit(d), None) => match mode.as_str() {
+            "classic" => app.pad.entry = Some(char::from(b'0' + d).to_string()),
+            "shuttle" if d == 0 => {
+                let _ = app.run("transport.play_selection", json!({"loop": true}));
+            }
+            "shuttle" => {
+                if !app.pad.held.contains(&d) {
+                    app.pad.held.push(d);
+                }
+                if let Some(speed) = shuttle_speed(&app.pad.held) {
+                    let _ = app.run("transport.shuttle", json!({"speed": speed}));
+                }
+            }
+            _ => {
+                let id = match d {
+                    0 => "transport.toggle",
+                    1 => "transport.rewind",
+                    2 => "transport.fast_forward",
+                    3 => "transport.record",
+                    4 => "options.loop_playback",
+                    5 => "options.loop_record",
+                    6 => "options.quickpunch",
+                    7 => "options.click",
+                    8 => "options.countoff",
+                    _ => "options.midi_merge",
+                };
+                let _ = app.run(id, json!({}));
+            }
+        },
+        (PadKey::Star | PadKey::Slash, _) => {}
+    }
 }
 
 fn command_for(key: Key, mods: Modifiers, mac: bool) -> Option<&'static str> {
@@ -94,8 +249,16 @@ fn fixed(app: &mut SoundApp, key: Key, m: Modifiers, mac: bool) -> bool {
             let _ = app.run(id, json!({}));
             true
         }
+        Key::Space if m.command && m.shift && !m.alt => {
+            let _ = app.run("transport.half_speed_record", json!({}));
+            true
+        }
         Key::Space if m.command => {
             let _ = app.run("transport.record", json!({}));
+            true
+        }
+        Key::F12 if m.shift && !m.command && !m.alt => {
+            let _ = app.run("transport.half_speed_record", json!({}));
             true
         }
         Key::S if search_chord(m, mac) => {
@@ -191,7 +354,19 @@ fn fixed(app: &mut SoundApp, key: Key, m: Modifiers, mac: bool) -> bool {
                 Key::F9 => "scrubber",
                 _ => "pencil",
             };
-            let _ = app.run("edit.tool", json!({"tool": tool}));
+            let ed = &app.engine.session().edit;
+            let all: &[&str] = match tool {
+                "trim" => &["standard", "tce", "scrub", "loop"],
+                "grabber" => &["time", "separation", "object"],
+                _ => &[],
+            };
+            if ed.tool.id() == tool && !all.is_empty() {
+                let now = openpt_engine::cmd::tool_variant(ed, ed.tool);
+                let next = all[(all.iter().position(|v| *v == now).unwrap_or(0) + 1) % all.len()];
+                let _ = app.run("edit.tool", json!({"tool": tool, "variant": next}));
+            } else {
+                let _ = app.run("edit.tool", json!({"tool": tool}));
+            }
             true
         }
         Key::Plus | Key::Minus if !m.command && app.ui.window == MainWindow::Edit => {
@@ -208,8 +383,13 @@ fn fixed(app: &mut SoundApp, key: Key, m: Modifiers, mac: bool) -> bool {
             let _ = app.run("view.waveform_zoom", json!({"factor": factor}));
             true
         }
-        Key::Num0 | Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5 if mods_match(Modifiers::COMMAND | Modifiers::ALT, m, mac) => {
+        Key::Num0 | Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5 if mods_match(Modifiers::COMMAND | Modifiers::ALT | Modifiers::CTRL, m, mac) => {
             let _ = app.run("clip.rating", json!({"rating": digit(key)}));
+            true
+        }
+        Key::Num1 | Key::Num2 | Key::Num3 if mods_match(Modifiers::COMMAND | Modifiers::ALT, m, mac) => {
+            let focus = ["commands", "clips", "groups"][usize::from(digit(key)) - 1];
+            let _ = app.run("options.keyboard_focus", json!({"focus": focus}));
             true
         }
         Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5 if mods_match(Modifiers::COMMAND | Modifiers::CTRL, m, mac) => {
@@ -241,6 +421,8 @@ fn fixed(app: &mut SoundApp, key: Key, m: Modifiers, mac: bool) -> bool {
         {
             true
         }
+        k if !m.command && !m.alt && !m.ctrl && app.engine.session().edit.keyboard_focus == "clips" && clip_list_focus(app, k) => true,
+        k if plain && app.engine.session().edit.keyboard_focus == "groups" && groups_focus(app, k) => true,
         Key::R | Key::T if plain => {
             let id = if key == Key::T { "view.zoom_in" } else { "view.zoom_out" };
             let _ = app.run(id, json!({}));
@@ -358,6 +540,51 @@ fn commands_focus(app: &mut SoundApp, key: Key, shift: bool) -> bool {
     true
 }
 
+fn clip_list_focus(app: &mut SoundApp, key: Key) -> bool {
+    let items = crate::panels::clip_list_items(app);
+    let pick = |app: &mut SoundApp, i: usize| {
+        if let Some((id, _, whole, _, _)) = items.get(i) {
+            let _ = app.run("edit.select", if *whole { json!({"sources": [id]}) } else { json!({"clips": [id]}) });
+        }
+    };
+    if matches!(key, Key::ArrowUp | Key::ArrowDown) {
+        let cur = items.iter().position(|i| i.4);
+        let next = match (cur, key) {
+            (None, _) => 0,
+            (Some(c), Key::ArrowUp) => c.saturating_sub(1),
+            (Some(c), _) => (c + 1).min(items.len().saturating_sub(1)),
+        };
+        pick(app, next);
+        return true;
+    }
+    let name = key.name();
+    if name.chars().count() != 1 || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return false;
+    }
+    let Some(ctx) = app.docking_context.clone() else { return false };
+    let id = egui::Id::new("clip_list_typeahead");
+    let now = ctx.input(|i| i.time);
+    let (mut typed, at): (String, f64) = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    if now - at > 1.0 {
+        typed.clear();
+    }
+    typed.push_str(&name.to_lowercase());
+    ctx.data_mut(|d| d.insert_temp(id, (typed.clone(), now)));
+    if let Some(i) = items.iter().position(|i| i.1.to_lowercase().starts_with(&typed)) {
+        pick(app, i);
+    }
+    true
+}
+
+fn groups_focus(app: &mut SoundApp, key: Key) -> bool {
+    let name = key.name().to_lowercase();
+    let Some(group) = app.engine.session().groups.iter().find(|g| g.letter.to_string() == name).map(|g| g.id.0) else {
+        return false;
+    };
+    let _ = app.run("track.group_toggle", json!({"group": group}));
+    true
+}
+
 fn move_selection_track(app: &mut SoundApp, dir: i64) {
     let s = app.engine.session();
     let visible: Vec<u64> = s.tracks.iter().filter(|t| !t.hidden).map(|t| t.id.0).collect();
@@ -391,10 +618,17 @@ pub fn shortcut_label(s: &str, mac: bool) -> String {
     if mac || (!has("Cmd") && !has("Ctrl")) || PC_CTRL_CHORDS.contains(&s) {
         return s.to_string();
     }
-    if has("Ctrl") {
+    if has("Ctrl") && !cfg!(windows) {
         return String::new();
     }
-    s.split('+').map(|p| if p == "Cmd" { "Ctrl" } else { p }).collect::<Vec<_>>().join("+")
+    s.split('+')
+        .map(|p| match p {
+            "Cmd" => "Ctrl",
+            "Ctrl" => "Win",
+            p => p,
+        })
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 const PC_CTRL_CHORDS: [&str; 4] = ["Ctrl+Up", "Ctrl+Down", "Ctrl+Shift+Up", "Ctrl+Shift+Down"];
@@ -409,13 +643,14 @@ mod label_tests {
         assert_eq!(shortcut_label("Cmd+Shift+W", false), "Ctrl+Shift+W");
         assert_eq!(shortcut_label("Cmd+Alt+B", false), "Ctrl+Alt+B");
         assert_eq!(shortcut_label("Cmd+,", false), "Ctrl+,");
+        let win = |s: &str| if cfg!(windows) { s.to_string() } else { String::new() };
+        assert_eq!(shortcut_label("Cmd+Ctrl+S", false), win("Ctrl+Win+S"));
         assert_eq!(shortcut_label("Shift+R", false), "Shift+R");
-        assert_eq!(shortcut_label("Cmd+Ctrl+S", false), "");
         assert_eq!(shortcut_label("", false), "");
         assert_eq!(shortcut_label("Ctrl+Up", false), "Ctrl+Up");
         assert_eq!(shortcut_label("Ctrl+Shift+Down", false), "Ctrl+Shift+Down");
-        assert_eq!(shortcut_label("Ctrl+Shift+P", false), "");
-        assert_eq!(shortcut_label("Ctrl+Alt+L", false), "");
+        assert_eq!(shortcut_label("Ctrl+Shift+P", false), win("Win+Shift+P"));
+        assert_eq!(shortcut_label("Ctrl+Alt+L", false), win("Win+Alt+L"));
     }
 
     #[test]

@@ -72,6 +72,7 @@ pub enum Dialog {
     Spot(crate::spot::Spot),
     Fades {
         shape: String,
+        batch: Option<BatchFades>,
     },
     StripSilence {
         threshold: f64,
@@ -224,7 +225,7 @@ impl Dialogs {
             "event.quantize" => {
                 Dialog::Number { cmd: id.into(), title: "Quantize strength".into(), key: "strength".into(), value: 100.0, suffix: "%".into() }
             }
-            "edit.fades_create" => Dialog::Fades { shape: "equal power".into() },
+            "edit.fades_create" => Dialog::Fades { shape: "equal power".into(), batch: BatchFades::wanted(&e.session()) },
             "edit.strip_silence" => Dialog::StripSilence { threshold: -48.0, min_ms: 50.0, pre_ms: 5.0, post_ms: 20.0 },
             "clip.warp_conform" => {
                 let s = e.session();
@@ -539,7 +540,32 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     }
                 }
                 Dialog::RenameTrack { id, name } => {
-                    name_field(ui, name);
+                    let mut step = ui.input_mut(|i| {
+                        if i.consume_key(egui::Modifiers::COMMAND, egui::Key::ArrowUp) {
+                            -1
+                        } else if i.consume_key(egui::Modifiers::COMMAND, egui::Key::ArrowDown) {
+                            1
+                        } else {
+                            0
+                        }
+                    });
+                    let field = name_field(ui, name);
+                    ui.horizontal(|ui| {
+                        if ui.button("◀ Previous").clicked() {
+                            step = -1;
+                        }
+                        if ui.button("Next ▶").clicked() {
+                            step = 1;
+                        }
+                    });
+                    if step != 0
+                        && let Some((next, next_name)) = neighbour_track(app.engine.session(), *id, step)
+                    {
+                        let _ = app.run("track.rename", json!({"track": id.0, "name": name}));
+                        *id = next;
+                        *name = next_name;
+                        ui.memory_mut(|m| m.surrender_focus(field));
+                    }
                     if buttons(ui, "OK", enter) {
                         action = Some(("track.rename".into(), json!({"track": id.0, "name": name})));
                     }
@@ -642,7 +668,15 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         action = d.command(app.engine.session());
                     }
                 }
-                Dialog::Fades { shape } => {
+                Dialog::Fades { shape, batch: Some(b) } => {
+                    let _ = shape;
+                    b.ui(ui, &mut app.ui.fade_presets);
+                    if buttons(ui, "OK", enter) {
+                        let rate = f64::from(app.engine.session().sample_rate.hz());
+                        action = Some(("edit.fades_create".into(), b.params(rate)));
+                    }
+                }
+                Dialog::Fades { shape, batch: None } => {
                     for s in openpt_model::FadeShape::ALL {
                         ui.radio_value(shape, s.label().to_lowercase(), s.label());
                     }
@@ -864,7 +898,7 @@ fn buttons(ui: &mut egui::Ui, ok: &str, enter: bool) -> bool {
     pressed
 }
 
-fn name_field(ui: &mut egui::Ui, name: &mut String) {
+fn name_field(ui: &mut egui::Ui, name: &mut String) -> egui::Id {
     let mut out = egui::TextEdit::singleline(name).show(ui);
     if !out.response.has_focus() {
         out.response.request_focus();
@@ -872,6 +906,14 @@ fn name_field(ui: &mut egui::Ui, name: &mut String) {
         out.state.cursor.set_char_range(Some(all));
         out.state.store(ui.ctx(), out.response.id);
     }
+    out.response.id
+}
+
+fn neighbour_track(s: &openpt_model::Session, id: TrackId, step: i32) -> Option<(TrackId, String)> {
+    let visible: Vec<&openpt_model::Track> = s.tracks.iter().filter(|t| !t.hidden).collect();
+    let i = visible.iter().position(|t| t.id == id)?;
+    let j = i.checked_add_signed(step as isize)?;
+    visible.get(j).map(|t| (t.id, t.name.clone()))
 }
 
 pub(crate) fn parse_bar_beat(s: &openpt_model::Session, text: &str, bar: bool) -> Option<i64> {
@@ -1091,5 +1133,104 @@ fn conform(app: &mut SoundApp, bpm: &str, bar: i64, grid: &str, refs: &[(u64, St
     match app.run("clip.warp_conform", p) {
         Ok(v) => app.ui.status = format!("Conformed {} clips to {:.2} BPM ({} points)", v["clips"], v["bpm"].as_f64().unwrap_or(0.0), v["points"]),
         Err(e) => app.ui.status = e,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BatchFades {
+    pub in_shape: String,
+    pub out_shape: String,
+    pub xfade_shape: String,
+    pub fade_in: bool,
+    pub fade_out: bool,
+    pub crossfade: bool,
+    pub length_ms: f32,
+    pub placement: String,
+    pub create: bool,
+    pub adjust: bool,
+}
+
+impl Default for BatchFades {
+    fn default() -> Self {
+        BatchFades {
+            in_shape: "equal power".into(),
+            out_shape: "equal power".into(),
+            xfade_shape: "equal power".into(),
+            fade_in: true,
+            fade_out: true,
+            crossfade: true,
+            length_ms: 10.0,
+            placement: "centered".into(),
+            create: true,
+            adjust: true,
+        }
+    }
+}
+
+impl BatchFades {
+    fn wanted(s: &openpt_model::Session) -> Option<BatchFades> {
+        let r = s.edit.selection;
+        let edges: usize = s
+            .tracks
+            .iter()
+            .filter(|t| s.edit.selected_tracks.contains(&t.id))
+            .flat_map(|t| t.clips().iter())
+            .map(|c| usize::from(r.contains(c.start)) + usize::from(r.start < c.end() && r.end >= c.end()))
+            .sum();
+        (edges > 1).then(BatchFades::default)
+    }
+
+    fn params(&self, rate: f64) -> Value {
+        json!({
+            "batch": true,
+            "in_shape": self.in_shape,
+            "out_shape": self.out_shape,
+            "xfade_shape": self.xfade_shape,
+            "fade_in": self.fade_in,
+            "fade_out": self.fade_out,
+            "crossfade": self.crossfade,
+            "length": ((f64::from(self.length_ms) / 1000.0 * rate).round() as i64).max(1),
+            "placement": self.placement,
+            "create": self.create,
+            "adjust": self.adjust,
+        })
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, presets: &mut [Option<BatchFades>; 5]) {
+        let shapes = |ui: &mut egui::Ui, id: &str, on: &mut bool, label: &str, shape: &mut String| {
+            ui.horizontal(|ui| {
+                ui.checkbox(on, label);
+                egui::ComboBox::from_id_salt(id).selected_text(shape.clone()).show_ui(ui, |ui| {
+                    for s in openpt_model::FadeShape::ALL {
+                        ui.selectable_value(shape, s.label().to_lowercase(), s.label());
+                    }
+                });
+            });
+        };
+        shapes(ui, "bf_in", &mut self.fade_in, "Fade In", &mut self.in_shape);
+        shapes(ui, "bf_x", &mut self.crossfade, "Crossfade", &mut self.xfade_shape);
+        shapes(ui, "bf_out", &mut self.fade_out, "Fade Out", &mut self.out_shape);
+        ui.horizontal(|ui| {
+            ui.label("Placement:");
+            for (v, l) in [("pre", "Pre-Splice"), ("centered", "Centered"), ("post", "Post-Splice")] {
+                ui.radio_value(&mut self.placement, v.to_string(), l);
+            }
+        });
+        ui.add(egui::Slider::new(&mut self.length_ms, 0.1..=10_000.0).logarithmic(true).text("Length (ms)"));
+        ui.checkbox(&mut self.create, "Create new fades");
+        ui.checkbox(&mut self.adjust, "Adjust existing fades");
+        ui.horizontal(|ui| {
+            ui.label("Presets:");
+            for (i, p) in presets.iter_mut().enumerate() {
+                let b = ui.add(egui::Button::new((i + 1).to_string()).selected(p.as_ref() == Some(self)));
+                if b.clicked() {
+                    match (ui.input(|i| i.modifiers.command), p.as_ref()) {
+                        (false, Some(saved)) => *self = saved.clone(),
+                        _ => *p = Some(self.clone()),
+                    }
+                }
+                b.on_hover_text(if p.is_some() { "Click to recall, Ctrl-click to store" } else { "Click to store" });
+            }
+        });
     }
 }

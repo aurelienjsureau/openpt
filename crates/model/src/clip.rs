@@ -131,6 +131,8 @@ pub struct Warp {
     pub markers: Vec<WarpMarker>,
     #[serde(default)]
     pub rendered: Option<SourceId>,
+    #[serde(default)]
+    pub pitch_cents: i32,
 }
 
 impl Warp {
@@ -362,7 +364,7 @@ mod tests {
 
     #[test]
     fn warp_maps_both_ways_through_its_markers() {
-        let w = Warp { source: SourceId(1), offset: 0, length: 1000, markers: vec![WarpMarker { src: 500, at: 300 }], rendered: None };
+        let w = Warp { source: SourceId(1), offset: 0, length: 1000, markers: vec![WarpMarker { src: 500, at: 300 }], rendered: None, pitch_cents: 0 };
         assert_eq!(w.to_clip(1000, 250), 150);
         assert_eq!(w.to_clip(1000, 500), 300);
         assert_eq!(w.to_clip(1000, 750), 650);

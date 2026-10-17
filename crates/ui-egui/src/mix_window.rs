@@ -1,5 +1,5 @@
 use crate::SoundApp;
-use crate::theme::{Tokens, bold, regular, rgb};
+use crate::theme::{Tokens, bold, mono, regular, rgb};
 use crate::widgets::{
     PannerEdit, PannerSpeaker, db_text, fader, fader_slot, groove, inset, meter, meter_scale, multi_meter, pan_knob, pan_text, raised_key,
     rec_toggle, selector_box, selector_box_with_tooltip, shade, surround_panner, text_toggle, vgradient,
@@ -355,6 +355,20 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         }
         y = sec.max.y + 4.0;
     }
+    if all || has("delay_comp") {
+        let sec = Rect::from_min_size(pos2(x0, y), vec2(inner_w, 34.0));
+        inset(ui.painter(), sec, t.strip_section);
+        let m = app.meter_snapshot.tracks.get(&id);
+        let (dly, cmp) = m.map_or((0, 0), |m| (m.latency, m.compensation));
+        let pdc = app.engine.session().edit.delay_compensation;
+        for (k, (label, v)) in [("dly", dly), ("cmp", cmp)].into_iter().enumerate() {
+            let ry = sec.min.y + 9.0 + k as f32 * 16.0;
+            ui.painter().text(pos2(x0 + 4.0, ry), Align2::LEFT_CENTER, label, regular(9.0), t.text_dim);
+            let col = if k == 1 && !pdc { t.text_dim } else if v > 0 { Color32::from_rgb(232, 168, 60) } else { t.counter_text };
+            ui.painter().text(pos2(sec.max.x - 4.0, ry), Align2::RIGHT_CENTER, v.to_string(), mono(10.0), col);
+        }
+        y = sec.max.y + 4.0;
+    }
     if all || has("comments") {
         let sec = Rect::from_min_size(pos2(x0, y), vec2(inner_w, 44.0));
         let mut c = track.comments.clone();
@@ -541,13 +555,15 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         multi_meter(ui, mr, &lv, &labels, md.clip);
     } else if chans >= 2 {
         let mw = mr.width() / 2.0 - 1.0;
-        meter(ui, Rect::from_min_size(mr.min, vec2(mw, mr.height())), md.level[0], md.hold[0], md.clip);
-        meter(ui, Rect::from_min_size(pos2(mr.min.x + mw + 2.0, mr.min.y), vec2(mw, mr.height())), md.level[1], md.hold[1], md.clip);
+        meter(ui, Rect::from_min_size(mr.min, vec2(mw, mr.height())), md.shown(0), md.hold[0], md.clip);
+        meter(ui, Rect::from_min_size(pos2(mr.min.x + mw + 2.0, mr.min.y), vec2(mw, mr.height())), md.shown(1), md.hold[1], md.clip);
     } else {
-        meter(ui, mr, md.level[0], md.hold[0], md.clip);
+        meter(ui, mr, md.shown(0), md.hold[0], md.clip);
     }
     if md.gr > 0.1 {
         ui.painter().text(pos2(mr.center().x, mr.min.y - 3.0), Align2::CENTER_BOTTOM, format!("-{:.0}", md.gr), regular(8.0), t.meter_yellow);
+        let gr_bar = Rect::from_min_max(pos2(mr.max.x - 3.0, mr.min.y + 5.0), pos2(mr.max.x, mr.min.y + 5.0 + (mr.height() - 6.0) * (md.gr / 24.0).min(1.0)));
+        ui.painter().rect_filled(gr_bar, 0.0, Color32::from_rgb(232, 160, 40));
     }
     let vr = Rect::from_min_size(pos2(x0 + 4.0, r.max.y - bottom_h + 4.0), vec2(inner_w - 8.0, 15.0));
     inset(ui.painter(), vr, t.counter_bg);
@@ -1398,13 +1414,13 @@ fn send_window_contents(app: &mut SoundApp, ctx: &egui::Context) {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     ui.add_space(((ui.available_width() - 104.0) / 2.0).max(0.0));
                     if text_toggle(ui, vec2(36.0, 18.0), "PRE", send.pre_fader, t.accent, "Pre-fader").clicked() {
-                        let _ = app.run("mix.send_level", json!({"track": id.0, "slot": slot, "pre_fader": !send.pre_fader}));
+                        let _ = run_scoped(app, ui, "mix.send_level", json!({"track": id.0, "slot": slot, "pre_fader": !send.pre_fader}));
                     }
                     if text_toggle(ui, vec2(22.0, 18.0), "M", send.mute, t.mute, "Mute send").clicked() {
-                        let _ = app.run("mix.send_level", json!({"track": id.0, "slot": slot, "mute": !send.mute}));
+                        let _ = run_scoped(app, ui, "mix.send_level", json!({"track": id.0, "slot": slot, "mute": !send.mute}));
                     }
                     if text_toggle(ui, vec2(36.0, 18.0), "FMP", send.follow_main_pan, t.accent, "Follow Main Pan").clicked() {
-                        let _ = app.run("mix.send_level", json!({"track": id.0, "slot": slot, "follow_main_pan": !send.follow_main_pan}));
+                        let _ = run_scoped(app, ui, "mix.send_level", json!({"track": id.0, "slot": slot, "follow_main_pan": !send.follow_main_pan}));
                     }
                 });
                 let mut pan = send.pan;
@@ -1695,7 +1711,7 @@ fn route_pick(app: &mut SoundApp, ui: &Ui, cmd: &str, key: &str, id: TrackId, va
     }
 }
 
-fn route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, input: bool) {
+pub(crate) fn route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, input: bool) {
     if input && app.engine.session().track(id).is_some_and(|t| t.kind.is_midi()) {
         midi_input_menu(app, ui, id);
         return;

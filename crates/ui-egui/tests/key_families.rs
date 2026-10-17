@@ -20,7 +20,7 @@ fn rig(os: OperatingSystem) -> (egui::Context, SoundApp) {
 }
 
 #[test]
-fn cmd_alt_brackets_zoom_waveforms_and_cmd_alt_digits_rate_clips() {
+fn cmd_alt_brackets_zoom_waveforms_and_cmd_alt_ctrl_digits_rate_clips() {
     for (os, cmd) in OSES {
         let (ctx, mut app) = rig(os);
         let cmd_alt = Modifiers { alt: true, ..cmd };
@@ -30,10 +30,19 @@ fn cmd_alt_brackets_zoom_waveforms_and_cmd_alt_digits_rate_clips() {
         assert_eq!(app.engine.session().edit.zoom.waveform_zoom, 2.0, "{os:?}");
         let kick = app.engine.session().track_by_name("Kick").unwrap().clips()[0].id;
         app.engine.execute("edit.select", &json!({"clips": [kick.0]})).unwrap();
-        press(&ctx, &mut app, Key::Num4, cmd_alt);
+        let rate = |app: &mut SoundApp, key: Key| {
+            if os == OperatingSystem::Mac {
+                press(&ctx, app, key, Modifiers { ctrl: true, ..cmd_alt });
+            } else {
+                shortcuts::start_chord(app, key, shortcuts::Held { ctrl: true, alt: true, shift: false });
+            }
+        };
+        rate(&mut app, Key::Num4);
         assert_eq!(app.engine.session().find_clip(kick).unwrap().1.rating, 4, "{os:?}");
-        press(&ctx, &mut app, Key::Num9, cmd_alt);
+        rate(&mut app, Key::Num9);
         assert_eq!(app.engine.session().find_clip(kick).unwrap().1.rating, 4, "{os:?}: 9 is outside 0-5");
+        press(&ctx, &mut app, Key::Num2, cmd_alt);
+        assert_eq!(app.engine.session().edit.keyboard_focus, "clips", "{os:?}: Cmd+Alt+2 is Clip List focus");
     }
 }
 

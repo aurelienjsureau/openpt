@@ -11,6 +11,7 @@ mod clip_list;
 mod clip_more;
 mod edit;
 mod edit_more;
+mod field;
 mod event;
 mod event_more;
 mod file;
@@ -36,6 +37,7 @@ mod vst3;
 pub(crate) mod warp;
 mod zoom_toggle;
 
+pub use edit::tool_variant;
 pub use file::{bounce_job, write_captured_bounce};
 
 pub(crate) use edit::remember_selection;
@@ -117,6 +119,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(view_more::specs());
         v.extend(track_more::specs());
         v.extend(clip_more::specs());
+        v.extend(field::specs());
         v.extend(clip_list::specs());
         v.extend(event_more::specs());
         v.extend(setup_more::specs());

@@ -1,7 +1,7 @@
 use crate::dialogs::Dialog;
 use crate::spot::Spot;
 use crate::theme::{Tokens, bold, clip_colors, regular, rgb};
-use crate::widgets::{groove, level_pos, meter_pos, raised_key, shade};
+use crate::widgets::{groove, raised_key, shade};
 use crate::{Gesture, SoundApp, toolbar};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use openpt_engine::edit as ops;
@@ -1466,18 +1466,18 @@ fn header_meter(ui: &Ui, r: Rect, md: &crate::MeterDisplay, stereo: bool) {
     let body = inner.with_min_y(clip.max.y + 1.0);
     let n = if stereo { 2 } else { 1 };
     let w = (body.width() - (n - 1) as f32) / n as f32;
-    let (amber, red) = (meter_pos(-12.0), meter_pos(-3.0));
+    let (amber, red) = crate::widgets::meter_zones();
     for ch in 0..n {
         let bar = Rect::from_min_size(pos2(body.min.x + ch as f32 * (w + 1.0), body.min.y), vec2(w, body.height()));
         let y = |f: f32| bar.max.y - bar.height() * f;
-        let lv = level_pos(md.level[ch]);
+        let lv = crate::widgets::shown_pos(md.shown(ch));
         for (lo, hi, col) in [(0.0, amber, t.meter_green), (amber, red, t.meter_yellow), (red, 1.0, t.meter_red)] {
             p.rect_filled(Rect::from_x_y_ranges(bar.x_range(), y(hi)..=y(lo)), 0.0, col.gamma_multiply(0.18));
             if lv > lo {
                 p.rect_filled(Rect::from_x_y_ranges(bar.x_range(), y(lv.min(hi))..=y(lo)), 0.0, col);
             }
         }
-        let hv = level_pos(md.hold[ch]);
+        let hv = crate::widgets::shown_pos(md.hold[ch]);
         if hv > 0.01 {
             p.hline(bar.x_range(), y(hv), Stroke::new(1.0, if hv > red { t.meter_red } else { t.meter_yellow }));
         }
@@ -1865,6 +1865,53 @@ pub(crate) fn track_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     }
     if app.engine.session().track(id).is_some_and(|track| track.folder.is_some()) && ui.button("Remove from Folder").clicked() {
         let _ = app.run("track.remove_from_folder", json!({"tracks": selection}));
+    }
+    ui.separator();
+    let (kind, playlists, active, elastic) = match app.engine.session().track(id) {
+        Some(t) => (t.kind, t.playlists.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), t.active_playlist, t.elastic.clone()),
+        None => return,
+    };
+    if kind.has_playlist() || kind == openpt_model::TrackKind::Aux {
+        ui.menu_button("Input", |ui| crate::mix_window::route_menu(app, ui, id, true));
+    }
+    if kind != openpt_model::TrackKind::Master {
+        ui.menu_button("Output", |ui| crate::mix_window::route_menu(app, ui, id, false));
+    }
+    if kind.has_playlist() {
+        ui.menu_button("Playlists", |ui| {
+            for (label, cmd) in [("New...", "track.playlist_new"), ("Duplicate...", "track.playlist_duplicate"), ("Delete Unused...", "track.playlist_delete_unused")] {
+                if ui.button(label).clicked() {
+                    let _ = app.run(cmd, json!({"track": tid}));
+                    ui.close();
+                }
+            }
+            ui.separator();
+            for (i, name) in playlists.iter().enumerate() {
+                if ui.selectable_label(i == active, name).clicked() {
+                    let _ = app.run("track.playlist_select", json!({"track": tid, "index": i}));
+                    ui.close();
+                }
+            }
+        });
+    }
+    if kind.has_playlist() && !kind.is_midi() {
+        ui.menu_button("Elastic Audio", |ui| {
+            for alg in ["none", "polyphonic", "rhythmic", "monophonic", "varispeed", "x-form"] {
+                if ui.selectable_label(elastic.as_deref().unwrap_or("none") == alg, elastic_label(alg)).clicked() {
+                    let _ = app.run("track.elastic", json!({"tracks": selection, "algorithm": alg}));
+                    ui.close();
+                }
+            }
+        });
+    }
+    if ui.button("Scroll into View").clicked() {
+        let _ = app.run("track.scroll_to", json!({"track": tid}));
+        ui.close();
+    }
+    if kind.has_playlist() && ui.button("Bounce...").clicked() {
+        let _ = app.run("edit.select", json!({"tracks": selection, "exact": true}));
+        crate::menus::invoke_menu(app, "track.bounce", "");
+        ui.close();
     }
     ui.separator();
     ui.menu_button("Track Height", |ui| {
@@ -2740,6 +2787,18 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     } else if resp.drag_started() && !on_line {
         app.gesture = match eff {
             Tool::Selector | Tool::Smart => Some(Gesture::Select { track: track.id, anchor: snap(&s, at_origin), tracks: vec![track.id] }),
+            Tool::Grabber if openpt_engine::cmd::tool_variant(&s.edit, Tool::Grabber) == "separation" && !s.edit.selection.is_empty() => {
+                let sel = s.edit.selection;
+                let tracks: Vec<TrackId> = if s.edit.selected_tracks.contains(&track.id) { s.edit.selected_tracks.clone() } else { vec![track.id] };
+                let _ = app.run("edit.separate", json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "start": sel.start, "end": sel.end}));
+                let now = app.engine.session();
+                let clips: Vec<ClipId> = tracks
+                    .iter()
+                    .filter_map(|t| now.track(*t))
+                    .flat_map(|t| t.clips().iter().filter(|c| c.start >= sel.start && c.end() <= sel.end).map(|c| c.id))
+                    .collect();
+                (!clips.is_empty()).then(|| Gesture::MoveClips { clips, grab_at: at_origin, delta: 0, from_track: track.id, to_track: track.id })
+            }
             Tool::Grabber => hit.as_ref().map(|c| {
                 let clips = if s.edit.selected_clips.contains(&c.id) { s.edit.selected_clips.clone() } else { vec![c.id] };
                 Gesture::MoveClips { clips, grab_at: at_origin, delta: 0, from_track: track.id, to_track: track.id }
@@ -2779,7 +2838,11 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
             Tool::Grabber => {
                 if let Some(c) = &hit {
                     let mut ids = if mods.shift { s.edit.selected_clips.iter().map(|x| x.0).collect::<Vec<_>>() } else { Vec::new() };
-                    ids.push(c.id.0);
+                    if openpt_engine::cmd::tool_variant(&s.edit, Tool::Grabber) == "object" && ids.contains(&c.id.0) {
+                        ids.retain(|x| *x != c.id.0);
+                    } else {
+                        ids.push(c.id.0);
+                    }
                     let before = app.grab_anchor.filter(|(clip_sel, _)| *clip_sel == s.edit.selection).map_or(s.edit.selection, |(_, b)| b);
                     let _ = app.run("edit.select", json!({"clips": ids}));
                     app.grab_anchor = Some((app.engine.session().edit.selection, before));
@@ -2911,7 +2974,12 @@ fn drive_drag(app: &mut SoundApp, ctx: &egui::Context) {
             let plan = drag_plan(ctx, &s, app.engine.revision, clips, (*from_track, *tt), *grab_at);
             *delta = move_delta(&plan, &s, *from_track, at - *grab_at, ctx.input(|i| i.modifiers.command));
         }
-        Some(Gesture::TrimStart { to, .. } | Gesture::TrimEnd { to, .. }) => *to = drag_snap(&s, at, ctx.input(|i| i.modifiers.command)),
+        Some(Gesture::TrimStart { to, .. } | Gesture::TrimEnd { to, .. }) => {
+            *to = drag_snap(&s, at, ctx.input(|i| i.modifiers.command));
+            if openpt_engine::cmd::tool_variant(&s.edit, Tool::Trim) == "scrub" {
+                app.engine.transport.position = *to;
+            }
+        }
         Some(Gesture::MidiClip { to, .. }) => *to = at,
         Some(Gesture::Fade { clip, fade_in, to, .. }) => {
             if let Some(range) = s.find_clip(*clip).and_then(|(_, c)| fade_drag_range(c, *fade_in, at)) {
@@ -3171,7 +3239,26 @@ fn drop_clips(app: &mut SoundApp, clips: Vec<ClipId>, delta: Samples, from: Trac
 }
 
 fn trim_clip(app: &mut SoundApp, clip: ClipId, to: Samples, start: bool) {
-    let spot = Spot::trim(app.engine.session(), clip, start, to);
+    let s = app.engine.session();
+    let variant = openpt_engine::cmd::tool_variant(&s.edit, Tool::Trim);
+    let Some(c) = s.find_clip(clip).map(|(_, c)| c.clone()) else { return };
+    match variant {
+        "tce" if s.edit.edit_mode != EditMode::Spot => {
+            let (a, b) = if start { (to, c.end()) } else { (c.start, to) };
+            if b > a
+                && let Err(e) = app.run("edit.tce_to_timeline", json!({"clips": [clip.0], "start": a, "end": b}))
+            {
+                app.ui.status = e;
+            }
+            return;
+        }
+        "loop" if !start && to > c.end() => {
+            let _ = app.run("clip.loop", json!({"clips": [clip.0], "length": to - c.start}));
+            return;
+        }
+        _ => {}
+    }
+    let spot = Spot::trim(s, clip, start, to);
     spot_or_run(app, spot);
 }
 
@@ -3224,35 +3311,148 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
         _ => openpt_time::NoteValue::Sixteenth.ticks(),
     };
     let ids = json!([c.0]);
-    if elastic && ui.button("Conform Song to Tempo...").clicked() {
-        let _ = app.dialogs.open_for_command(&app.engine, "clip.warp_conform");
-        ui.close();
+    if !app.engine.session().edit.selected_clips.contains(&c) {
+        let _ = app.run("edit.select", json!({"clips": ids}));
     }
-    for (label, cmd) in [
+    let item = |app: &mut SoundApp, ui: &mut Ui, label: &str, id: &str| {
+        let mut b = egui::Button::new(label);
+        if let Some(k) = crate::menus::shortcut_for(id) {
+            b = b.shortcut_text(crate::shortcuts::shortcut_label(k, ui.ctx().os().is_mac()));
+        }
+        if ui.add(b).clicked() {
+            crate::menus::invoke_menu(app, id, "");
+            ui.close();
+        }
+    };
+    for (label, id) in [("Cut", "edit.cut"), ("Copy", "edit.copy"), ("Paste", "edit.paste"), ("Clear", "edit.clear")] {
+        item(app, ui, label, id);
+    }
+    ui.separator();
+    ui.menu_button("Fades", |ui| {
+        for (label, id) in [("Create...", "edit.fades_create"), ("Delete", "edit.fades_delete"), ("Fade to Start", "edit.fade_to_start"), ("Fade to End", "edit.fade_to_end")] {
+            item(app, ui, label, id);
+        }
+    });
+    ui.menu_button("Separate Clip", |ui| {
+        for (label, id) in [("At Selection", "edit.separate"), ("On Grid", "edit.separate_on_grid"), ("At Transients", "edit.separate_at_transients")] {
+            item(app, ui, label, id);
+        }
+    });
+    item(app, ui, "Heal Separation", "edit.heal");
+    item(app, ui, "Consolidate Clip", "edit.consolidate");
+    let multichannel = {
+        let s = app.engine.session();
+        s.find_clip(c).is_some_and(|(_, x)| matches!(x.content, ClipContent::Audio { source, .. } if s.source(source).is_some_and(|f| f.channels > 1)))
+    };
+    if multichannel {
+        item(app, ui, "Expand Channels to New Tracks", "clip.expand_channels");
+    }
+    let alternates: Vec<(u64, u64, String)> = app
+        .engine
+        .execute("clip.field_matches", &json!({"clip": c.0}))
+        .ok()
+        .and_then(|v| v.get("matches").and_then(serde_json::Value::as_array).cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| Some((m.get("source")?.as_u64()?, m.get("channel")?.as_u64()?, m.get("label")?.as_str()?.to_string())))
+        .collect();
+    if !alternates.is_empty() {
+        ui.menu_button("Field Recorder Channels", |ui| {
+            for (src, ch, label) in &alternates {
+                if ui.button(label).clicked() {
+                    if let Err(e) = app.run("clip.field_replace", json!({"clip": c.0, "source": src, "channel": ch})) {
+                        app.ui.status = e;
+                    }
+                    ui.close();
+                }
+            }
+        });
+    }
+    ui.separator();
+    ui.menu_button("Clip Gain", |ui| {
+        for (label, id) in [
+            ("Bypass", "clip.gain_bypass"),
+            ("Render", "clip.gain_render"),
+            ("Clear", "edit.clear_clip_gain"),
+            ("Cut", "edit.cut_clip_gain"),
+            ("Copy", "edit.copy_clip_gain"),
+            ("Show Clip Gain Line", "view.clip_gain_line"),
+            ("Show Clip Gain Info", "view.clip_gain_info"),
+        ] {
+            item(app, ui, label, id);
+        }
+    });
+    if elastic {
+        ui.menu_button("Elastic Audio", |ui| {
+            for (label, id) in [
+                ("Elastic Properties...", "clip.elastic_properties"),
+                ("Remove Warp", "clip.remove_warp"),
+                ("Remove Pitch Shift", "clip.remove_pitch_shift"),
+                ("Conform Song to Tempo...", "clip.warp_conform"),
+            ] {
+                item(app, ui, label, id);
+            }
+            if ui.button("Add Warp Markers at Events").clicked() {
+                let _ = app.run("clip.warp_at_events", json!({"clip": c.0}));
+                ui.close();
+            }
+            if ui.button("Elastic Pitch...").clicked() {
+                let cents = app.engine.session().find_clip(c).and_then(|(_, x)| x.warp.as_ref()).map_or(0, |w| w.pitch_cents);
+                app.dialogs.open = Some(crate::dialogs::Dialog::Number {
+                    cmd: "clip.elastic_pitch".into(),
+                    title: "Elastic Pitch (semitones)".into(),
+                    key: "semitones".into(),
+                    value: f64::from(cents) / 100.0,
+                    suffix: "st".into(),
+                });
+                ui.close();
+            }
+        });
+    }
+    ui.menu_button("Rating", |ui| {
+        let now = app.engine.session().find_clip(c).map_or(0, |(_, x)| x.rating);
+        for r in 0..=5u8 {
+            let label = if r == 0 { "No Rating".to_string() } else { "★".repeat(usize::from(r)) };
+            if ui.selectable_label(now == r, label).clicked() {
+                let _ = app.run("clip.rating", json!({"clips": ids, "rating": r}));
+                ui.close();
+            }
+        }
+    });
+    ui.separator();
+    for (label, id) in [
         ("Mute/Unmute", "edit.mute_clips"),
         ("Edit Lock/Unlock", "clip.edit_lock"),
         ("Time Lock/Unlock", "clip.time_lock"),
-        ("Quantize to Grid", "clip.quantize_to_grid"),
-        ("Render Clip Gain", "clip.gain_render"),
-        ("Bring to Front", "clip.bring_to_front"),
-        ("Send to Back", "clip.send_to_back"),
+        ("Loop...", "clip.loop"),
+        ("Unloop", "clip.unloop"),
+        ("Group", "clip.group"),
+        ("Ungroup", "clip.ungroup"),
+        ("Regroup", "clip.regroup"),
     ] {
-        if ui.button(label).clicked() {
-            if cmd == "clip.quantize_to_grid" && elastic {
-                let _ = app.run("event.quantize", json!({"clips": ids, "grid": grid}));
-                continue;
-            }
-            let _ = app.run(cmd, json!({"clips": ids}));
-        }
+        item(app, ui, label, id);
     }
+    if ui.button("Spot...").clicked() {
+        let s = app.engine.session_arc();
+        app.dialogs.open = crate::spot::Spot::clips(&s, vec![c], None, 0).map(crate::dialogs::Dialog::Spot);
+        ui.close();
+    }
+    if ui.button("Quantize to Grid").clicked() {
+        if elastic {
+            let _ = app.run("event.quantize", json!({"clips": ids, "grid": grid}));
+        } else {
+            let _ = app.run("clip.quantize_to_grid", json!({"clips": ids}));
+        }
+        ui.close();
+    }
+    item(app, ui, "Identify Sync Point", "clip.identify_sync_point");
+    item(app, ui, "Bring to Front", "clip.bring_to_front");
+    item(app, ui, "Send to Back", "clip.send_to_back");
     ui.separator();
     if ui.button("Rename...").clicked() {
         let name = app.engine.session().find_clip(c).map(|(_, x)| x.name.clone()).unwrap_or_default();
         app.dialogs.open_rename_clip(c, &name);
-    }
-    if ui.button("Delete").clicked() {
-        let _ = app.run("edit.select", json!({"clips": ids}));
-        let _ = app.run("edit.clear", json!({}));
+        ui.close();
     }
 }
 

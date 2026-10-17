@@ -167,7 +167,7 @@ pub fn knob(ui: &mut Ui, size: f32, value: &mut f32, range: std::ops::RangeInclu
         *value = (*value + (d.x - d.y) * 0.005 * (hi - lo) * fine).clamp(lo, hi);
         resp.mark_changed();
     }
-    if resp.double_clicked() {
+    if resp.double_clicked() || (resp.clicked() && ui.input(|i| i.modifiers.alt)) {
         *value = default;
         resp.mark_changed();
     }
@@ -198,17 +198,77 @@ pub fn pan_text(v: f32) -> String {
 
 const METER_MARKS: [f32; 8] = [0.0, -5.0, -10.0, -15.0, -20.0, -30.0, -40.0, -60.0];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeterKind {
+    Peak,
+    Vu,
+    K(u8),
+}
+
+static METER_KIND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_meter_kind(id: &str) {
+    let v = match id {
+        "vu" => 1,
+        "k20" => 20,
+        "k14" => 14,
+        "k12" => 12,
+        _ => 0,
+    };
+    METER_KIND.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn meter_kind() -> MeterKind {
+    match METER_KIND.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => MeterKind::Peak,
+        1 => MeterKind::Vu,
+        n => MeterKind::K(n),
+    }
+}
+
+pub fn scale_pos(db: f32) -> f32 {
+    match meter_kind() {
+        MeterKind::Peak => meter_pos(db),
+        MeterKind::Vu => ((db + 18.0 + 20.0) / 23.0).clamp(0.0, 1.0),
+        MeterKind::K(n) => ((db + f32::from(n) + 40.0) / (f32::from(n) + 40.0)).clamp(0.0, 1.0),
+    }
+}
+
+pub fn shown_pos(v: f32) -> f32 {
+    if !v.is_finite() || v <= 1e-6 { 0.0 } else { scale_pos(20.0 * v.log10()) }
+}
+
+pub fn meter_zones() -> (f32, f32) {
+    match meter_kind() {
+        MeterKind::Peak => (meter_pos(-12.0), meter_pos(-3.0)),
+        MeterKind::Vu => (scale_pos(-21.0), scale_pos(-18.0)),
+        MeterKind::K(n) => (scale_pos(-f32::from(n)), scale_pos(4.0 - f32::from(n))),
+    }
+}
+
+fn scale_marks() -> Vec<(f32, f32)> {
+    match meter_kind() {
+        MeterKind::Peak => METER_MARKS.iter().map(|d| (*d, *d)).collect(),
+        MeterKind::Vu => [3.0f32, 2.0, 1.0, 0.0, -1.0, -3.0, -5.0, -7.0, -10.0, -20.0].iter().map(|v| (*v, v - 18.0)).collect(),
+        MeterKind::K(n) => {
+            let n = f32::from(n);
+            [20.0f32, 16.0, 12.0, 8.0, 4.0, 0.0, -4.0, -8.0, -12.0, -20.0, -30.0, -40.0].iter().filter(|k| **k <= n).map(|k| (*k, k - n)).collect()
+        }
+    }
+}
+
 fn meter_bar(r: Rect) -> Rect {
     Rect::from_min_max(pos2(r.min.x + 1.0, r.min.y + 5.0), pos2(r.max.x - 1.0, r.max.y - 1.0))
 }
 
 fn meter_marks(bar: Rect) -> impl Iterator<Item = (f32, f32)> {
+    let marks = scale_marks();
     let mut last = f32::NEG_INFINITY;
-    METER_MARKS.into_iter().filter_map(move |db| {
-        let y = bar.max.y - bar.height() * meter_pos(db);
+    marks.into_iter().filter_map(move |(label, db)| {
+        let y = bar.max.y - bar.height() * scale_pos(db);
         (y - last >= 9.0).then(|| {
             last = y;
-            (db, y)
+            (label, y)
         })
     })
 }
@@ -220,9 +280,9 @@ pub fn meter(ui: &Ui, r: Rect, level: f32, hold: f32, clip: bool) {
     p.rect_filled(Rect::from_min_max(pos2(r.min.x, r.min.y + 4.0), r.max), 0.0, t.meter_bg);
     let bar = meter_bar(r);
     let y = |pos: f32| bar.max.y - bar.height() * pos;
-    let (amber, red) = (meter_pos(-12.0), meter_pos(-3.0));
+    let (amber, red) = meter_zones();
     let zones = [(0.0, amber, t.meter_green), (amber, red, t.meter_yellow), (red, 1.0, t.meter_red)];
-    let lit = level_pos(level);
+    let lit = shown_pos(level);
     let unlit = if t.meter_bg.intensity() > 0.5 { 0.08 } else { 0.18 };
     let mut mesh = Mesh::default();
     for (lo, hi, color) in zones {
@@ -234,7 +294,7 @@ pub fn meter(ui: &Ui, r: Rect, level: f32, hold: f32, clip: bool) {
     for (_, at) in meter_marks(bar).skip(1) {
         p.hline(bar.x_range(), p.round_to_pixel_center(at), Stroke::new(1.0, Color32::from_black_alpha(90)));
     }
-    let held = level_pos(hold);
+    let held = if meter_kind() == MeterKind::Vu { 0.0 } else { shown_pos(hold) };
     if held > 0.01 {
         let color = zones.iter().find(|z| held <= z.1).map_or(t.meter_red, |z| z.2);
         p.rect_filled(Rect::from_x_y_ranges(bar.x_range(), y(held) - 1.0..=y(held) + 1.0), 0.0, color);

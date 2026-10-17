@@ -57,6 +57,9 @@ pub enum TransportRequest {
     PlaySelection,
     Pause,
     HalfSpeed,
+    HalfSpeedRecord,
+    Shuttle(i32),
+    LoopSelection,
     Scrub(Samples),
     AllNotesOff,
 }

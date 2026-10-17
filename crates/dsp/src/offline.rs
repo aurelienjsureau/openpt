@@ -201,7 +201,49 @@ pub fn resample(ch: &[Vec<f32>], from: u32, to: u32) -> Vec<Vec<f32>> {
         .collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stretch {
+    pub frame_s: f64,
+    pub tol_s: f64,
+    pub overlap: usize,
+    pub step: i64,
+}
+
+impl Stretch {
+    pub const POLYPHONIC: Stretch = Stretch { frame_s: 0.04, tol_s: 0.010, overlap: 2, step: 4 };
+    pub const X_FORM: Stretch = Stretch { frame_s: 0.08, tol_s: 0.015, overlap: 4, step: 1 };
+
+    pub fn monophonic(ch: &[Vec<f32>], sample_rate: f32) -> Stretch {
+        let sr = sane_sr(sample_rate);
+        let len = max_len(ch);
+        let mut periods: Vec<f32> = (0..8)
+            .filter_map(|k| {
+                let at = len * (2 * k + 1) / 16;
+                let frame: Vec<f32> = (at..(at + 2048).min(len)).map(|i| ch.iter().map(|c| c.get(i).copied().unwrap_or(0.0)).sum()).collect();
+                (frame.len() >= 1024).then(|| crate::pitch_detect::yin(&frame, sr, 50.0, 1000.0, 0.15)).flatten()
+            })
+            .map(|hz| 1.0 / hz)
+            .collect();
+        periods.sort_by(f32::total_cmp);
+        let Some(&period) = periods.get(periods.len() / 2) else { return Stretch::POLYPHONIC };
+        let p = f64::from(period);
+        Stretch { frame_s: (2.5 * p).clamp(0.008, 0.05), tol_s: p.clamp(0.002, 0.02), overlap: 2, step: 1 }
+    }
+
+    pub fn for_algorithm(algo: &str, ch: &[Vec<f32>], sample_rate: f32) -> Stretch {
+        match algo {
+            "monophonic" => Stretch::monophonic(ch, sample_rate),
+            "x-form" => Stretch::X_FORM,
+            _ => Stretch::POLYPHONIC,
+        }
+    }
+}
+
 pub fn time_stretch(ch: &[Vec<f32>], ratio: f64, sample_rate: f32) -> Vec<Vec<f32>> {
+    time_stretch_with(ch, ratio, sample_rate, Stretch::POLYPHONIC)
+}
+
+pub fn time_stretch_with(ch: &[Vec<f32>], ratio: f64, sample_rate: f32, set: Stretch) -> Vec<Vec<f32>> {
     let len = max_len(ch);
     let ratio = if ratio.is_finite() { ratio.clamp(0.1, 10.0) } else { 1.0 };
     let out_len = ((len as f64 * ratio).round() as usize).min(MAX_OFFLINE_SAMPLES);
@@ -212,9 +254,9 @@ pub fn time_stretch(ch: &[Vec<f32>], ratio: f64, sample_rate: f32) -> Vec<Vec<f3
         return ch.iter().map(|c| c.iter().copied().chain(std::iter::repeat(0.0)).take(out_len).collect()).collect();
     }
     let sr = f64::from(sane_sr(sample_rate));
-    let frame = (((sr * 0.04) as usize) & !1).clamp(64, 8192);
-    let hop = frame / 2;
-    let tol = ((sr * 0.010) as usize).clamp(8, 2048) as i64;
+    let frame = (((sr * set.frame_s) as usize) & !1).clamp(64, 16384);
+    let hop = frame / set.overlap.clamp(2, 8);
+    let tol = ((sr * set.tol_s) as usize).clamp(8, 4096) as i64;
     let window: Vec<f32> = (0..frame).map(|i| (0.5 - 0.5 * (2.0 * PI * i as f64 / frame as f64).cos()) as f32).collect();
     let nch = ch.len() as f32;
     let guide: Vec<f32> = (0..len).map(|i| ch.iter().map(|c| c.get(i).copied().unwrap_or(0.0)).sum::<f32>() / nch).collect();
@@ -258,7 +300,7 @@ pub fn time_stretch(ch: &[Vec<f32>], ratio: f64, sample_rate: f32) -> Vec<Vec<f3
                     best_s = s;
                     best = p;
                 }
-                p += 4;
+                p += set.step.max(1);
             }
             let (rlo, rhi) = ((best - 3).max(lo), (best + 3).min(hi));
             for p in rlo..=rhi {

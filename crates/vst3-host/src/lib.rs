@@ -16,6 +16,8 @@ mod ara_sys;
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unsafe_code)]
 mod ffi;
+#[allow(unsafe_code)]
+pub mod keyhook;
 #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
 pub use ara::{
     PlaybackRequest, bindings as ara_bindings, bound_tracks as ara_bound_tracks, finish_restores as ara_finish_restores,
@@ -337,4 +339,9 @@ mod tests {
         assert!(e.to_string().contains("not a VST3 plugin"), "{e}");
         let _ = std::fs::remove_dir_all(&d);
     }
+}
+
+pub fn pump_editor_timers() {
+    #[cfg(not(target_arch = "wasm32"))]
+    ffi::pump_editor_timers();
 }

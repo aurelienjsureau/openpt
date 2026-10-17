@@ -183,11 +183,33 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             shuffle_lock
         ),
-        cmd!(noundo "edit.tool", "Edit Tool", [], Some("F5-F10"), "{tool: zoom|trim|selector|grabber|scrubber|pencil|smart}", always, |e, p| {
-            let t = str_param(p, "tool").and_then(openpt_model::Tool::from_id).ok_or_else(|| bad("edit.tool", "unknown tool"))?;
-            e.session_mut().edit.tool = t;
-            Ok(json!({"tool": t}))
-        }),
+        cmd!(
+            noundo "edit.tool",
+            "Edit Tool",
+            [],
+            Some("F5-F10"),
+            "{tool: zoom|trim|selector|grabber|scrubber|pencil|smart, variant?: Trim standard|tce|scrub|loop, Grabber time|separation|object}",
+            always,
+            |e, p| {
+                let t = str_param(p, "tool").and_then(openpt_model::Tool::from_id).ok_or_else(|| bad("edit.tool", "unknown tool"))?;
+                let s = e.session_mut();
+                s.edit.tool = t;
+                if let Some(v) = str_param(p, "variant") {
+                    let (family, all): (&str, &[&str]) = match t {
+                        openpt_model::Tool::Trim => ("trim", &["standard", "tce", "scrub", "loop"]),
+                        openpt_model::Tool::Grabber => ("grabber", &["time", "separation", "object"]),
+                        _ => return Err(bad("edit.tool", "only the Trim and Grabber tools have variants")),
+                    };
+                    if !all.contains(&v) {
+                        return Err(bad("edit.tool", format!("unknown {family} variant `{v}`")));
+                    }
+                    for x in all.iter().skip(1) {
+                        s.edit.set_flag(&format!("tool.{family}.{x}"), *x == v);
+                    }
+                }
+                Ok(json!({"tool": t, "variant": tool_variant(&s.edit, t)}))
+            }
+        ),
         cmd!(
             "edit.move_clips",
             "Move Clips",
@@ -716,6 +738,15 @@ fn separate_at_transients(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"separated": n}))
 }
 
+pub fn tool_variant(ed: &openpt_model::EditState, t: openpt_model::Tool) -> &'static str {
+    let (family, all): (&str, &[&'static str]) = match t {
+        openpt_model::Tool::Trim => ("trim", &["standard", "tce", "scrub", "loop"]),
+        openpt_model::Tool::Grabber => ("grabber", &["time", "separation", "object"]),
+        _ => return "",
+    };
+    all.iter().skip(1).find(|x| ed.flag(&format!("tool.{family}.{x}"))).copied().unwrap_or(all[0])
+}
+
 fn heal(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "edit.heal", p)?;
     let mut r = range_param(e, "edit.heal", p)?;
@@ -884,10 +915,60 @@ fn fades_create(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     let tracks = tracks_required(e, "edit.fades_create", p)?;
     let r = range_param(e, "edit.fades_create", p)?;
+    if bool_or(p, "batch", false) {
+        return batch_fades(e, p, &tracks, r);
+    }
     let s = e.session_mut();
     let n: usize = tracks.iter().map(|t| ops::create_fades(s, *t, r, shape)).sum();
     if n == 0 {
         return Err(bad("edit.fades_create", "the selection must cover a clip start, end or the boundary between two clips"));
+    }
+    Ok(json!({"fades": n}))
+}
+
+fn batch_fades(e: &mut Engine, p: &Value, tracks: &[openpt_model::TrackId], r: openpt_time::Range) -> Result<Value> {
+    let id = "edit.fades_create";
+    let shape = |key: &str| str_param(p, key).map_or(Some(FadeShape::EqualPower), FadeShape::from_id).ok_or_else(|| bad(id, format!("unknown `{key}`")));
+    let (in_shape, out_shape, x_shape) = (shape("in_shape")?, shape("out_shape")?, shape("xfade_shape")?);
+    let len = position_param(e, id, p, "length")?.filter(|l| *l > 0).ok_or_else(|| bad(id, "`length` must be positive"))?;
+    let placement = str_param(p, "placement").unwrap_or("centered");
+    let (create, adjust) = (bool_or(p, "create", true), bool_or(p, "adjust", true));
+    let (want_in, want_out, want_x) = (bool_or(p, "fade_in", true), bool_or(p, "fade_out", true), bool_or(p, "crossfade", true));
+    let s = e.session_mut();
+    let mut n = 0;
+    for t in tracks {
+        let mut clips: Vec<openpt_model::Clip> = s.track(*t).map(|tr| tr.clips().to_vec()).unwrap_or_default();
+        clips.sort_by_key(|c| c.start);
+        for (i, c) in clips.iter().enumerate() {
+            let touch_before = i > 0 && clips[i - 1].end() == c.start;
+            let touch_after = clips.get(i + 1).is_some_and(|nx| nx.start == c.end());
+            let ok = |exists: bool| (exists && adjust) || (!exists && create);
+            if r.contains(c.start) && touch_before {
+                if want_x && ok(c.fade_in.len > 0) {
+                    let b = c.start;
+                    let xr = match placement {
+                        "pre" => openpt_time::Range::new(b - len, b + 1),
+                        "post" => openpt_time::Range::new(b - 1, b + len),
+                        _ => openpt_time::Range::new(b - len / 2, b + (len - len / 2).max(1)),
+                    };
+                    n += ops::create_fades(s, *t, xr, x_shape);
+                }
+            } else if r.contains(c.start) && want_in && ok(c.fade_in.len > 0) {
+                let l = len.min(c.length - 1);
+                if l > 0 {
+                    n += ops::create_fades(s, *t, openpt_time::Range::new(c.start, c.start + l), in_shape);
+                }
+            }
+            if !touch_after && r.start < c.end() && r.end >= c.end() && want_out && ok(c.fade_out.len > 0) {
+                let l = len.min(c.length - 1);
+                if l > 0 {
+                    n += ops::create_fades(s, *t, openpt_time::Range::new(c.end() - l, c.end()), out_shape);
+                }
+            }
+        }
+    }
+    if n == 0 {
+        return Err(bad(id, "no clip start, end or boundary in the selection to fade"));
     }
     Ok(json!({"fades": n}))
 }
@@ -1002,6 +1083,39 @@ fn consolidate(e: &mut Engine, p: &Value) -> Result<Value> {
 mod tests {
     use super::*;
     use openpt_model::{ChannelFormat, Clip, ClipContent, TrackId, TrackKind};
+
+    #[test]
+    fn batch_fades_fade_lone_edges_and_crossfade_touching_clips() {
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        for (start, len) in [(0, 48_000), (48_000, 48_000), (200_000, 48_000)] {
+            let id = s.new_clip_id();
+            crate::edit::place_clip(&mut s, t, Clip::audio(id, "c", openpt_model::SourceId(9), 0, start, len));
+        }
+        s.edit.selected_tracks = vec![t];
+        s.edit.selection = openpt_time::Range::new(0, 300_000);
+        let mut e = Engine::new(s);
+        let r = e.execute("edit.fades_create", &json!({"batch": true, "length": 1000, "out_shape": "linear"})).unwrap();
+        assert_eq!(r["fades"], 5, "{r}");
+        let clips = e.session().track(t).unwrap().clips().to_vec();
+        assert_eq!(clips[0].fade_in.len, 1000);
+        assert!(clips[0].fade_out.len > 0 && clips[1].fade_in.len > 0, "the touching clips crossfade");
+        assert_eq!((clips[2].fade_in.len, clips[2].fade_out.len, clips[2].fade_out.shape), (1000, 1000, FadeShape::Linear));
+        assert!(e.undo());
+        assert!(e.execute("edit.fades_create", &json!({"batch": true, "length": 1000, "create": false})).is_err());
+    }
+
+    #[test]
+    fn trim_and_grabber_variants_are_exclusive() {
+        let mut e = Engine::default();
+        e.execute("edit.tool", &json!({"tool": "trim", "variant": "tce"})).unwrap();
+        let r = e.execute("edit.tool", &json!({"tool": "trim", "variant": "loop"})).unwrap();
+        assert_eq!(r["variant"], "loop");
+        assert_eq!(tool_variant(&e.session().edit, openpt_model::Tool::Trim), "loop");
+        assert_eq!(tool_variant(&e.session().edit, openpt_model::Tool::Grabber), "time");
+        assert!(e.execute("edit.tool", &json!({"tool": "pencil", "variant": "tce"})).is_err());
+        assert!(e.execute("edit.tool", &json!({"tool": "grabber", "variant": "tce"})).is_err());
+    }
 
     #[test]
     fn targeted_fade_curvature_saves_reopens_and_undoes_without_changing_lengths() {

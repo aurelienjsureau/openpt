@@ -1881,6 +1881,10 @@ impl EditorLink {
     }
 }
 
+pub(crate) fn pump_editor_timers() {
+    window::pump_timers();
+}
+
 #[cfg(target_os = "macos")]
 mod window {
     use objc2::rc::Retained;
@@ -1890,6 +1894,8 @@ mod window {
     use std::ffi::{c_char, c_void};
 
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeNSView);
+
+    pub fn pump_timers() {}
 
     pub fn on_main_thread() -> bool {
         MainThreadMarker::new().is_some()
@@ -2026,6 +2032,35 @@ mod window {
     thread_local! {
         static PLUGIN_RESIZING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static STATES: RefCell<HashMap<usize, State>> = RefCell::new(HashMap::new());
+    }
+
+    pub fn pump_timers() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{DispatchMessageW, EnumChildWindows, MSG, PM_REMOVE, PeekMessageW, WM_TIMER};
+        if !on_main_thread() {
+            return;
+        }
+        unsafe extern "system" fn collect(h: HWND, l: LPARAM) -> i32 {
+            unsafe { (*(l as *mut Vec<HWND>)).push(h) };
+            1
+        }
+        let hosts: Vec<HWND> = STATES.with(|s| s.borrow().keys().map(|k| *k as HWND).collect());
+        if hosts.is_empty() {
+            return;
+        }
+        let mut targets: Vec<HWND> = vec![-1isize as HWND];
+        for h in hosts {
+            targets.push(h);
+            unsafe { EnumChildWindows(h, Some(collect), &mut targets as *mut Vec<HWND> as LPARAM) };
+        }
+        for h in targets {
+            for _ in 0..8 {
+                let mut msg: MSG = unsafe { std::mem::zeroed() };
+                if unsafe { PeekMessageW(&mut msg, h, WM_TIMER, WM_TIMER, PM_REMOVE) } == 0 {
+                    break;
+                }
+                unsafe { DispatchMessageW(&msg) };
+            }
+        }
     }
 
     fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut State) -> R) -> Option<R> {
@@ -2586,6 +2621,8 @@ mod window {
     use std::ffi::{c_char, c_void};
 
     pub const PLATFORM_TYPE: Option<*const c_char> = None;
+
+    pub fn pump_timers() {}
 
     pub fn on_main_thread() -> bool {
         true

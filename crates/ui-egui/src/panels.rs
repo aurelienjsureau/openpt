@@ -1,7 +1,7 @@
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, mono, regular, rgb};
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
-use openpt_model::{ClipId, SourceId};
+use openpt_model::{ClipContent, ClipId, SourceId};
 use serde_json::json;
 
 fn drag_track(app: &mut SoundApp, ui: &Ui, row: Rect, id: u64, dropped: bool) {
@@ -33,12 +33,18 @@ fn drag_track(app: &mut SoundApp, ui: &Ui, row: Rect, id: u64, dropped: bool) {
     }
 }
 
-fn panel_header(ui: &mut Ui, title: &str) {
+fn panel_header(ui: &mut Ui, title: &str) -> Rect {
     let t = Tokens::current();
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
     ui.painter().rect_filled(r, 0.0, t.panel_bg2);
     ui.painter().text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, title, bold(11.5), t.header_text);
     ui.painter().line_segment([pos2(r.min.x, r.max.y), pos2(r.max.x, r.max.y)], Stroke::new(1.0, t.border));
+    r
+}
+
+fn header_tools(ui: &mut Ui, head: Rect, add: impl FnOnce(&mut Ui)) {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(head.shrink2(vec2(4.0, 3.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
+    add(&mut child);
 }
 
 const GUTTER_W: f32 = 10.0;
@@ -118,7 +124,8 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
     });
     gutter_scroll(ui, gutter, &out);
     ui.add_space(4.0);
-    panel_header(ui, "GROUPS");
+    let head = panel_header(ui, "GROUPS");
+    header_tools(ui, head, |ui| focus_button(app, ui, "groups", "Groups List Keyboard Focus (type a group letter to enable or disable it)"));
     let groups: Vec<(u64, char, String, bool, [u8; 3])> =
         app.engine.session().groups.iter().map(|g| (g.id.0, g.letter, g.name.clone(), g.active, g.color)).collect();
     let out = egui::ScrollArea::vertical().id_salt("groups_scroll").auto_shrink([false, false]).scroll_bar_visibility(hidden).show(ui, |ui| {
@@ -225,31 +232,58 @@ fn gutter_scroll<R>(ui: &Ui, gutter: Rect, out: &egui::scroll_area::ScrollAreaOu
     }
 }
 
-pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
-    let _prof = crate::prof::scope("clip_list");
-    let t = Tokens::current();
-    panel_header(ui, "CLIPS");
-    let items: Vec<(u64, String, bool, [u8; 3], bool)> = {
-        let s = app.engine.session();
-        let sel_clips: std::collections::HashSet<openpt_model::ClipId> = s.edit.selected_clips.iter().copied().collect();
-        let mut v = Vec::new();
-        let renders: std::collections::HashSet<openpt_model::SourceId> = s
-            .tracks
-            .iter()
-            .flat_map(|t| t.playlists.iter())
-            .flat_map(|p| &p.clips)
-            .filter_map(|c| c.warp.as_ref().and_then(|w| w.rendered))
-            .collect();
+pub(crate) fn clip_list_items(app: &SoundApp) -> Vec<(u64, String, bool, [u8; 3], bool)> {
+    let s = app.engine.session();
+    let [audio, midi, groups, auto] = app.ui.clip_list_show;
+    let sel_clips: std::collections::HashSet<openpt_model::ClipId> = s.edit.selected_clips.iter().copied().collect();
+    let mut v = Vec::new();
+    let renders: std::collections::HashSet<openpt_model::SourceId> =
+        s.tracks.iter().flat_map(|t| t.playlists.iter()).flat_map(|p| &p.clips).filter_map(|c| c.warp.as_ref().and_then(|w| w.rendered)).collect();
+    if audio {
         for src in s.sources.iter().filter(|x| !renders.contains(&x.id)) {
             v.push((src.id.0, format!("{} ({}ch)", src.name, src.channels), true, [150, 150, 150], s.edit.selected_sources.contains(&src.id)));
         }
-        for tr in &s.tracks {
-            for c in tr.clips() {
+    }
+    for tr in &s.tracks {
+        for c in tr.clips() {
+            let show = match &c.content {
+                _ if c.group.is_some() => groups,
+                ClipContent::Midi { .. } => midi,
+                ClipContent::Audio { source, offset } => {
+                    let whole = *offset == 0 && s.sources.iter().find(|x| x.id == *source).is_some_and(|x| x.frames == c.length as u64);
+                    audio && (whole || auto)
+                }
+                ClipContent::Video { .. } => true,
+            };
+            if show {
                 v.push((c.id.0, c.name.clone(), false, c.color.unwrap_or(tr.color), sel_clips.contains(&c.id)));
             }
         }
-        v
-    };
+    }
+    v
+}
+
+fn focus_button(app: &mut SoundApp, ui: &mut Ui, focus: &str, tip: &str) {
+    let t = Tokens::current();
+    let on = app.engine.session().edit.keyboard_focus == focus;
+    if crate::widgets::text_toggle(ui, vec2(28.0, 15.0), "a-z", on, t.accent, tip).clicked() {
+        let _ = app.run("options.keyboard_focus", json!({"focus": if on { "none" } else { focus }}));
+    }
+}
+
+pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
+    let _prof = crate::prof::scope("clip_list");
+    let t = Tokens::current();
+    let head = panel_header(ui, "CLIPS");
+    header_tools(ui, head, |ui| {
+        ui.menu_button(egui::RichText::new("Show").font(regular(10.0)), |ui| {
+            for (i, label) in ["Audio", "MIDI", "Clip Groups", "Auto-Created"].into_iter().enumerate() {
+                ui.checkbox(&mut app.ui.clip_list_show[i], label);
+            }
+        });
+        focus_button(app, ui, "clips", "Clip List Keyboard Focus (type a name to select a clip)");
+    });
+    let items = clip_list_items(app);
     let fkey = egui::Id::new("clip_filter");
     let mut filter: String = ui.ctx().memory(|m| m.data.get_temp(fkey)).unwrap_or_default();
     let find = ui.add(egui::TextEdit::singleline(&mut filter).hint_text("🔍 Find clips").desired_width(f32::INFINITY));
@@ -376,8 +410,8 @@ fn transport_window(app: &mut SoundApp, ctx: &egui::Context) {
             if flags.contains("view.transport.output_meters") {
                 let (r, _) = ui.allocate_exact_size(vec2(22.0, 26.0), Sense::hover());
                 let m = app.main_meter;
-                crate::widgets::meter(ui, Rect::from_min_size(r.min, vec2(10.0, 26.0)), m.level[0], m.hold[0], m.clip);
-                crate::widgets::meter(ui, Rect::from_min_size(pos2(r.min.x + 12.0, r.min.y), vec2(10.0, 26.0)), m.level[1], m.hold[1], m.clip);
+                crate::widgets::meter(ui, Rect::from_min_size(r.min, vec2(10.0, 26.0)), m.shown(0), m.hold[0], m.clip);
+                crate::widgets::meter(ui, Rect::from_min_size(pos2(r.min.x + 12.0, r.min.y), vec2(10.0, 26.0)), m.shown(1), m.hold[1], m.clip);
             }
         });
         let s = app.engine.session();

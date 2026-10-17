@@ -16,6 +16,8 @@ pub struct Source {
     pub time_reference: u64,
     #[serde(default)]
     pub unsaved: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<openpt_audio_io::FieldInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

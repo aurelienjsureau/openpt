@@ -100,6 +100,7 @@ fn add_source_audio(s: &mut Session, name: &str, audio: Arc<SourceAudio>, path: 
         format,
         time_reference: 0,
         unsaved: true,
+        field: None,
     });
     s.pool.insert(id, audio);
     id
@@ -124,6 +125,7 @@ pub struct PreparedAudio {
     format: FileFormat,
     file_rate: u32,
     time_reference: Option<u64>,
+    field: Option<openpt_audio_io::FieldInfo>,
     audio: Arc<SourceAudio>,
 }
 
@@ -146,6 +148,7 @@ fn prepare_audio(name: &str, bytes: &[u8], path: Option<&str>, session_rate: u32
         format: info.format,
         file_rate: info.sample_rate,
         time_reference: info.bwf.map(|b| b.time_reference),
+        field: openpt_audio_io::field_info(bytes),
         audio: Arc::new(SourceAudio::new(buf)),
     })
 }
@@ -159,6 +162,9 @@ pub fn place_prepared(e: &mut Engine, p: PreparedAudio, target: Option<TrackId>,
     let channels = p.audio.buffer.num_channels();
     let s = e.session_mut();
     let src = add_source_audio(s, name, p.audio, p.path.as_deref(), p.format);
+    if let Some(sx) = s.sources.last_mut() {
+        sx.field = p.field.clone();
+    }
     if let (Some(stamp), Some(sx)) = (p.time_reference, s.sources.last_mut()) {
         sx.time_reference = stamp_at_rate(stamp, p.file_rate, session_rate);
     }
@@ -1269,6 +1275,43 @@ pub struct Take {
     pub track: TrackId,
     pub path: PathBuf,
     pub channels: usize,
+}
+
+pub fn halve_take(path: &Path) -> std::result::Result<(), String> {
+    const TAPS: usize = 63;
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let (info, buf) = openpt_audio_io::decode(&bytes, Some("wav")).map_err(|e| e.to_string())?;
+    let mid = (TAPS / 2) as f64;
+    let h: Vec<f32> = (0..TAPS)
+        .map(|i| {
+            let x = i as f64 - mid;
+            let sinc = if x == 0.0 { 0.5 } else { (std::f64::consts::PI * x / 2.0).sin() / (std::f64::consts::PI * x) };
+            let w = 0.42 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / (TAPS - 1) as f64).cos()
+                + 0.08 * (4.0 * std::f64::consts::PI * i as f64 / (TAPS - 1) as f64).cos();
+            (sinc * w) as f32
+        })
+        .collect();
+    let channels = buf
+        .channels
+        .iter()
+        .map(|x| {
+            (0..x.len().div_ceil(2))
+                .map(|o| {
+                    let c = 2 * o;
+                    h.iter().enumerate().map(|(k, hk)| hk * x.get((c + k).wrapping_sub(TAPS / 2)).copied().unwrap_or(0.0)).sum()
+                })
+                .collect()
+        })
+        .collect();
+    let bit_depth = match info.sample_format {
+        openpt_audio_io::SampleFormat::Int16 => openpt_audio_io::BitDepth::Int16,
+        openpt_audio_io::SampleFormat::Float32 | openpt_audio_io::SampleFormat::Float64 => openpt_audio_io::BitDepth::Float32,
+        _ => openpt_audio_io::BitDepth::Int24,
+    };
+    let out = AudioBuffer { sample_rate: buf.sample_rate, channels };
+    let opts = EncodeOptions { format: FileFormat::Wav, bit_depth, dither: false, bwf: info.bwf };
+    let bytes = openpt_audio_io::encode(&out, &opts).map_err(|e| e.to_string())?;
+    std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
 pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>) -> Vec<openpt_model::ClipId> {

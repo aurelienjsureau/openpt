@@ -23,7 +23,7 @@ fn kick_clip_count(h: &Harness<'_, SoundApp>) -> usize {
 }
 
 #[test]
-fn clip_menu_stays_open_while_moving_onto_delete() {
+fn clip_menu_stays_open_while_moving_onto_clear() {
     let engine = openpt_engine::demo::demo_engine();
     let app = SoundApp::new(engine, None, Services::default());
     let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).with_pixels_per_point(2.0).build_ui_state(
@@ -51,7 +51,7 @@ fn clip_menu_stays_open_while_moving_onto_delete() {
     for _ in 0..10 {
         step(&mut h);
     }
-    let delete = h.get_by_label("Delete").rect().center();
+    let delete = h.get_by_label("Clear Ctrl+B").rect().center();
     for (x, y) in [(x + 20.0, y + 30.0), (delete.x, delete.y)] {
         h.state_mut().synthetic.push(Event::PointerMoved(pos2(x, y)));
         for _ in 0..10 {
@@ -63,5 +63,5 @@ fn clip_menu_stays_open_while_moving_onto_delete() {
         step(&mut h);
     }
 
-    assert_eq!(kick_clip_count(&h), before - 1, "clicking Delete in the clip menu should remove the clip");
+    assert_eq!(kick_clip_count(&h), before - 1, "clicking Clear in the clip menu should remove the clip");
 }

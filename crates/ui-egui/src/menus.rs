@@ -357,6 +357,7 @@ fn mix_section_id(label: &str) -> &'static str {
         "Track Color" => "color",
         "Comments" => "comments",
         "EQ Curve" => "eq_curve",
+        "Delay Compensation" => "delay_comp",
         "Meters and Faders" => "meters",
         "All" => "all",
         "Minimal" => "minimal",

@@ -35,6 +35,7 @@ pub mod warp_view;
 pub mod waveform;
 pub mod widgets;
 pub mod windows;
+pub mod winkeys;
 
 use openpt_engine::{Engine, TransportRequest};
 use openpt_model::TrackId;
@@ -132,6 +133,10 @@ pub struct UiState {
     pub meter_clip_hold: String,
     pub meter_decay_db_s: f32,
     pub note_names: String,
+    pub numeric_keypad: String,
+    pub meter_type: String,
+    pub fade_presets: [Option<dialogs::BatchFades>; 5],
+    pub clip_list_show: [bool; 4],
 }
 
 impl Default for UiState {
@@ -210,6 +215,10 @@ impl Default for UiState {
             meter_clip_hold: "infinite".into(),
             meter_decay_db_s: 26.0,
             note_names: "c3".into(),
+            numeric_keypad: "transport".into(),
+            meter_type: "peak".into(),
+            fade_presets: Default::default(),
+            clip_list_show: [true; 4],
         }
     }
 }
@@ -235,6 +244,13 @@ pub fn fit_window_to_screen(ctx: &egui::Context) {
 #[derive(Debug, Clone)]
 pub struct DragSource(pub Vec<u64>);
 
+impl MeterDisplay {
+    pub fn shown(&self, c: usize) -> f32 {
+        let v = if widgets::meter_kind() == widgets::MeterKind::Peak { self.level } else { self.rms };
+        v.get(c).copied().unwrap_or(0.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MeterDisplay {
     pub level: [f32; 2],
@@ -243,6 +259,7 @@ pub struct MeterDisplay {
     pub clip: bool,
     pub clip_age: f32,
     pub gr: f32,
+    pub rms: [f32; 2],
     pub plugin_failures: u32,
 }
 
@@ -369,7 +386,7 @@ pub struct SoundApp {
     pub dialogs: dialogs::Dialogs,
     pub meters: HashMap<TrackId, MeterDisplay>,
     pub main_meter: MeterDisplay,
-    meter_snapshot: openpt_playback::MeterSnapshot,
+    pub(crate) meter_snapshot: openpt_playback::MeterSnapshot,
     pub gesture: Option<Gesture>,
     pub edit_layout: edit_window::EditLayout,
     pub midi: midi_editor::MidiEditorState,
@@ -388,6 +405,9 @@ pub struct SoundApp {
     fonts_installed: bool,
     theme_applied: Option<bool>,
     pub(crate) docking_context: Option<egui::Context>,
+    pub(crate) pad: shortcuts::Pad,
+    shuttle_back: Option<f64>,
+    half_speed_take: bool,
     sim: Option<(Samples, Option<Samples>, Option<Range>)>,
     record_hint: Option<(f64, &'static str)>,
     pub quit_requested: bool,
@@ -475,6 +495,9 @@ impl SoundApp {
             fonts_installed: false,
             theme_applied: None,
             docking_context: None,
+            pad: shortcuts::Pad::default(),
+            shuttle_back: None,
+            half_speed_take: false,
             sim: None,
             record_hint: None,
             quit_requested: false,
@@ -582,7 +605,28 @@ impl SoundApp {
         self.edit_layout.last_follow_to = None;
     }
 
+    fn shuttle(&mut self, milli: i32) {
+        self.shuttle_back = None;
+        if milli <= 0 {
+            if self.is_playing() {
+                self.stop_play();
+            }
+            if milli < 0 {
+                self.shuttle_back = Some(f64::from(-milli) / 1000.0);
+            }
+            return;
+        }
+        if let Some(p) = &self.player {
+            p.set_speed(milli as f32 / 1000.0);
+        }
+        if !self.is_playing() {
+            let at = self.position();
+            self.start_play(at, None, None);
+        }
+    }
+
     fn stop_play(&mut self) {
+        self.shuttle_back = None;
         if let Some(p) = &self.player {
             p.set_speed(1.0);
             p.stop();
@@ -725,6 +769,9 @@ impl SoundApp {
 
     fn apply_editor_edits(&mut self) {
         let Some(p) = &self.player else { return };
+        if p.any_editor_open() {
+            openpt_vst3_host::pump_editor_timers();
+        }
         for (t, slot, param, value) in p.idle() {
             if slot == openpt_mix::INSTRUMENT_SLOT {
                 continue;
@@ -1088,7 +1135,14 @@ impl SoundApp {
         }
         let pos = self.position();
         let plan = self.take_plan.take();
-        let (audio_takes, problem) = self.recorder.as_mut().map(|r| r.finish()).unwrap_or_default();
+        let (audio_takes, mut problem) = self.recorder.as_mut().map(|r| r.finish()).unwrap_or_default();
+        if std::mem::take(&mut self.half_speed_take) {
+            for (_, path) in &audio_takes {
+                if let Err(e) = openpt_engine::io::halve_take(path) {
+                    problem = Some(format!("half-speed take not converted: {e}"));
+                }
+            }
+        }
         let midi_takes = self.midi_recorder.take().map(|mut r| r.finish(self.engine.session(), pos)).unwrap_or_default();
         if std::mem::take(&mut self.discard_take) {
             self.punch = None;
@@ -1314,12 +1368,38 @@ impl SoundApp {
                     }
                     self.play_from_selection();
                 }
+                TransportRequest::HalfSpeedRecord => {
+                    if self.engine.transport.recording {
+                        self.stop_play();
+                    } else {
+                        if let Some(p) = &self.player {
+                            p.set_speed(0.5);
+                        }
+                        self.half_speed_take = true;
+                        self.start_recording();
+                    }
+                }
+                TransportRequest::Shuttle(milli) => self.shuttle(milli),
+                TransportRequest::LoopSelection => {
+                    let sel = self.engine.session().edit.selection;
+                    let end = sel.end.max(sel.start + 1);
+                    self.start_play(sel.start, None, Some(Range::new(sel.start, end)));
+                }
                 TransportRequest::Scrub(at) => self.engine.transport.position = at,
                 TransportRequest::AllNotesOff => {
                     if let Some(p) = &self.player {
                         p.panic_all_notes_off();
                     }
                 }
+            }
+        }
+        if let Some(v) = self.shuttle_back {
+            let sr = self.engine.session().sample_rate.as_f64();
+            let at = (self.engine.transport.position as f64 - f64::from(dt) * v * sr).max(0.0) as i64;
+            let _ = self.engine.execute("transport.locate", &json!({"at": at}));
+            self.engine.transport.position = at;
+            if at == 0 {
+                self.shuttle_back = None;
             }
         }
         if let Some(p) = &self.player {
@@ -1341,7 +1421,7 @@ impl SoundApp {
             let b = Ballistics::from_prefs(&self.ui);
             for (id, m) in &snap.tracks {
                 let d = self.meters.entry(*id).or_default();
-                feed_meter(d, m.peak, m.gain_reduction_db, dt, &b);
+                feed_meter(d, m.peak, m.rms, m.gain_reduction_db, dt, &b);
                 if m.plugin_failures.count != d.plugin_failures {
                     d.plugin_failures = m.plugin_failures.count;
                     if let Some(msg) = failed_plugin_status(self.engine.session(), *id, m.plugin_failures.last) {
@@ -1350,7 +1430,7 @@ impl SoundApp {
                 }
             }
             let main = snap.main.peak;
-            feed_meter(&mut self.main_meter, main, 0.0, dt, &b);
+            feed_meter(&mut self.main_meter, main, snap.main.rms, 0.0, dt, &b);
             if ended {
                 self.stop_play();
             }
@@ -1370,9 +1450,9 @@ impl SoundApp {
         }
         if !self.meters_live() {
             for d in self.meters.values_mut() {
-                feed_meter(d, [0.0, 0.0], 0.0, dt, &Ballistics::from_prefs(&self.ui));
+                feed_meter(d, [0.0, 0.0], [0.0, 0.0], 0.0, dt, &Ballistics::from_prefs(&self.ui));
             }
-            feed_meter(&mut self.main_meter, [0.0, 0.0], 0.0, dt, &Ballistics::from_prefs(&self.ui));
+            feed_meter(&mut self.main_meter, [0.0, 0.0], [0.0, 0.0], 0.0, dt, &Ballistics::from_prefs(&self.ui));
         }
     }
 
@@ -1396,6 +1476,7 @@ impl SoundApp {
                 ctx.request_repaint();
             }
         }
+        widgets::set_meter_kind(&self.ui.meter_type);
         let light = theme::wants_light(ctx, self.ui.theme);
         if self.theme_applied != Some(light) || theme::is_light() != light {
             theme::apply(ctx, light);
@@ -1578,7 +1659,13 @@ impl Ballistics {
     }
 }
 
-fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32, b: &Ballistics) {
+fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], rms: [f32; 2], gr: f32, dt: f32, b: &Ballistics) {
+    let a = 1.0 - (-dt / 0.3).exp();
+    for (s, r) in d.rms.iter_mut().zip(rms) {
+        let r = if r.is_finite() { r } else { 0.0 };
+        let p = *s * *s + a * (r * r - *s * *s);
+        *s = if p < 1e-10 { 0.0 } else { p.sqrt() };
+    }
     let fall = 10f32.powf(-b.decay_db_s * dt / 20.0);
     for c in 0..2 {
         let v = peak.get(c).copied().unwrap_or(0.0);

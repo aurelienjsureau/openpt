@@ -490,6 +490,34 @@ fn workspace(app: &mut SoundApp, ctx: &egui::Context) {
     app.ui.show_workspace = open;
 }
 
+pub(crate) fn recall_configuration(app: &mut SoundApp, n: usize) -> bool {
+    let Some((_, v)) = n.checked_sub(1).and_then(|i| app.ui.configurations.get(i)).cloned() else { return false };
+    let Ok(mut st) = serde_json::from_value::<crate::UiState>(v) else { return false };
+    if let Err(error) = st.docking.validate().and_then(|()| st.mix_docking.validate_mix()) {
+        app.ui.status = format!("Window configuration could not be restored: {error}");
+        return false;
+    }
+    st.configurations = app.ui.configurations.clone();
+    st.theme = app.ui.theme;
+    st.show_configurations = app.ui.show_configurations;
+    crate::docking::cancel_replaced_state(app, &st);
+    app.ui = st;
+    true
+}
+
+pub(crate) fn store_configuration(app: &mut SoundApp, n: usize) {
+    let mut snap = app.ui.clone();
+    snap.configurations.clear();
+    let Ok(v) = serde_json::to_value(&snap) else { return };
+    match n.checked_sub(1).and_then(|i| app.ui.configurations.get_mut(i)) {
+        Some(slot) => slot.1 = v,
+        None => {
+            let k = app.ui.configurations.len() + 1;
+            app.ui.configurations.push((format!("Configuration {k}"), v));
+        }
+    }
+}
+
 fn configurations(app: &mut SoundApp, ctx: &egui::Context) {
     let mut open = app.ui.show_configurations;
     win(ctx, &mut open, "Window Configurations", vec2(320.0, 240.0), |ui| {
@@ -503,20 +531,11 @@ fn configurations(app: &mut SoundApp, ctx: &egui::Context) {
         }
         ui.separator();
         let list = app.ui.configurations.clone();
-        for (i, (name, v)) in list.iter().enumerate() {
+        for (i, (name, _)) in list.iter().enumerate() {
             ui.horizontal(|ui| {
-                if ui.button(format!("{}  {name}", i + 1)).clicked()
-                    && let Ok(mut st) = serde_json::from_value::<crate::UiState>(v.clone())
-                {
-                    if let Err(error) = st.docking.validate().and_then(|()| st.mix_docking.validate_mix()) {
-                        app.ui.status = format!("Window configuration could not be restored: {error}");
-                    } else {
-                        st.configurations = app.ui.configurations.clone();
-                        st.theme = app.ui.theme;
-                        st.show_configurations = true;
-                        crate::docking::cancel_replaced_state(app, &st);
-                        app.ui = st;
-                    }
+                if ui.button(format!("{}  {name}", i + 1)).clicked() {
+                    recall_configuration(app, i + 1);
+                    app.ui.show_configurations = true;
                 }
                 if ui.small_button("✕").clicked() {
                     app.ui.configurations.remove(i);

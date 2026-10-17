@@ -23,6 +23,21 @@ const PAGES: [(Page, &str); 6] = [
     (Page::Midi, "MIDI"),
 ];
 
+const FLAGS: [(&str, &str, &str, Page); 8] = [
+    ("options.dynamic_transport", "options.dynamic_transport", "Dynamic Transport", Page::Operation),
+    ("options.transport_online", "options.transport_online", "Transport Online", Page::Operation),
+    ("options.low_latency_monitoring", "options.low_latency_monitoring", "Low Latency Monitoring", Page::Operation),
+    ("options.auto_spot_clips", "options.auto_spot_clips", "Auto-Spot Clips", Page::Editing),
+    ("options.keyboard_lock", "options.edit_tool_mode_keyboard_lock", "Edit/Tool Mode Keyboard Lock", Page::Editing),
+    ("options.marker_target_follows_selection", "options.marker_target_follows_first_selected_track", "Marker Target Follows First Selected Track", Page::Editing),
+    ("options.midi_thru", "options.midi_thru", "MIDI Thru", Page::Midi),
+    ("options.midi_live_mode", "options.midi_live_mode", "MIDI Live Mode", Page::Midi),
+];
+
+fn flags_of(page: Page) -> impl Iterator<Item = (usize, &'static str)> {
+    FLAGS.iter().enumerate().filter(move |f| f.1.3 == page).map(|(i, f)| (i, f.2))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Opts {
     insertion_follows_playback: bool,
@@ -40,6 +55,8 @@ struct Opts {
     pre_fader_metering: bool,
     sends_default_inf: bool,
     solo_mode: String,
+    scrolling: String,
+    flags: [bool; FLAGS.len()],
 }
 
 impl Opts {
@@ -63,6 +80,8 @@ impl Opts {
             pre_fader_metering: e.pre_fader_metering,
             sends_default_inf: e.flag("pref.sends_default_inf"),
             solo_mode: e.solo_mode.split('+').next().unwrap_or("sip").to_string(),
+            scrolling: e.scrolling.clone(),
+            flags: FLAGS.map(|f| e.flag(f.1)),
         }
     }
 
@@ -93,6 +112,14 @@ impl Opts {
         if self.countoff_bars != before.countoff_bars {
             out.push(("setup.click_countoff", json!({"countoff_bars": self.countoff_bars})));
         }
+        for (i, f) in FLAGS.iter().enumerate() {
+            if self.flags[i] != before.flags[i] {
+                out.push((f.0, json!({"value": self.flags[i]})));
+            }
+        }
+        if self.scrolling != before.scrolling {
+            out.push(("options.scrolling", json!({"mode": self.scrolling})));
+        }
         if self.solo_mode != before.solo_mode {
             out.push(("options.solo_mode", json!({"mode": self.solo_mode})));
         }
@@ -116,6 +143,8 @@ struct App {
     meter_clip_hold: String,
     meter_decay_db_s: f32,
     note_names: String,
+    numeric_keypad: String,
+    meter_type: String,
     vst3_folders: Vec<String>,
 }
 
@@ -137,6 +166,8 @@ impl App {
             meter_clip_hold: u.meter_clip_hold.clone(),
             meter_decay_db_s: u.meter_decay_db_s,
             note_names: u.note_names.clone(),
+            numeric_keypad: u.numeric_keypad.clone(),
+            meter_type: u.meter_type.clone(),
             vst3_folders: u.vst3_folders.clone(),
         }
     }
@@ -156,6 +187,8 @@ impl App {
         u.meter_clip_hold = self.meter_clip_hold;
         u.meter_decay_db_s = self.meter_decay_db_s.clamp(1.0, 300.0);
         u.note_names = self.note_names;
+        u.numeric_keypad = self.numeric_keypad;
+        u.meter_type = self.meter_type;
         if u.vst3_folders != self.vst3_folders {
             u.vst3_folders = self.vst3_folders;
             openpt_vst3_host::set_search_dirs(u.vst3_folders.iter().map(std::path::PathBuf::from).collect());
@@ -326,11 +359,30 @@ fn radios(ui: &mut Ui, value: &mut String, options: &[(&str, &str)]) {
     }
 }
 
+fn flag_group(ui: &mut Ui, q: &str, title: &str, page: Page, o: &mut Opts) {
+    let labels: Vec<&str> = flags_of(page).map(|f| f.1).collect();
+    group(ui, q, title, &labels, |ui| {
+        for (i, label) in flags_of(page) {
+            check(ui, q, &mut o.flags[i], label);
+        }
+    });
+}
+
 fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_window: &mut Option<&'static str>, add_folder: &mut bool) {
     ui.columns(2, |cols| {
         let [left, right] = cols else { return };
         match page {
             Page::Display => {
+                group(right, q, "Edit Window", &["Edit Window Scrolling"], |ui| {
+                    row(ui, q, "Edit Window Scrolling", |ui| {
+                        combo(
+                            ui,
+                            "pref_scrolling",
+                            &mut o.scrolling,
+                            &[("none", "No Scrolling"), ("after_playback", "After Playback"), ("page", "Page"), ("continuous", "Continuous"), ("center", "Centered Playhead")],
+                        )
+                    });
+                });
                 group(left, q, "Basics", &["Organize Plugin Menus By", "Interface Scale", "Track Color Tint"], |ui| {
                     row(ui, q, "Organize Plugin Menus By", |ui| {
                         combo(
@@ -358,6 +410,7 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                 });
             }
             Page::Operation => {
+                flag_group(right, q, "Options", Page::Operation, o);
                 group(
                     left,
                     q,
@@ -372,6 +425,9 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                         row(ui, q, "Countoff", |ui| number(ui, &mut o.countoff_bars, 1..=16, 0.1, "bars"));
                     },
                 );
+                group(right, q, "Numeric Keypad", &["Numeric Keypad", "Classic", "Transport", "Shuttle"], |ui| {
+                    radios(ui, &mut a.numeric_keypad, &[("classic", "Classic"), ("transport", "Transport"), ("shuttle", "Shuttle")]);
+                });
                 group(left, q, "Auto Backup", &["Enable Session File Auto Backup", "Backup every"], |ui| {
                     check(ui, q, &mut a.autosave_enabled, "Enable Session File Auto Backup");
                     row(ui, q, "Backup every", |ui| number(ui, &mut a.autosave_minutes, 1..=120, 0.1, "minutes"));
@@ -389,6 +445,7 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                 });
             }
             Page::Editing => {
+                flag_group(right, q, "Options", Page::Editing, o);
                 group(
                     left,
                     q,
@@ -453,11 +510,20 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                     });
                     row(ui, q, "Decay", |ui| number(ui, &mut a.meter_decay_db_s, 1.0..=300.0, 0.5, "dB/s"));
                 });
-                group(right, q, "Track Meters", &["Pre-Fader Metering"], |ui| {
+                group(right, q, "Track Meters", &["Pre-Fader Metering", "Meter Type", "VU", "K-20", "K-14", "K-12"], |ui| {
                     check(ui, q, &mut o.pre_fader_metering, "Pre-Fader Metering");
+                    if hit(q, "Meter Type") || hit(q, "VU") || hit(q, "K-20") {
+                        ui.label("Meter Type:");
+                        radios(
+                            ui,
+                            &mut a.meter_type,
+                            &[("peak", "Sample Peak"), ("vu", "VU (0 VU = -18 dBFS)"), ("k20", "K-20"), ("k14", "K-14"), ("k12", "K-12")],
+                        );
+                    }
                 });
             }
             Page::Midi => {
+                flag_group(right, q, "Options", Page::Midi, o);
                 group(left, q, "Note Display", &["Middle C", "Note Display"], |ui| {
                     radios(
                         ui,

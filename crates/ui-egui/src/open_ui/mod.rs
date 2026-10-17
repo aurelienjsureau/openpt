@@ -202,7 +202,7 @@ pub fn knob_with(ui: &mut Ui, cx: &mut Ctx, cell: Rect, prm: &ParamInfo, v: f32,
     let mut n = prm.to_normalized(v);
     let mut changed = false;
     if resp.dragged() {
-        let fine = if ui.input(|i| i.modifiers.shift) { 0.15 } else { 1.0 };
+        let fine = if ui.input(|i| i.modifiers.shift || i.modifiers.command) { 0.15 } else { 1.0 };
         n = (n - resp.drag_delta().y * 0.005 * fine).clamp(0.0, 1.0);
         changed = true;
     }

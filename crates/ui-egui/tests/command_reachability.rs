@@ -9,8 +9,6 @@ const KNOWN_UNREACHED: &[&str] = &[
     "edit.paste_clip_gain",
     "event.midi_note",
     "file.bounce_stems",
-    "markers.next",
-    "markers.previous",
     "mix.insert_move",
     "mix.new_bus",
     "mix.phase_invert",

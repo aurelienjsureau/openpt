@@ -113,7 +113,10 @@ pub fn create_instance_on(
 pub struct StripMeter {
     pub peak: [f32; 2],
     pub peaks: Vec<f32>,
+    pub rms: [f32; 2],
     pub gain_reduction_db: f32,
+    pub latency: u32,
+    pub compensation: u32,
     pub plugin_failures: PluginFailures,
 }
 
@@ -134,7 +137,10 @@ impl StripMeter {
     pub fn copy_from(&mut self, o: &StripMeter) {
         self.peak = o.peak;
         self.peaks.clone_from(&o.peaks);
+        self.rms = o.rms;
         self.gain_reduction_db = o.gain_reduction_db;
+        self.latency = o.latency;
+        self.compensation = o.compensation;
         self.plugin_failures = o.plugin_failures;
     }
 
@@ -147,6 +153,11 @@ impl StripMeter {
         }
         let last = self.peaks.len().saturating_sub(1);
         self.peak = [self.peaks.first().copied().unwrap_or(0.0), self.peaks.get(1.min(last)).copied().unwrap_or(0.0)];
+        let rms = |c: usize| bufs.get(c).map_or(0.0, |b| {
+            let b = b.get(..frames).unwrap_or(&[]);
+            if b.is_empty() { 0.0 } else { (b.iter().map(|x| x * x).sum::<f32>() / b.len() as f32).sqrt() }
+        });
+        self.rms = [rms(0), rms(1.min(last))];
         self.gain_reduction_db = gr;
     }
 }
@@ -246,6 +257,8 @@ struct Strip {
     align: DelayLine,
     align_pre: DelayLine,
     out_extra: DelayLine,
+    send_lines: Vec<DelayLine>,
+    send_buf: Vec<Vec<f32>>,
     outbuf: Vec<Vec<f32>>,
     failures: PluginFailures,
     key_wait: DelayLine,
@@ -276,7 +289,6 @@ impl DelayLine {
             self.bufs = vec![vec![0.0; len]; ch];
         }
     }
-    #[cfg(test)]
     #[inline]
     fn len(&self) -> usize {
         self.len
@@ -333,6 +345,8 @@ impl Strip {
             align: DelayLine::default(),
             align_pre: DelayLine::default(),
             out_extra: DelayLine::default(),
+            send_lines: Vec::new(),
+            send_buf: Vec::new(),
             outbuf: Vec::new(),
             failures: PluginFailures::default(),
             key_wait: DelayLine::default(),
@@ -363,8 +377,10 @@ pub struct MixEngine {
     order: Vec<usize>,
     pub latency: usize,
     track_latency: usize,
-    aux_fed: Vec<BusId>,
-    aux_latency: usize,
+    pdc: bool,
+    arrive: HashMap<BusId, usize>,
+    main_arrive: usize,
+    aux_out: HashMap<TrackId, usize>,
     pub input: Vec<Vec<f32>>,
     pub midi_input: Vec<(usize, LiveMidiEvent)>,
     pub midi_routed: Vec<(TrackId, usize, [u8; 3])>,
@@ -438,8 +454,10 @@ impl MixEngine {
             order: Vec::new(),
             latency: 0,
             track_latency: 0,
-            aux_fed: Vec::new(),
-            aux_latency: 0,
+            pdc: false,
+            arrive: HashMap::new(),
+            main_arrive: 0,
+            aux_out: HashMap::new(),
             input: Vec::new(),
             midi_input: Vec::with_capacity(256),
             midi_routed: Vec::with_capacity(2048),
@@ -511,6 +529,7 @@ impl MixEngine {
             s.align.clear();
             s.align_pre.clear();
             s.out_extra.clear();
+            s.send_lines.iter_mut().for_each(DelayLine::clear);
         }
         self.meters.clear();
         self.main_meter = StripMeter::default();
@@ -706,22 +725,55 @@ impl MixEngine {
             }
         }
         let lmax_t = if pdc { work.iter().map(|(_, st)| st.latency).max().unwrap_or(0) } else { 0 };
-        let lmax_a =
-            if pdc { self.strips.iter().filter(|(id, _)| s.track(**id).is_some_and(is_aux)).map(|(_, st)| st.latency).max().unwrap_or(0) } else { 0 };
+        self.pdc = pdc;
         self.track_latency = lmax_t;
-        self.latency = lmax_t + lmax_a + lmax_m;
-        self.aux_latency = lmax_a;
-        self.aux_fed.clear();
+        self.arrive.clear();
+        self.aux_out.clear();
+        let mut main_at = lmax_t;
         if pdc {
-            for t in s.tracks.iter().filter(|t| is_aux(t) && live(t)) {
-                if let Route::Bus(b) = &t.mixer.output
-                    && !self.aux_fed.contains(b)
-                {
-                    self.aux_fed.push(*b);
+            fn note(arrive: &mut HashMap<BusId, usize>, main_at: &mut usize, r: &Route, at: usize) {
+                match r {
+                    Route::Main => *main_at = (*main_at).max(at),
+                    Route::Bus(b) => {
+                        let e = arrive.entry(*b).or_insert(0);
+                        *e = (*e).max(at);
+                    }
+                    _ => {}
+                }
+            }
+            for (i, _) in work.iter() {
+                let Some(t) = s.tracks.get(*i) else { continue };
+                if t.mixer.record_arm || t.mixer.input_monitor {
+                    continue;
+                }
+                note(&mut self.arrive, &mut main_at, &t.mixer.output, lmax_t);
+                for snd in t.mixer.sends.iter().flatten() {
+                    note(&mut self.arrive, &mut main_at, &snd.target, lmax_t);
+                }
+            }
+            let auxes: Vec<&Track> = order.iter().filter_map(|&i| s.tracks.get(i)).filter(|t| live(t) && is_aux(t)).collect();
+            for _ in 0..4 {
+                let mut changed = false;
+                for t in &auxes {
+                    let input = match &t.mixer.input {
+                        Route::Bus(b) => self.arrive.get(b).copied().unwrap_or(lmax_t),
+                        _ => lmax_t,
+                    };
+                    let at = input.saturating_add(self.strips.get(&t.id).map_or(0, |st| st.latency));
+                    changed |= self.aux_out.insert(t.id, at) != Some(at);
+                    note(&mut self.arrive, &mut main_at, &t.mixer.output, at);
+                    for snd in t.mixer.sends.iter().flatten() {
+                        note(&mut self.arrive, &mut main_at, &snd.target, at);
+                    }
+                }
+                if !changed {
+                    break;
                 }
             }
         }
-        let align = |t: &Track, st: &mut Strip, aux_fed: &[BusId]| {
+        self.main_arrive = main_at;
+        self.latency = main_at + lmax_m;
+        let align = |t: &Track, st: &mut Strip| {
             let ch = st.buf.len();
             let is_monitored = t.mixer.record_arm || t.mixer.input_monitor;
             let align_delay = if pdc && !is_monitored { lmax_t.saturating_sub(st.latency) } else { 0 };
@@ -731,18 +783,12 @@ impl MixEngine {
                 st.align_pre.set(align_delay, ch);
                 st.align_pre.process(&mut st.pre, frames);
             }
-            let waits = match &t.mixer.output {
-                Route::Main => !is_monitored,
-                Route::Bus(b) => !is_monitored && aux_fed.contains(b),
-                _ => false,
-            };
-            st.out_extra.set(if waits { lmax_a } else { 0 }, ch);
         };
         let extra_delay =
             |t: &Track, st: &Strip| if pdc && !(t.mixer.record_arm || t.mixer.input_monitor) { lmax_t.saturating_sub(st.latency) } else { 0 };
         for (i, st) in work.iter_mut().take(n_free) {
             if let Some(t) = s.tracks.get(*i) {
-                align(t, st, &self.aux_fed);
+                align(t, st);
                 self.route_strip(t, st, pos, frames);
                 let d = extra_delay(t, st);
                 self.route_extras(t, st, d, frames);
@@ -760,7 +806,7 @@ impl MixEngine {
             process_strip(s, t, st, &self.busses, Some(&self.keys), &live_in, pos, frames, any_solo);
             let law = self.pan_law;
             feed_keys(t, st, &mut self.keys, &self.key_latency, pos, frames, law);
-            align(t, st, &self.aux_fed);
+            align(t, st);
             self.route_strip(t, st, pos, frames);
             let d = extra_delay(t, st);
             self.route_extras(t, st, d, frames);
@@ -786,9 +832,8 @@ impl MixEngine {
             };
             process_strip(s, t, &mut st, &self.busses, None, &live_in, pos, frames, any_solo);
             let ch = st.buf.len();
-            st.align.set(if pdc { lmax_a.saturating_sub(st.latency) } else { 0 }, ch);
-            st.align.process(&mut st.buf, frames);
-            st.out_extra.set(0, ch);
+            st.align.set(0, ch);
+            st.align_pre.set(0, ch);
             self.route_strip(t, &mut st, pos, frames);
             self.strips.insert(t.id, st);
         }
@@ -850,10 +895,12 @@ impl MixEngine {
     fn route_extras(&mut self, t: &Track, st: &mut Strip, delay: usize, frames: usize) {
         let Some(ins) = t.instrument.as_ref().filter(|i| i.multi_out) else { return };
         st.extra_align.resize_with(st.extras.len(), DelayLine::default);
+        let waits: Vec<usize> = ins.outputs.iter().map(|b| self.wait_for(t, &Route::Bus(*b))).collect();
         for (k, (out, line)) in st.extras.iter_mut().zip(st.extra_align.iter_mut()).enumerate() {
+            let wait = waits.get(k).copied().unwrap_or(0);
             let Some(b) = ins.outputs.get(k) else { break };
             let Some(dst) = self.busses.get_mut(b) else { continue };
-            line.set(delay, out.len());
+            line.set((delay + wait).min(MAX_LATENCY), out.len());
             line.process(out, frames);
             let (ns, nd) = (out.len(), dst.buf.len());
             let m = if ns == nd {
@@ -901,7 +948,29 @@ impl MixEngine {
         }
     }
     fn bus_latency(&self, bus: BusId) -> usize {
-        self.track_latency + if self.aux_fed.contains(&bus) { self.aux_latency } else { 0 }
+        self.arrive.get(&bus).copied().unwrap_or(self.track_latency)
+    }
+
+    fn departure(&self, t: &Track) -> Option<usize> {
+        if !self.pdc {
+            None
+        } else if reads_bus(t) {
+            self.aux_out.get(&t.id).copied()
+        } else if t.mixer.record_arm || t.mixer.input_monitor {
+            None
+        } else {
+            Some(self.track_latency)
+        }
+    }
+
+    fn wait_for(&self, t: &Track, dest: &Route) -> usize {
+        let Some(d) = self.departure(t) else { return 0 };
+        match dest {
+            Route::Main => self.main_arrive.saturating_sub(d),
+            Route::Bus(b) => self.arrive.get(b).map_or(0, |a| a.saturating_sub(d)),
+            _ => 0,
+        }
+        .min(MAX_LATENCY)
     }
 
     fn copy_bus(&self, bus: BusId, frames: usize, out: &mut [Vec<f32>]) {
@@ -925,16 +994,43 @@ impl MixEngine {
         let m = self.meters.entry(t.id).or_default();
         m.measure(&strip.buf, frames, strip.gr);
         m.plugin_failures = strip.failures;
+        m.latency = strip.latency as u32;
+        m.compensation = strip.align.len() as u32;
         let src_fmt = strip_format(t, strip.buf.len());
         let law = self.pan_law;
+        let waits: Vec<usize> = t.mixer.sends.iter().map(|x| x.as_ref().map_or(0, |x| self.wait_for(t, &x.target))).collect();
+        if strip.send_lines.len() < waits.len() {
+            strip.send_lines.resize_with(waits.len(), DelayLine::default);
+        }
+        strip.out_extra.set(self.wait_for(t, &t.mixer.output), strip.buf.len());
         for (i, snd) in t.mixer.sends.iter().enumerate() {
             let Some(snd) = snd else { continue };
+            let wait = waits.get(i).copied().unwrap_or(0);
+            let ch = if snd.pre_fader { strip.pre.len() } else { strip.buf.len() };
+            if let Some(line) = strip.send_lines.get_mut(i) {
+                line.set(wait, ch);
+                if wait > 0 {
+                    let src = if snd.pre_fader { &strip.pre } else { &strip.buf };
+                    strip.send_buf.resize_with(src.len(), Vec::new);
+                    for (d, x) in strip.send_buf.iter_mut().zip(src) {
+                        d.clear();
+                        d.extend_from_slice(x.get(..frames).unwrap_or(&[]));
+                    }
+                    line.process(&mut strip.send_buf, frames);
+                }
+            }
             if snd.mute || strip.muted {
                 continue;
             }
             let lvl = send_level(t, i, snd.level_db, pos);
             let gain = db_to_gain(lvl);
-            let src = if snd.pre_fader { &strip.pre } else { &strip.buf };
+            let src = if wait > 0 {
+                &strip.send_buf
+            } else if snd.pre_fader {
+                &strip.pre
+            } else {
+                &strip.buf
+            };
             let Route::Bus(b) = &snd.target else { continue };
             let Some(dst) = self.busses.get_mut(b) else { continue };
             if gain <= 0.0 {
@@ -3313,6 +3409,103 @@ mod tests {
         s.track_mut(aux).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("lookahead".into(), 0.0);
         let zero = render(&s, 0, n as i64);
         assert_eq!(impulse_at(&zero[0]), impulse_at(&control[0]));
+    }
+
+    #[test]
+    fn aux_chains_of_different_depths_line_up() {
+        for (master_lookahead, verb_lookahead, verb_to_mix) in [(5.0, 0.0, false), (0.0, 5.0, false), (5.0, 2.0, false), (5.0, 2.0, true), (2.0, 5.0, true)] {
+            let mut s = Session::default();
+            s.edit.click = false;
+            let n = 16_384;
+            let mut imp = vec![0.0f32; n];
+            imp[3000] = 0.25;
+            s.pool.insert(SourceId(903), Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![imp.clone(), imp] })));
+            let mix = s.add_bus("Mix", ChannelFormat::Stereo);
+            let verb = s.add_bus("Verb", ChannelFormat::Stereo);
+            let src = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Source"));
+            let master = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Master"));
+            let ret = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Verb"));
+            let cid = s.new_clip_id();
+            s.track_mut(src).unwrap().playlist_mut().unwrap().clips.push(Clip::audio(cid, "i", SourceId(903), 0, 0, n as i64));
+            s.track_mut(src).unwrap().mixer.output = Route::Bus(mix);
+            let mut send = openpt_model::SendSlot::new(Route::Bus(verb));
+            send.level_db = 0.0;
+            s.track_mut(src).unwrap().mixer.sends[0] = Some(send);
+            s.track_mut(master).unwrap().mixer.input = Route::Bus(mix);
+            s.track_mut(ret).unwrap().mixer.input = Route::Bus(verb);
+            if verb_to_mix {
+                s.track_mut(ret).unwrap().mixer.output = Route::Bus(mix);
+            }
+            for (t, la) in [(master, master_lookahead), (ret, verb_lookahead)] {
+                if la > 0.0 {
+                    let mut comp = Insert::new("compressor");
+                    comp.params.insert("lookahead".into(), la);
+                    comp.params.insert("ratio".into(), 1.0);
+                    s.track_mut(t).unwrap().mixer.inserts[0] = Some(comp);
+                }
+            }
+            let mut eng = MixEngine::new(48_000.0, 512);
+            let mut all = vec![Vec::new(), Vec::new()];
+            let mut out = vec![vec![0.0f32; 512]; 2];
+            for b in 0..(n / 512) {
+                eng.render(&s, (b * 512) as i64, 512, &mut out);
+                for (a, o) in all.iter_mut().zip(&out) {
+                    a.extend_from_slice(o);
+                }
+            }
+            let hits = impulse_at(&all[0]);
+            let case = (master_lookahead, verb_lookahead, verb_to_mix);
+            assert_eq!(hits.len(), 1, "{case:?}: dry and return apart at {hits:?}");
+            assert_eq!(hits[0], 3000 + eng.latency, "{case:?}: the reported latency is the real one");
+        }
+    }
+
+    #[test]
+    fn a_send_to_a_latent_aux_stays_in_phase_with_the_dry_track() {
+        for pre in [false, true] {
+            for (other_latent, source_latent) in [(false, false), (true, false), (false, true), (true, true)] {
+                let mut s = Session::default();
+                s.edit.click = false;
+                let n = 16_384;
+                let mut imp = vec![0.0f32; n];
+                imp[3000] = 0.25;
+                s.pool.insert(SourceId(902), Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![imp.clone(), imp] })));
+                let bus = s.add_bus("Verb", ChannelFormat::Stereo);
+                let src = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Source"));
+                let aux = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Return"));
+                let cid = s.new_clip_id();
+                s.track_mut(src).unwrap().playlist_mut().unwrap().clips.push(Clip::audio(cid, "i", SourceId(902), 0, 0, n as i64));
+                let mut send = openpt_model::SendSlot::new(Route::Bus(bus));
+                send.level_db = 0.0;
+                send.pre_fader = pre;
+                s.track_mut(src).unwrap().mixer.sends[0] = Some(send);
+                s.track_mut(aux).unwrap().mixer.input = Route::Bus(bus);
+                let mut comp = Insert::new("compressor");
+                comp.params.insert("lookahead".into(), 5.0);
+                comp.params.insert("ratio".into(), 1.0);
+                s.track_mut(aux).unwrap().mixer.inserts[0] = Some(comp.clone());
+                if source_latent {
+                    let mut c2 = comp.clone();
+                    c2.params.insert("lookahead".into(), 2.0);
+                    s.track_mut(src).unwrap().mixer.inserts[0] = Some(c2);
+                }
+                if other_latent {
+                    let o = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Other"));
+                    s.track_mut(o).unwrap().mixer.inserts[0] = Some(comp.clone());
+                }
+                let mut eng = MixEngine::new(48_000.0, 512);
+                let mut all = vec![Vec::new(), Vec::new()];
+                let mut out = vec![vec![0.0f32; 512]; 2];
+                for b in 0..(n / 512) {
+                    eng.render(&s, (b * 512) as i64, 512, &mut out);
+                    for (a, o) in all.iter_mut().zip(&out) {
+                        a.extend_from_slice(o);
+                    }
+                }
+                let hits = impulse_at(&all[0]);
+                assert_eq!(hits.len(), 1, "pre {pre}, other latent {other_latent}, source latent {source_latent}: dry and send apart at {hits:?}");
+            }
+        }
     }
 
     #[test]

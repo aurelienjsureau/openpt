@@ -400,7 +400,7 @@ impl AudioState {
             return;
         }
         let speed = f64::from(self.shared.speed.load(Ordering::Relaxed)) / 1000.0;
-        let step = self.session.sample_rate.as_f64() / self.device_rate.max(1.0) * speed.clamp(0.1, 4.0);
+        let step = self.session.sample_rate.as_f64() / self.device_rate.max(1.0) * speed.clamp(0.0625, 4.0);
         let callback_frames = out.len() / channels;
         let quantum = ((callback_frames as f64 * step).ceil() as usize).clamp(1, BLOCK);
         for frame in out.chunks_mut(channels) {
@@ -872,7 +872,7 @@ impl Player {
     }
 
     pub fn set_speed(&self, speed: f32) {
-        let v = if speed.is_finite() { (speed.clamp(0.1, 4.0) * 1000.0) as u32 } else { 1000 };
+        let v = if speed.is_finite() { (speed.clamp(0.0625, 4.0) * 1000.0) as u32 } else { 1000 };
         self.shared.speed.store(v, Ordering::Relaxed);
     }
 

@@ -19,7 +19,7 @@ pub fn specs() -> Vec<CommandSpec> {
         )),
         cmd!("clip.send_to_back", "Send to Back", ["Clip"], Some("Alt+Shift+B"), "{clips?}", has_selection, |e, p| layer(e, p, false)),
         cmd!("clip.bring_to_front", "Bring to Front", ["Clip"], Some("Alt+Shift+F"), "{clips?}", has_selection, |e, p| layer(e, p, true)),
-        cmd!("clip.rating", "Rating", ["Clip", "Rating"], Some("Cmd+Alt+0-5"), "{clips?, rating: 0..5}", has_selection, |e, p| {
+        cmd!("clip.rating", "Rating", ["Clip", "Rating"], Some("Cmd+Alt+Ctrl+0-5"), "{clips?, rating: 0..5}", has_selection, |e, p| {
             let ids = clip_ids_param(e, p);
             let r = i64_or(p, "rating", 0).clamp(0, 5) as u8;
             let s = e.session_mut();

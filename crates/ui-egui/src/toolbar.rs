@@ -168,7 +168,30 @@ fn tools(app: &mut SoundApp, ui: &mut Ui) {
                 ] {
                     let smart_member = cur == Tool::Smart && matches!(tool, Tool::Trim | Tool::Selector | Tool::Grabber);
                     let tip = format!("{}{}", tool.label(), tool.fkey().map(|k| format!(" ({k})")).unwrap_or_default());
-                    if icon_button(ui, vec2(36.0, 26.0), icon, cur == tool || smart_member, &tip).clicked() {
+                    let variants: &[(&str, &str)] = match tool {
+                        Tool::Trim => &[("standard", "Standard"), ("tce", "TCE"), ("scrub", "Scrub"), ("loop", "Loop")],
+                        Tool::Grabber => &[("time", "Time"), ("separation", "Separation"), ("object", "Object")],
+                        _ => &[],
+                    };
+                    let variant = openpt_engine::cmd::tool_variant(&app.engine.session().edit, tool);
+                    let label = variants.iter().find(|v| v.0 == variant).map(|v| v.1).unwrap_or("");
+                    let tip = if variants.len() > 1 { format!("{tip} — {label} (right-click for the others)") } else { tip };
+                    let resp = icon_button(ui, vec2(36.0, 26.0), icon, cur == tool || smart_member, &tip);
+                    if variants.len() > 1 && variant != variants[0].0 {
+                        let c = resp.rect.right_bottom() - vec2(5.0, 6.0);
+                        ui.painter().text(c, egui::Align2::CENTER_CENTER, &label[..1], crate::theme::bold(8.0), t.accent);
+                    }
+                    if !variants.is_empty() {
+                        resp.context_menu(|ui| {
+                            for (v, name) in variants {
+                                if ui.selectable_label(variant == *v, *name).clicked() {
+                                    let _ = app.run("edit.tool", json!({"tool": tool.id(), "variant": v}));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                    if resp.clicked() {
                         let _ = app.run("edit.tool", json!({"tool": tool.id()}));
                     }
                 }
@@ -539,6 +562,6 @@ fn output_meter(app: &mut SoundApp, ui: &mut Ui) {
     let w = (r.width() - 6.0) / 2.0;
     for c in 0..2 {
         let rr = Rect::from_min_size(pos2(r.min.x + 2.0 + c as f32 * (w + 2.0), r.min.y), vec2(w, r.height()));
-        crate::widgets::meter(ui, rr, m.level[c], m.hold[c], m.clip);
+        crate::widgets::meter(ui, rr, m.shown(c), m.hold[c], m.clip);
     }
 }
