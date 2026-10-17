@@ -23,10 +23,30 @@ fn set_title(ctx: &egui::Context, title: String) {
     }
 }
 
+fn note_frame_time(ms: f32) {
+    use std::cell::Cell;
+    use std::time::Instant;
+    std::thread_local! {
+        static SLOW: Cell<(Option<Instant>, u32, f32)> = const { Cell::new((None, 0, 0.0)) };
+    }
+    if ms < 50.0 {
+        return;
+    }
+    let (last, n, worst) = SLOW.get();
+    let (n, worst) = (n + 1, worst.max(ms));
+    if last.is_none_or(|t| t.elapsed().as_secs() >= 2) {
+        log::warn!("slow frames: {n} of 50 ms or more, worst {worst:.0} ms");
+        SLOW.set((Some(Instant::now()), 0, 0.0));
+    } else {
+        SLOW.set((last, n, worst));
+    }
+}
+
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if let Some(cpu) = frame.info().cpu_usage {
             self.0.cpu_ms = self.0.cpu_ms * 0.9 + cpu * 1000.0 * 0.1;
+            note_frame_time(cpu * 1000.0);
         }
         if let Some(logger) = self.1 {
             logger.report_audio_thread();
@@ -218,6 +238,13 @@ fn main() -> eframe::Result {
         register_vst3_scanner();
     }
     let logger = logging::install();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let failed = openpt_vst3_host::boost_process();
+        if !failed.is_empty() {
+            log::warn!("scheduling: could not set {}", failed.join(", "));
+        }
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("OpenPT {}", env!("CARGO_PKG_VERSION"));
@@ -278,7 +305,14 @@ fn main() -> eframe::Result {
         "OpenPT",
         options,
         Box::new(move |cc| {
-            let player = if no_audio { None } else { Some(openpt_playback::Player::with_config(Arc::new(engine.session().clone()), &prefs.audio)) };
+            if let Some(rs) = &cc.wgpu_render_state {
+                let i = rs.adapter.get_info();
+                log::info!("graphics adapter: {} ({:?}, {:?}, driver {} {})", i.name, i.device_type, i.backend, i.driver, i.driver_info);
+                if i.device_type == eframe::wgpu::DeviceType::Cpu {
+                    log::warn!("graphics adapter is a software renderer: drawing runs on the CPU and will be slow (update the graphics driver)");
+                }
+            }
+            let player =if no_audio { None } else { Some(openpt_playback::Player::with_config(Arc::new(engine.session().clone()), &prefs.audio)) };
             let mut app = SoundApp::new(engine, player, services());
             app.autosave_dir = prefs_path().and_then(|p| p.parent().map(|d| d.join("Autosave")));
             app.leftovers = app.autosave_dir.as_deref().map(openpt_engine::autosave::leftovers).unwrap_or_default();

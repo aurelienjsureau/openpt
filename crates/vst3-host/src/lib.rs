@@ -75,6 +75,65 @@ mod keys {
     pub fn disable_ime() {}
 }
 
+pub fn boost_process() -> Vec<&'static str> {
+    prio::boost_process()
+}
+
+pub fn pro_audio_thread() {
+    prio::pro_audio_thread();
+}
+
+#[allow(unsafe_code)]
+mod prio {
+    #[cfg(windows)]
+    pub fn boost_process() -> Vec<&'static str> {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentProcess, HIGH_PRIORITY_CLASS, PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+            PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION, PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetPriorityClass,
+            SetProcessInformation,
+        };
+        let mut failed = Vec::new();
+        let state = PROCESS_POWER_THROTTLING_STATE {
+            Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+            ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+            StateMask: 0,
+        };
+        unsafe {
+            if SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS) == 0 {
+                failed.push("high priority class");
+            }
+            let size = u32::try_from(std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>()).unwrap_or(0);
+            if SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, (&raw const state).cast(), size) == 0 {
+                failed.push("power throttling opt-out");
+            }
+            if windows_sys::Win32::Media::timeBeginPeriod(1) != 0 {
+                failed.push("1 ms timer resolution");
+            }
+        }
+        failed
+    }
+    #[cfg(not(windows))]
+    pub fn boost_process() -> Vec<&'static str> {
+        Vec::new()
+    }
+
+    #[cfg(windows)]
+    pub fn pro_audio_thread() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static DONE: Cell<bool> = const { Cell::new(false) };
+        }
+        if DONE.replace(true) {
+            return;
+        }
+        const TASK: [u16; 10] = [80, 114, 111, 32, 65, 117, 100, 105, 111, 0];
+        let mut index = 0u32;
+        unsafe { windows_sys::Win32::System::Threading::AvSetMmThreadCharacteristicsW(TASK.as_ptr(), &raw mut index) };
+    }
+    #[cfg(not(windows))]
+    pub fn pro_audio_thread() {}
+}
+
 pub const ID_PREFIX: &str = "vst3:";
 
 pub const AUDIO_MODULE_CLASS: &str = "Audio Module Class";

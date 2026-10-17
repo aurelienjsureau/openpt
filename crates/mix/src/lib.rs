@@ -1520,6 +1520,7 @@ std::thread_local! {
 
 pub fn mark_audio_thread() {
     AUDIO_THREAD.set(true);
+    openpt_vst3_host::pro_audio_thread();
 }
 
 pub fn on_audio_thread() -> bool {
@@ -1543,10 +1544,27 @@ fn run_strips<T: Send>(work: &mut [T], f: impl Fn(&mut T) + Sync + Send) {
     use rayon::prelude::*;
     if work.len() >= 4 {
         let audio = on_audio_thread();
-        work.par_iter_mut().for_each(|w| as_audio_thread(audio, || f(w)));
+        let mut run = || work.par_iter_mut().for_each(|w| as_audio_thread(audio, || f(w)));
+        match strip_pool() {
+            Some(pool) => pool.install(run),
+            None => run(),
+        }
     } else {
         work.iter_mut().for_each(f);
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn strip_pool() -> Option<&'static rayon::ThreadPool> {
+    static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .thread_name(|i| format!("openpt-mix-{i}"))
+            .start_handler(|_| openpt_vst3_host::pro_audio_thread())
+            .build()
+            .ok()
+    })
+    .as_ref()
 }
 
 #[cfg(target_arch = "wasm32")]

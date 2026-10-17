@@ -730,7 +730,12 @@ impl Player {
     }
 
     pub fn update_session(&self, s: Arc<Session>) {
+        let started = std::time::Instant::now();
         let instances = self.side().prepare(&s);
+        let took = started.elapsed();
+        if took.as_millis() >= 50 {
+            log::warn!("slow session update: {} ms ({} new plugin instances)", took.as_millis(), instances.len());
+        }
         let _ = self.tx.send(Cmd::Session(s, instances));
     }
 

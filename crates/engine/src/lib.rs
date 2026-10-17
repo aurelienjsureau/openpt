@@ -306,7 +306,12 @@ impl Engine {
         let before = Arc::clone(&self.doc);
         let rev = self.revision;
         let dirty = self.dirty;
+        let started = std::time::Instant::now();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (spec.run)(self, params)));
+        let took = started.elapsed();
+        if took.as_millis() >= 50 {
+            log::warn!("slow command: {id} took {} ms", took.as_millis());
+        }
         let result = match result {
             Ok(r) => r,
             Err(p) => {
