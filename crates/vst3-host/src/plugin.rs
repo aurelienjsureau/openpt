@@ -272,6 +272,10 @@ impl Plugin for Vst3Plugin {
         self.run(io, Some(key).filter(|k| !k.is_empty()), frames);
     }
 
+    fn gain_reduction_db(&self) -> f32 {
+        self.inst.gain_reduction_db()
+    }
+
     fn latency(&self) -> usize {
         self.latency
     }

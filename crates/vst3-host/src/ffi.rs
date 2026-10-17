@@ -26,6 +26,7 @@ const MAX_BUSES: i32 = 16;
 const MAX_BUS_CHANNELS: u32 = 64;
 pub(crate) const EVENT_CAP: usize = 1024;
 pub(crate) const PARAM_QUEUE_CAP: usize = 1024;
+const OUTPUTS_CAP: usize = 256;
 const MAX_STATE_BYTES: usize = 64 << 20;
 const EDIT_CAP: usize = 256;
 const STATE_MAGIC: &[u8; 4] = b"SCV3";
@@ -395,6 +396,7 @@ impl Bundle {
             controller: None,
             single: false,
             connections: None,
+            gain_reduction: None,
             component_initialized: true,
             controller_initialized: false,
             active: false,
@@ -444,13 +446,51 @@ impl Bundle {
                 unsafe { c.setComponentHandler(h.as_ptr()) };
             }
         }
+        inst.gain_reduction = inst
+            .controller
+            .as_ref()
+            .and_then(|c| GainReduction::query(c.as_ptr().cast()))
+            .or_else(|| GainReduction::query(inst.component.as_ptr().cast()));
         inst.editor = Arc::new(EditorLink {
+            outputs: Mutex::new(Vec::with_capacity(OUTPUTS_CAP)),
             inner: Mutex::new(EditorInner { component: Some(inst.component.clone()), controller: inst.controller.clone(), ..EditorInner::default() }),
         });
         Ok(inst)
     }
 }
 
+
+struct GainReduction(*mut sb::FUnknown);
+
+#[repr(C)]
+struct GainReductionVtbl {
+    base: sb::FUnknownVtbl,
+    get_gain_reduction_value_in_db: unsafe extern "system" fn(this: *mut sb::FUnknown) -> f64,
+}
+
+const GAIN_REDUCTION_IID: sb::TUID = vst3::uid(0x8e3c292c, 0x95924f9d, 0xb2590b1e, 0x100e4198);
+
+impl GainReduction {
+    fn query(obj: *mut sb::FUnknown) -> Option<GainReduction> {
+        if obj.is_null() {
+            return None;
+        }
+        let mut out: *mut std::ffi::c_void = std::ptr::null_mut();
+        let r = unsafe { ((*(*obj).vtbl).queryInterface)(obj, &GAIN_REDUCTION_IID, &mut out) };
+        (r == sb::kResultOk && !out.is_null()).then(|| GainReduction(out.cast()))
+    }
+
+    fn db(&self) -> f32 {
+        let v = unsafe { ((*((*self.0).vtbl as *const GainReductionVtbl)).get_gain_reduction_value_in_db)(self.0) };
+        if v.is_finite() { (-v).clamp(0.0, 96.0) as f32 } else { 0.0 }
+    }
+}
+
+impl Drop for GainReduction {
+    fn drop(&mut self) {
+        unsafe { ((*(*self.0).vtbl).release)(self.0) };
+    }
+}
 fn tuid_bytes(t: &sb::TUID) -> [u8; 16] {
     let mut out = [0u8; 16];
     for (o, b) in out.iter_mut().zip(t.iter()) {
@@ -1124,6 +1164,7 @@ pub(crate) struct Instance {
     controller: Option<ComPtr<sv::IEditController>>,
     single: bool,
     connections: Option<(ComPtr<sv::IConnectionPoint>, ComPtr<sv::IConnectionPoint>)>,
+    gain_reduction: Option<GainReduction>,
     component_initialized: bool,
     controller_initialized: bool,
     active: bool,
@@ -1258,6 +1299,10 @@ impl Instance {
         let c = self.controller.as_ref()?;
         let mut s: sv::String128 = [0; 128];
         ok(unsafe { c.getParamStringByValue(id, normalized.clamp(0.0, 1.0), &mut s) }).then(|| read_c16(&s)).filter(|t| !t.is_empty())
+    }
+
+    pub fn gain_reduction_db(&self) -> f32 {
+        self.gain_reduction.as_ref().map_or(0.0, GainReduction::db)
     }
 
     pub fn latency(&self) -> u32 {
@@ -1514,7 +1559,29 @@ impl Instance {
             processContext: &mut self.context,
         };
         let r = unsafe { p.process(&mut data) };
+        self.forward_outputs();
         if ok(r) { Ok(()) } else { Err(Vst3Error::Process(format!("process returned {r}"))) }
+    }
+}
+
+impl Instance {
+    fn forward_outputs(&self) {
+        let n = usize::try_from(self.out_params.count.load(Ordering::Relaxed).max(0)).unwrap_or(0);
+        if n == 0 {
+            return;
+        }
+        let Ok(mut out) = self.editor.outputs.try_lock() else { return };
+        for q in self.out_params.queues.iter().take(n) {
+            if q.points.load(Ordering::Relaxed) < 1 {
+                continue;
+            }
+            let (id, v) = (q.id.load(Ordering::Relaxed), f64::from_bits(q.value.load(Ordering::Relaxed)));
+            match out.iter().position(|(i, _)| *i == id) {
+                Some(k) => out[k].1 = v,
+                None if out.len() < OUTPUTS_CAP => out.push((id, v)),
+                None => {}
+            }
+        }
     }
 }
 
@@ -1523,6 +1590,7 @@ impl Drop for Instance {
         if self.editor.kill() {
             self.bundle.mark_leaked();
         }
+        self.gain_reduction = None;
         self.shutdown();
         if let Some((a, b)) = self.connections.take() {
             unsafe {
@@ -1605,6 +1673,7 @@ struct EditorInner {
 #[derive(Default)]
 pub(crate) struct EditorLink {
     inner: Mutex<EditorInner>,
+    outputs: Mutex<Vec<(u32, f64)>>,
 }
 
 impl EditorLink {
@@ -1800,6 +1869,12 @@ impl EditorLink {
         let mut g = self.lock();
         if g.window.as_ref().is_some_and(|w| !w.is_visible()) {
             EditorLink::teardown(&mut g);
+        }
+        let outputs: Vec<(u32, f64)> = self.outputs.lock().map(|mut o| o.drain(..).collect()).unwrap_or_default();
+        if let Some(c) = &g.controller {
+            for (id, v) in outputs {
+                unsafe { c.setParamNormalized(id, v.clamp(0.0, 1.0)) };
+            }
         }
     }
 
@@ -2035,7 +2110,11 @@ mod window {
     }
 
     pub fn pump_timers() {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{DispatchMessageW, EnumChildWindows, MSG, PM_REMOVE, PeekMessageW, WM_TIMER};
+        use windows_sys::Win32::Graphics::Gdi::{RDW_ALLCHILDREN, RDW_UPDATENOW, RedrawWindow};
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, EnumChildWindows, EnumThreadWindows, GetClassNameW, MSG, PM_REMOVE, PeekMessageW, WM_TIMER,
+        };
         if !on_main_thread() {
             return;
         }
@@ -2047,8 +2126,15 @@ mod window {
         if hosts.is_empty() {
             return;
         }
+        let winit = |h: HWND| {
+            let mut buf = [0u16; 32];
+            let n = unsafe { GetClassNameW(h, buf.as_mut_ptr(), buf.len() as i32) }.max(0) as usize;
+            String::from_utf16_lossy(&buf[..n]) == "Window Class"
+        };
+        let mut tops: Vec<HWND> = Vec::new();
+        unsafe { EnumThreadWindows(GetCurrentThreadId(), Some(collect), &mut tops as *mut Vec<HWND> as LPARAM) };
         let mut targets: Vec<HWND> = vec![-1isize as HWND];
-        for h in hosts {
+        for h in tops.into_iter().filter(|h| !winit(*h)) {
             targets.push(h);
             unsafe { EnumChildWindows(h, Some(collect), &mut targets as *mut Vec<HWND> as LPARAM) };
         }
@@ -2060,6 +2146,9 @@ mod window {
                 }
                 unsafe { DispatchMessageW(&msg) };
             }
+        }
+        for h in hosts {
+            unsafe { RedrawWindow(h, std::ptr::null(), std::ptr::null_mut(), RDW_UPDATENOW | RDW_ALLCHILDREN) };
         }
     }
 
