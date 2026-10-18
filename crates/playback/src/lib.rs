@@ -160,6 +160,7 @@ struct AudioState {
     rendered_samples: u64,
     garbage: Sender<Vec<Box<dyn Plugin>>>,
     old_sessions: Option<SyncSender<Arc<Session>>>,
+    latency_probe: bool,
 }
 
 fn new_engine(sr: f32) -> MixEngine {
@@ -176,6 +177,7 @@ impl AudioState {
         AudioState {
             garbage,
             old_sessions: None,
+            latency_probe: true,
             fold: fold_gains(&session),
             rx,
             shared,
@@ -210,6 +212,7 @@ impl AudioState {
                 Cmd::Recording(r) => self.recording = r,
                 Cmd::Session(s, instances) => {
                     changed = true;
+                    self.latency_probe = true;
                     if (s.sample_rate.as_f64() - self.session.sample_rate.as_f64()).abs() > 0.5 {
                         let mut old = std::mem::replace(&mut self.mix, new_engine(s.sample_rate.as_f64() as f32));
                         let _ = self.garbage.send(old.drain_plugins());
@@ -240,6 +243,7 @@ impl AudioState {
                     self.mix.reset();
                 }
                 Cmd::Stop => {
+                    self.latency_probe = true;
                     self.playing = false;
                     self.end = None;
                     self.looped = None;
@@ -393,9 +397,29 @@ impl AudioState {
         let monitoring = audio_monitoring || midi_monitoring || midi_has_events;
         if !self.playing && !monitoring {
             out.iter_mut().for_each(|x| *x = 0.0);
+            if self.latency_probe {
+                self.latency_probe = false;
+                let n = 64.min(BLOCK);
+                self.mix.render(&self.session, self.pos, n, &mut self.pending);
+                self.pending_len = 0;
+                self.read = 0.0;
+                self.send_garbage();
+                if let Ok(mut m) = self.shared.meters.try_lock() {
+                    for (k, v) in &self.mix.meters {
+                        match m.tracks.get_mut(k) {
+                            Some(d) => d.copy_from(v),
+                            None => {
+                                m.tracks.insert(*k, v.clone());
+                            }
+                        }
+                    }
+                }
+            }
             if let Ok(mut m) = self.shared.meters.try_lock() {
-                m.main = StripMeter::default();
-                m.tracks.clear();
+                m.main.clear_levels();
+                for v in m.tracks.values_mut() {
+                    v.clear_levels();
+                }
             }
             return;
         }
@@ -1236,6 +1260,31 @@ mod tests {
         tx.send(Cmd::Session(Arc::new(s44), Vec::new())).unwrap();
         st.fill(&mut out, 2);
         assert_eq!(grx.try_recv().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn latencies_are_reported_while_stopped() {
+        use openpt_model::{ChannelFormat, Insert, TrackKind};
+        let mut s = openpt_model::Session::default();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
+        let shared = Arc::new(Shared {
+            position: AtomicI64::new(0),
+            playing: AtomicBool::new(false),
+            speed: AtomicU32::new(1000),
+            meters: Mutex::new(MeterSnapshot::default()),
+        });
+        let (tx, rx) = channel();
+        let (gtx, _grx) = channel();
+        let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(openpt_model::Session::default()), 48_000.0, gtx);
+        tx.send(Cmd::Session(Arc::new(s), Vec::new())).unwrap();
+        let mut out = vec![0.0f32; 256];
+        st.fill(&mut out, 2);
+        st.fill(&mut out, 2);
+        let m = shared.meters.lock().unwrap();
+        let latency = m.tracks.get(&t).map_or(0, |m| m.latency);
+        assert!(latency > 0, "stopped, the Delay Compensation view still sees the maximizer's lookahead");
+        assert!(out.iter().all(|x| *x == 0.0), "the probe block is not heard");
     }
 
     #[test]

@@ -144,6 +144,13 @@ impl StripMeter {
         self.plugin_failures = o.plugin_failures;
     }
 
+    pub fn clear_levels(&mut self) {
+        self.peak = [0.0; 2];
+        self.peaks.fill(0.0);
+        self.rms = [0.0; 2];
+        self.gain_reduction_db = 0.0;
+    }
+
     fn measure(&mut self, bufs: &[Vec<f32>], frames: usize, gr: f32) {
         if self.peaks.len() != bufs.len() {
             self.peaks.resize(bufs.len(), 0.0);
