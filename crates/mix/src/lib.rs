@@ -2707,13 +2707,18 @@ pub fn render_track_pre_fader(s: &Session, track: TrackId, range: Range) -> Vec<
             t.mixer.solo = false;
             t.mixer.output = Route::Main;
             t.mixer.pan = match t.channels() {
-                1 => vec![0.0],
+                1 => vec![-1.0],
                 _ => vec![-1.0, 1.0],
             };
             t.automation.retain(|l| matches!(l.param, AutoParam::Plugin { .. }));
             t.mixer.sends.iter_mut().for_each(|x| *x = None);
             t.mixer.surround = None;
         } else if feeding.contains(&t.id) {
+            if t.inactive {
+                t.inactive = false;
+                t.mixer.output = Route::None;
+                t.mixer.sends.iter_mut().for_each(|x| *x = None);
+            }
             if !matches!(t.mixer.output, Route::Bus(_)) {
                 t.mixer.output = Route::None;
             }
@@ -2725,8 +2730,7 @@ pub fn render_track_pre_fader(s: &Session, track: TrackId, range: Range) -> Vec<
     if s.track(track).is_some_and(|t| t.channels() == 1)
         && let Some(l) = out.first().cloned()
     {
-        let g = std::f32::consts::SQRT_2;
-        out = vec![l.iter().map(|x| x * g).collect()];
+        out = vec![l];
     }
     out
 }

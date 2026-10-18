@@ -29,11 +29,19 @@ fn an_aux_commits_what_its_bus_carries() {
     e.execute("mix.send", &json!({"track": src.0, "slot": 0, "bus": "Verb", "pre_fader": true})).unwrap();
 
     let range = Range::new(0, 48_000);
+    let mono = openpt_mix::render_track_pre_fader(e.session(), src, range);
+    assert_eq!(mono.len(), 1);
+    assert!((peak(&mono) - 0.25).abs() < 1e-5, "a mono track commits at unity: {}", peak(&mono));
     let heard = peak(&openpt_mix::render_track_pre_fader(e.session(), aux, range));
     assert!(heard > 0.1, "the send reaches the committed aux: {heard}");
     e.session_mut().track_mut(src).unwrap().mixer.output = Route::None;
     let send_only = peak(&openpt_mix::render_track_pre_fader(e.session(), aux, range));
     assert!((heard - send_only).abs() < 1e-4, "the source's own output stays out: {heard} vs {send_only}");
+
+    e.execute("track.commit", &json!({"tracks": [src.0]})).unwrap();
+    assert!(e.session().track(src).unwrap().inactive);
+    let after = peak(&openpt_mix::render_track_pre_fader(e.session(), aux, range));
+    assert!((heard - after).abs() < 1e-4, "a source committed first still feeds the aux: {after}");
 
     let r = e.execute("track.commit", &json!({"tracks": [aux.0]})).unwrap();
     assert_eq!(r["tracks"].as_array().map(Vec::len), Some(1), "{r}");
