@@ -96,6 +96,7 @@ fn mix_view_aliases() -> &'static [(&'static str, &'static str)] {
             "Track Color",
             "Comments",
             "EQ Curve",
+            "Delay Compensation",
             "Meters and Faders",
             "All",
             "Minimal",
@@ -690,7 +691,7 @@ mod tests {
         let a = first.iter().find(|(path, _)| path.contains("Mix Window Views > All")).map(|(path, _)| *path).unwrap();
         let b = second.iter().find(|(path, _)| path.contains("Mix Window Views > All")).map(|(path, _)| *path).unwrap();
         assert!(std::ptr::eq(a, b));
-        assert_eq!(first.iter().filter(|(path, _)| path.contains("Mix Window Views")).count(), 15);
+        assert_eq!(first.iter().filter(|(path, _)| path.contains("Mix Window Views")).count(), 16);
     }
 
     #[test]
