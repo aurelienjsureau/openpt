@@ -998,18 +998,19 @@ impl MixEngine {
     }
 
     fn route_strip(&mut self, t: &Track, strip: &mut Strip, pos: Samples, frames: usize) {
+        let out_wait = self.wait_for(t, &t.mixer.output);
         let m = self.meters.entry(t.id).or_default();
         m.measure(&strip.buf, frames, strip.gr);
         m.plugin_failures = strip.failures;
         m.latency = strip.latency as u32;
-        m.compensation = strip.align.len() as u32;
+        m.compensation = u32::try_from(strip.align.len() + out_wait).unwrap_or(u32::MAX);
         let src_fmt = strip_format(t, strip.buf.len());
         let law = self.pan_law;
         let waits: Vec<usize> = t.mixer.sends.iter().map(|x| x.as_ref().map_or(0, |x| self.wait_for(t, &x.target))).collect();
         if strip.send_lines.len() < waits.len() {
             strip.send_lines.resize_with(waits.len(), DelayLine::default);
         }
-        strip.out_extra.set(self.wait_for(t, &t.mixer.output), strip.buf.len());
+        strip.out_extra.set(out_wait, strip.buf.len());
         for (i, snd) in t.mixer.sends.iter().enumerate() {
             let Some(snd) = snd else { continue };
             let wait = waits.get(i).copied().unwrap_or(0);

@@ -1622,7 +1622,7 @@ impl SoundApp {
         dialogs::show(self, &ctx);
         if self.meters_live() {
             let editors = self.player.as_ref().is_some_and(Player::any_editor_open);
-            let hz = if self.ui.window == MainWindow::Mix && !editors { 60 } else { 30 };
+            let hz = if editors { 30 } else { 60 };
             ctx.request_repaint_after(std::time::Duration::from_millis(1000 / hz));
         } else if self.meters.values().any(|m| m.level[0] > 0.0001) {
             ctx.request_repaint_after(std::time::Duration::from_millis(80));
