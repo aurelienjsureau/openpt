@@ -773,7 +773,8 @@ pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
     if !tr.kind.is_audio_path() || tr.kind == TrackKind::Master {
         return Ok(None);
     }
-    let end = tr.clips().iter().map(Clip::end).max().unwrap_or(0);
+    let feeding = openpt_mix::feeding_tracks(s, t);
+    let end = std::iter::once(t).chain(feeding).filter_map(|x| s.track(x)).flat_map(|x| x.clips().iter().map(Clip::end)).max().unwrap_or(0);
     if end <= 0 {
         return Ok(None);
     }

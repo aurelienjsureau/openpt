@@ -2670,7 +2670,33 @@ pub fn render_clips(s: &Session, track: TrackId, range: Range) -> Vec<Vec<f32>> 
     out
 }
 
+pub fn feeding_tracks(s: &Session, track: TrackId) -> Vec<TrackId> {
+    let mut busses: Vec<BusId> = Vec::new();
+    let mut out: Vec<TrackId> = Vec::new();
+    let mut todo = vec![track];
+    while let Some(t) = todo.pop() {
+        let Some(tr) = s.track(t).filter(|tr| tr.kind == TrackKind::Aux) else { continue };
+        let Route::Bus(b) = tr.mixer.input else { continue };
+        if busses.contains(&b) {
+            continue;
+        }
+        busses.push(b);
+        for src in &s.tracks {
+            let to_bus = |r: &Route| *r == Route::Bus(b);
+            let feeds = to_bus(&src.mixer.output)
+                || src.mixer.sends.iter().flatten().any(|x| to_bus(&x.target))
+                || src.instrument.iter().chain(src.mixer.inserts.iter().flatten()).any(|i| i.multi_out && i.outputs.contains(&b));
+            if feeds && src.id != track && !out.contains(&src.id) {
+                out.push(src.id);
+                todo.push(src.id);
+            }
+        }
+    }
+    out
+}
+
 pub fn render_track_pre_fader(s: &Session, track: TrackId, range: Range) -> Vec<Vec<f32>> {
+    let feeding = feeding_tracks(s, track);
     let mut solo = s.clone();
     let fmt = s.track(track).map_or(ChannelFormat::Stereo, |t| if t.channels() > 2 { t.format } else { ChannelFormat::Stereo });
     solo.outputs = vec![openpt_model::OutputPath { name: "Out".into(), first_channel: 0, format: fmt }];
@@ -2687,6 +2713,10 @@ pub fn render_track_pre_fader(s: &Session, track: TrackId, range: Range) -> Vec<
             t.automation.retain(|l| matches!(l.param, AutoParam::Plugin { .. }));
             t.mixer.sends.iter_mut().for_each(|x| *x = None);
             t.mixer.surround = None;
+        } else if feeding.contains(&t.id) {
+            if !matches!(t.mixer.output, Route::Bus(_)) {
+                t.mixer.output = Route::None;
+            }
         } else {
             t.inactive = true;
         }
