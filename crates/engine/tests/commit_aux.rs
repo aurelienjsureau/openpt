@@ -47,3 +47,25 @@ fn an_aux_commits_what_its_bus_carries() {
     assert_eq!(r["tracks"].as_array().map(Vec::len), Some(1), "{r}");
     assert!(e.session().track(aux).unwrap().inactive);
 }
+
+#[test]
+fn a_frozen_track_plays_its_render_without_its_plugins() {
+    let mut s = Session::default();
+    let t = audio_track(&mut s, "Gtr", 0.25);
+    s.track_mut(t).unwrap().mixer.inserts[0] = Some(openpt_model::Insert::new("maximizer"));
+    let mut e = Engine::new(s);
+    let range = Range::new(0, 48_000);
+    let live = openpt_mix::render_range(e.session(), range, 512);
+    let r = e.execute("track.freeze", &json!({"tracks": [t.0]})).unwrap();
+    assert_eq!(r["frozen"], true, "{r}");
+    let tr = e.session().track(t).unwrap();
+    assert!(tr.is_frozen() && tr.freeze.is_some());
+    let frozen = openpt_mix::render_range(e.session(), range, 512);
+    let diff = live.iter().flatten().zip(frozen.iter().flatten()).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+    assert!(diff < 1e-3, "the frozen render sounds as the live track: {diff}");
+
+    e.execute("track.freeze", &json!({"tracks": [t.0]})).unwrap();
+    assert!(!e.session().track(t).unwrap().is_frozen(), "a second Freeze unfreezes");
+    assert!(e.undo());
+    assert!(e.session().track(t).unwrap().is_frozen());
+}

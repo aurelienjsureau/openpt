@@ -827,6 +827,59 @@ fn place_commit(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) 
     Some(nt)
 }
 
+pub fn freeze_track(e: &mut Engine, t: TrackId) -> Result<bool> {
+    let s = e.session();
+    let Some(range) = commit_range(s, t) else { return Ok(false) };
+    let Some(tr) = s.track(t) else { return Ok(false) };
+    if tr.is_frozen() {
+        return Ok(false);
+    }
+    if let Some(ins) = tr.instrument.as_ref().filter(|i| i.multi_out)
+        && s.tracks.iter().any(|a| matches!(a.mixer.input, openpt_model::Route::Bus(b) if ins.outputs.contains(&b)) && !a.is_frozen() && !a.inactive)
+    {
+        return Err(EngineError::BadParams("track.freeze".into(), format!(
+            "{}: its multiple outputs feed Aux tracks; freeze those Aux tracks with it (or first)",
+            tr.name
+        )));
+    }
+    refuse_longer(s, "track.freeze", &tr.name, "freeze", range.len(), render_limit(tr.channels().max(2)))?;
+    let audio = openpt_mix::render_track_pre_fader(s, t, range);
+    place_freeze(e, t, range, audio);
+    Ok(true)
+}
+
+pub fn freeze_captured(e: &mut Engine, captured: Vec<(TrackId, Vec<Vec<f32>>)>) -> usize {
+    let before = e.session_arc();
+    let mut n = 0;
+    for (t, mut audio) in captured {
+        let Some(range) = commit_range(e.session(), t) else { continue };
+        let len = usize::try_from(range.len()).unwrap_or(0);
+        audio.iter_mut().for_each(|c| c.resize(len, 0.0));
+        n += usize::from(place_freeze(e, t, range, audio));
+    }
+    e.push_undo("Freeze", before);
+    n
+}
+
+fn place_freeze(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) -> bool {
+    let Some(name) = e.session().track(t).map(|tr| format!("{}.frz", tr.name)) else { return false };
+    let buf = AudioBuffer { sample_rate: e.session().sample_rate.hz(), channels: audio };
+    let s = e.session_mut();
+    let src = add_source(s, &name, buf, None, FileFormat::Wav);
+    let cid = s.new_clip_id();
+    let Some(tr) = s.track_mut(t) else { return false };
+    tr.freeze = Some(Clip::audio(cid, name, src, 0, 0, range.len()));
+    tr.frozen = true;
+    true
+}
+
+pub fn unfreeze_track(e: &mut Engine, t: TrackId) {
+    if let Some(tr) = e.session_mut().track_mut(t) {
+        tr.frozen = false;
+        tr.freeze = None;
+    }
+}
+
 pub fn export_clips(e: &Engine, ids: &[openpt_model::ClipId], dir: &str) -> Result<usize> {
     let s = e.session();
     make_dir(dir)?;

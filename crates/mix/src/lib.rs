@@ -49,7 +49,7 @@ pub struct PreparedInstance {
 pub fn instance_specs(s: &Session) -> Vec<InstanceSpec> {
     let main_ch = main_channels(s);
     let mut out = Vec::new();
-    for t in &s.tracks {
+    for t in s.tracks.iter().filter(|t| !t.is_frozen()) {
         let ch = strip_channels(t, main_ch);
         for (i, ins) in t.mixer.inserts.iter().enumerate() {
             if let Some(ins) = ins
@@ -96,22 +96,21 @@ fn create_instance_with(
     ara: Option<&openpt_dsp::AraTrack>,
     offline: bool,
 ) -> Option<NewInstance> {
+    let started = std::time::Instant::now();
     let multi_out = id.starts_with(openpt_model::MULTI_OUT_PREFIX);
     let id = id.strip_prefix(openpt_model::MULTI_OUT_PREFIX).unwrap_or(id);
-    let (mut plugin, refused_state) = match id.strip_prefix(openpt_model::MULTI_MONO_PREFIX) {
+    let state_first = !multi_out;
+    let (mut plugin, mut refused_state) = match id.strip_prefix(openpt_model::MULTI_MONO_PREFIX) {
         Some(inner) => {
             let (mm, refused) = multi_mono::MultiMono::new(inner, state)?;
             (Box::new(mm) as Box<dyn Plugin>, refused)
         }
         None => {
             let mut p = create_plugin(id)?;
-            let refused = state.is_some_and(|st| !p.load_state(st));
+            let refused = state_first && state.is_some_and(|st| !p.load_state(st));
             (p, refused)
         }
     };
-    if refused_state {
-        log::warn!("{id}: the plugin did not accept its stored state");
-    }
     if let Some(t) = ara {
         let bound = plugin.ara_bind(t);
         log::info!("{id}: ARA {} ({} clips)", if bound { "bound" } else { "not bound" }, t.clips.len());
@@ -119,6 +118,16 @@ fn create_instance_with(
     plugin.set_multi_output(multi_out);
     plugin.set_offline(offline);
     plugin.prepare(sample_rate, max_block, ch);
+    if !state_first && let Some(st) = state {
+        refused_state = !plugin.load_state(st);
+    }
+    if refused_state {
+        log::warn!("{id}: the plugin did not accept its stored state");
+    }
+    let took = started.elapsed();
+    if took.as_secs() >= 2 {
+        log::warn!("slow plugin instance: {id} took {} ms{}", took.as_millis(), if multi_out { " (multiple outputs)" } else { "" });
+    }
     Some(NewInstance { plugin, refused_state })
 }
 
@@ -599,7 +608,9 @@ impl MixEngine {
                 cx.retire(p);
             }
             strip.plugins.resize_with(t.mixer.inserts.len(), || None);
+            let frozen = t.is_frozen();
             for (idx, (slot, ins)) in strip.plugins.iter_mut().zip(t.mixer.inserts.iter()).enumerate() {
+                let ins = if frozen { &None } else { ins };
                 match ins {
                     Some(i) if slot.as_ref().is_none_or(|p| !i.is_instance(&p.id) || p.ch != ch) || cx.waiting(t.id, idx) => {
                         let old = slot.take();
@@ -613,7 +624,7 @@ impl MixEngine {
                     _ => {}
                 }
             }
-            let want = t.instrument.as_ref();
+            let want = t.instrument.as_ref().filter(|_| !frozen);
             let ich = ch.max(2);
             if strip.instrument.as_ref().map(|p| p.ch) != want.map(|_| ich)
                 || (want.is_some() && !matches!((&strip.instrument, want), (Some(p), Some(i)) if i.is_instance(&p.id)))
@@ -1143,6 +1154,11 @@ fn process_strip(
     }
     let transport = transport_at(s, pos, !live.monitor_only, live.recording);
     match t.kind {
+        _ if t.is_frozen() => {
+            if !live.monitor_only && let Some(c) = &t.freeze {
+                render_clip(s, c, pos, frames, &mut strip.buf, &mut strip.scratch);
+            }
+        }
         TrackKind::Audio
             if matches!(t.mixer.input, Route::Bus(_)) && (t.mixer.input_monitor || (t.mixer.record_arm && (live.monitor_only || live.recording))) =>
         {
@@ -1531,6 +1547,7 @@ fn structure_fingerprint(s: &Session) -> usize {
         t.kind.hash(&mut h);
         t.format.hash(&mut h);
         t.inactive.hash(&mut h);
+        t.is_frozen().hash(&mut h);
         t.mixer.inserts.len().hash(&mut h);
         t.mixer.input.hash(&mut h);
         t.mixer.output.hash(&mut h);

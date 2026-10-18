@@ -209,6 +209,8 @@ pub struct Track {
     pub inactive: bool,
     #[serde(default)]
     pub frozen: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freeze: Option<Clip>,
     #[serde(default)]
     pub comments: String,
     #[serde(default)]
@@ -248,6 +250,10 @@ fn yes() -> bool {
 }
 
 impl Track {
+    pub fn is_frozen(&self) -> bool {
+        self.frozen && self.freeze.is_some()
+    }
+
     pub fn new(id: TrackId, name: impl Into<String>, kind: TrackKind, format: ChannelFormat, color: [u8; 3]) -> Self {
         let name = name.into();
         let format = if kind.is_midi() && kind == TrackKind::Midi { ChannelFormat::Mono } else { format };
@@ -273,6 +279,7 @@ impl Track {
             hidden: false,
             inactive: false,
             frozen: false,
+            freeze: None,
             comments: String::new(),
             folder: None,
             folder_open: true,

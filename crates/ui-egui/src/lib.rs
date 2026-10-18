@@ -536,10 +536,16 @@ impl SoundApp {
         if let Some(r) = menus::run_ui_command(self, id, &params) {
             return r;
         }
-        if matches!(id, "track.commit" | "track.bounce") && self.player.is_some() {
+        let freezing = id == "track.freeze" && params.get("value").and_then(Value::as_bool) != Some(false) && {
+            let s = self.engine.session();
+            let tracks = openpt_engine::cmd::tracks_param(&self.engine, id, &params).unwrap_or_default();
+            !tracks.iter().all(|t| s.track(*t).is_some_and(openpt_model::Track::is_frozen))
+        };
+        if (freezing || matches!(id, "track.commit" | "track.bounce")) && self.player.is_some() {
             let tracks = openpt_engine::cmd::tracks_param(&self.engine, id, &params).map_err(|e| e.to_string())?;
             let s = self.engine.session();
-            let (live, offline): (Vec<TrackId>, Vec<TrackId>) = tracks.into_iter().partition(|t| bounce::commits_live(s, *t));
+            let (live, offline): (Vec<TrackId>, Vec<TrackId>) =
+                tracks.into_iter().partition(|t| bounce::commits_live(s, *t) && !(freezing && s.track(*t).is_some_and(openpt_model::Track::is_frozen)));
             if !live.is_empty() {
                 let out = json!({"live": live.iter().map(|t| t.0).collect::<Vec<_>>(), "then": offline.iter().map(|t| t.0).collect::<Vec<_>>()});
                 bounce::start_live_commit(self, live, id, offline);

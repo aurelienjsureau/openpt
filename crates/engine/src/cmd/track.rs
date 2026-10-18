@@ -157,13 +157,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"tracks": tracks.len()}))
             }
         ),
-        cmd!("track.freeze", "Freeze", ["Track"], None, "{tracks?}", has_selection, |e, p| flag(
-            e,
-            p,
-            "track.freeze",
-            |t, v| t.frozen = v,
-            |t| t.frozen
-        )),
+        cmd!("track.freeze", "Freeze", ["Track"], None, "{tracks?, value?: bool} — renders each track through its inserts and plays that instead (Unfreeze when they all are)", has_selection, freeze),
         cmd!("track.commit", "Commit...", ["Track"], Some("Alt+Shift+C"), "{tracks?}", has_selection, commit),
         cmd!("track.bounce", "Bounce...", ["Track"], Some("Cmd+Alt+Shift+B"), "{tracks?}", has_selection, commit),
         cmd!("track.bypass_inserts", "All", ["Track", "Bypass Inserts"], None, "{tracks?, bypass?: bool}", has_selection, bypass_inserts),
@@ -954,6 +948,26 @@ fn route_to_track(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"bus": bus.0}))
+}
+
+fn freeze(e: &mut Engine, p: &Value) -> Result<Value> {
+    let mut tracks = tracks_required(e, "track.freeze", p)?;
+    let s = e.session();
+    let freeze = p.get("value").and_then(Value::as_bool).unwrap_or_else(|| !tracks.iter().all(|t| s.track(*t).is_some_and(Track::is_frozen)));
+    if !freeze {
+        for t in &tracks {
+            crate::io::unfreeze_track(e, *t);
+        }
+        return Ok(json!({"frozen": false, "tracks": tracks}));
+    }
+    tracks.sort_by_key(|t| s.track(*t).is_some_and(|x| x.instrument.as_ref().is_some_and(|i| i.multi_out)));
+    let mut out = Vec::new();
+    for t in tracks {
+        if crate::io::freeze_track(e, t)? {
+            out.push(t);
+        }
+    }
+    Ok(json!({"frozen": true, "tracks": out}))
 }
 
 fn commit(e: &mut Engine, p: &Value) -> Result<Value> {

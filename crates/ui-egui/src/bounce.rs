@@ -166,6 +166,7 @@ pub struct LiveCommit {
     stop: i64,
     cmd: String,
     then: Vec<openpt_model::TrackId>,
+    freeze: bool,
 }
 
 pub fn commits_live(s: &openpt_model::Session, t: openpt_model::TrackId) -> bool {
@@ -176,6 +177,7 @@ pub fn commits_live(s: &openpt_model::Session, t: openpt_model::TrackId) -> bool
 }
 
 pub fn start_live_commit(app: &mut SoundApp, tracks: Vec<openpt_model::TrackId>, cmd: &str, then: Vec<openpt_model::TrackId>) {
+    let freeze = cmd == "track.freeze";
     if app.bounce.is_some() || app.rt_bounce.is_some() || app.live_commit.is_some() {
         app.ui.status = "A bounce is already running".into();
         return;
@@ -201,7 +203,7 @@ pub fn start_live_commit(app: &mut SoundApp, tracks: Vec<openpt_model::TrackId>,
     let taps = tracks.iter().map(|t| (*t, Vec::new(), 0)).collect();
     let scratch = vec![vec![0.0f32; eng.max_block()]; openpt_mix::main_channels(&session)];
     let stop = end + session.sample_rate.samples(1.0);
-    app.live_commit = Some(LiveCommit { eng, session, taps, scratch, pos: 0, end, stop, cmd: cmd.to_string(), then });
+    app.live_commit = Some(LiveCommit { eng, session, taps, scratch, pos: 0, end, stop, cmd: cmd.to_string(), then, freeze });
 }
 
 pub fn step_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
@@ -226,7 +228,7 @@ pub fn step_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
         return;
     }
     let Some(lc) = app.live_commit.take() else { return };
-    let LiveCommit { mut eng, taps, end, cmd, then, .. } = lc;
+    let LiveCommit { mut eng, taps, end, cmd, then, freeze, .. } = lc;
     eng.set_taps(Vec::new());
     eng.reset();
     if let Some(p) = &app.player {
@@ -237,10 +239,10 @@ pub fn step_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
         .into_iter()
         .map(|(t, chans, lag)| (t, chans.into_iter().map(|c| c.get(lag..).map_or_else(Vec::new, |c| c[..len.min(c.len())].to_vec())).collect()))
         .collect();
-    let mut n = openpt_engine::io::commit_captured(&mut app.engine, captured).len();
+    let mut n = if freeze { openpt_engine::io::freeze_captured(&mut app.engine, captured) } else { openpt_engine::io::commit_captured(&mut app.engine, captured).len() };
     if !then.is_empty() {
         let ids: Vec<u64> = then.iter().map(|t| t.0).collect();
-        match app.engine.execute(&cmd, &serde_json::json!({"tracks": ids})) {
+        match app.engine.execute(&cmd, &serde_json::json!({"tracks": ids, "value": true})) {
             Ok(v) => n += v["tracks"].as_array().map_or(0, Vec::len),
             Err(e) => {
                 app.ui.status = e.to_string();
@@ -248,7 +250,7 @@ pub fn step_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
             }
         }
     }
-    app.ui.status = format!("Committed {n} track{}", if n == 1 { "" } else { "s" });
+    app.ui.status = format!("{} {n} track{}", if freeze { "Froze" } else { "Committed" }, if n == 1 { "" } else { "s" });
 }
 
 pub fn show_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
@@ -259,7 +261,8 @@ pub fn show_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
     egui::Modal::new(egui::Id::new("live_commit_progress")).show(ctx, |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
         ui.set_width(320.0);
-        ui.label(egui::RichText::new(format!("Committing {n} track{}", if n == 1 { "" } else { "s" })).font(bold(13.0)));
+        let what = if lc.freeze { "Freezing" } else { "Committing" };
+        ui.label(egui::RichText::new(format!("{what} {n} track{}", if n == 1 { "" } else { "s" })).font(bold(13.0)));
         ui.add(egui::ProgressBar::new(done));
         ui.horizontal(|ui| {
             cancel |= ui.button("Cancel").clicked();
