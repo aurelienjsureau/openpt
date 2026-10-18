@@ -907,6 +907,9 @@ pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
                 run_pick(app, ui, "mix.instrument_outputs", json!({"track": id.0, "on": true, "outputs": outputs, "create_auxes": true}));
             }
         }
+        if ui.button("no instrument").on_hover_text("Alt+Shift: on every selected track · Alt: on every track").clicked() {
+            run_pick(app, ui, "mix.instrument_remove", json!({"track": id.0}));
+        }
         ui.separator();
     }
     let mut picked = None;

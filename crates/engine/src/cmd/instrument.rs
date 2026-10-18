@@ -32,6 +32,12 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             set_instrument_param
         ),
+        cmd!("mix.instrument_remove", "Remove Instrument", [], None, "{tracks?} — the instrument of each instrument track", has_selection, |e, p| {
+            let tracks = tracks_required(e, "mix.instrument_remove", p)?;
+            let s = e.session_mut();
+            let removed = tracks.into_iter().filter(|&t| s.track_mut(t).and_then(|tr| tr.instrument.take()).is_some()).count();
+            Ok(json!({"removed": removed}))
+        }),
     ]
 }
 
@@ -256,5 +262,18 @@ mod tests {
         assert!(e.execute("mix.instrument", &json!({"track": audio.0, "plugin": "drum_synth"})).is_err(), "an audio track");
         assert_eq!(instrument_of(&e, inst).as_deref(), Some("subtractive_synth"));
         assert_eq!(instrument_of(&e, audio), None);
+    }
+
+    #[test]
+    fn removes_the_instrument_of_every_selected_track() {
+        let mut e = Engine::default();
+        let (a, b, c) = (track(&mut e, "instrument"), track(&mut e, "instrument"), track(&mut e, "instrument"));
+        e.session_mut().edit.selected_tracks = vec![a, b];
+        let r = e.execute("mix.instrument_remove", &json!({})).unwrap();
+        assert_eq!(r["removed"], 2);
+        assert_eq!((instrument_of(&e, a), instrument_of(&e, b)), (None, None));
+        assert!(instrument_of(&e, c).is_some());
+        assert!(e.undo());
+        assert!(instrument_of(&e, a).is_some());
     }
 }
