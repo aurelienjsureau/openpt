@@ -256,6 +256,10 @@ impl Plugin for Vst3Plugin {
         self.multi_out = on;
     }
 
+    fn set_offline(&mut self, on: bool) {
+        self.inst.set_offline(on);
+    }
+
     fn extra_outputs(&self) -> usize {
         if self.multi_out { (1..16).take_while(|b| self.outputs.channels(*b) > 0).count() } else { 0 }
     }

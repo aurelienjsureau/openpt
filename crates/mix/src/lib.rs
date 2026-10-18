@@ -73,7 +73,7 @@ pub struct NewInstance {
 }
 
 pub fn create_instance(id: &str, state: Option<&[u8]>, sample_rate: f32, max_block: usize, ch: usize) -> Option<NewInstance> {
-    create_instance_on(id, state, sample_rate, max_block, ch, None)
+    create_instance_with(id, state, sample_rate, max_block, ch, None, false)
 }
 
 pub fn create_instance_on(
@@ -83,6 +83,18 @@ pub fn create_instance_on(
     max_block: usize,
     ch: usize,
     ara: Option<&openpt_dsp::AraTrack>,
+) -> Option<NewInstance> {
+    create_instance_with(id, state, sample_rate, max_block, ch, ara, false)
+}
+
+fn create_instance_with(
+    id: &str,
+    state: Option<&[u8]>,
+    sample_rate: f32,
+    max_block: usize,
+    ch: usize,
+    ara: Option<&openpt_dsp::AraTrack>,
+    offline: bool,
 ) -> Option<NewInstance> {
     let multi_out = id.starts_with(openpt_model::MULTI_OUT_PREFIX);
     let id = id.strip_prefix(openpt_model::MULTI_OUT_PREFIX).unwrap_or(id);
@@ -105,6 +117,7 @@ pub fn create_instance_on(
         log::info!("{id}: ARA {} ({} clips)", if bound { "bound" } else { "not bound" }, t.clips.len());
     }
     plugin.set_multi_output(multi_out);
+    plugin.set_offline(offline);
     plugin.prepare(sample_rate, max_block, ch);
     Some(NewInstance { plugin, refused_state })
 }
@@ -250,6 +263,7 @@ struct Strip {
     buf: Vec<Vec<f32>>,
     heat: openpt_dsp::heat::Heat,
     pre: Vec<Vec<f32>>,
+    tap: bool,
     scratch: Vec<f32>,
     plugins: Vec<Option<PluginSlot>>,
     instrument: Option<PluginSlot>,
@@ -338,6 +352,7 @@ impl Strip {
         Strip {
             buf: Vec::new(),
             pre: Vec::new(),
+            tap: false,
             scratch: Vec::new(),
             plugins: Vec::new(),
             instrument: None,
@@ -388,6 +403,7 @@ pub struct MixEngine {
     arrive: HashMap<BusId, usize>,
     main_arrive: usize,
     aux_out: HashMap<TrackId, usize>,
+    taps: Vec<TrackId>,
     pub input: Vec<Vec<f32>>,
     pub midi_input: Vec<(usize, LiveMidiEvent)>,
     pub midi_routed: Vec<(TrackId, usize, [u8; 3])>,
@@ -434,7 +450,7 @@ impl SlotCtx<'_> {
             }
         } else {
             let state = if third { ins.state_bytes() } else { None };
-            create_instance(&ins.instance_id(), state.as_deref(), self.sr, self.mb, ch).map(|n| n.plugin)
+            create_instance_with(&ins.instance_id(), state.as_deref(), self.sr, self.mb, ch, None, !self.external).map(|n| n.plugin)
         }?;
         if let Some(sc) = plugin.scope() {
             openpt_dsp::scope::publish(t.0, idx, &sc);
@@ -465,6 +481,7 @@ impl MixEngine {
             arrive: HashMap::new(),
             main_arrive: 0,
             aux_out: HashMap::new(),
+            taps: Vec::new(),
             input: Vec::new(),
             midi_input: Vec::with_capacity(256),
             midi_routed: Vec::with_capacity(2048),
@@ -478,6 +495,16 @@ impl MixEngine {
             keys: HashMap::new(),
             key_latency: HashMap::new(),
         }
+    }
+
+    pub fn set_taps(&mut self, tracks: Vec<TrackId>) {
+        self.taps = tracks;
+    }
+
+    pub fn tapped(&self, s: &Session, track: TrackId) -> Option<(&[Vec<f32>], usize)> {
+        let st = self.strips.get(&track).filter(|st| st.tap)?;
+        let latency = s.track(track).and_then(|t| self.departure(t)).unwrap_or(0);
+        Some((&st.pre, latency))
     }
 
     pub fn set_external_instances(&mut self, on: bool) {
@@ -653,6 +680,10 @@ impl MixEngine {
         let order = std::mem::take(&mut self.order);
         let live = |t: &Track| !(t.kind == TrackKind::Master || t.inactive || t.kind == TrackKind::Vca);
         let is_aux = reads_bus;
+        let taps = &self.taps;
+        for (id, st) in &mut self.strips {
+            st.tap = taps.contains(id);
+        }
         let mut work = std::mem::take(&mut self.work);
         work.clear();
         for &i in &order {
@@ -786,7 +817,7 @@ impl MixEngine {
             let align_delay = if pdc && !is_monitored { lmax_t.saturating_sub(st.latency) } else { 0 };
             st.align.set(align_delay, ch);
             st.align.process(&mut st.buf, frames);
-            if t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
+            if st.tap || t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
                 st.align_pre.set(align_delay, ch);
                 st.align_pre.process(&mut st.pre, frames);
             }
@@ -1342,7 +1373,7 @@ fn process_strip(
     let auto_mute = t.mixer.automation_mode.reads() && t.lane(&AutoParam::Mute).is_some_and(|l| l.value_at(pos, 0.0) >= 0.5);
     let soloed_out = any_solo && !t.mixer.solo && !t.mixer.solo_safe && !receives_solo(s, t);
     strip.muted = t.mixer.mute || auto_mute || soloed_out;
-    if t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
+    if strip.tap || t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
         strip.pre.resize_with(strip.buf.len(), Vec::new);
         for (d, src) in strip.pre.iter_mut().zip(strip.buf.iter()) {
             d.clear();
@@ -3566,6 +3597,36 @@ mod tests {
                 assert_eq!(hits.len(), 1, "pre {pre}, other latent {other_latent}, source latent {source_latent}: dry and send apart at {hits:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_tapped_aux_lines_up_with_the_timeline_once_its_lag_is_dropped() {
+        let mut s = Session::default();
+        let mut imp = vec![0.0f32; 48_000];
+        imp[1000] = 1.0;
+        s.pool.insert(SourceId(901), Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![imp] })));
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let bus = s.add_bus("Verb", ChannelFormat::Mono);
+        let aux = s.add_track(TrackKind::Aux, ChannelFormat::Mono, None);
+        s.track_mut(aux).unwrap().mixer.input = Route::Bus(bus);
+        let cid = s.new_clip_id();
+        let tr = s.track_mut(t).unwrap();
+        tr.playlist_mut().unwrap().clips.push(Clip::audio(cid, "i", SourceId(901), 0, 0, 48_000));
+        tr.mixer.inserts[0] = Some(Insert::new("maximizer"));
+        tr.mixer.output = Route::Bus(bus);
+        let mut eng = MixEngine::new(48_000.0, 256);
+        eng.set_taps(vec![aux]);
+        let mut out = vec![vec![0.0f32; 256]; 2];
+        let (mut got, mut lag) = (Vec::new(), 0);
+        for k in 0..20 {
+            eng.render(&s, k * 256, 256, &mut out);
+            let (b, l) = eng.tapped(&s, aux).unwrap();
+            lag = l;
+            got.extend_from_slice(&b[0][..256]);
+        }
+        assert!(lag > 16, "the maximizer's latency is compensated: {lag}");
+        let peak = got.iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).unwrap().0;
+        assert_eq!(peak - lag, 1000);
     }
 
     #[test]

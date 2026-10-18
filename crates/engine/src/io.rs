@@ -767,23 +767,42 @@ pub fn render_clip_gain(e: &mut Engine, cmd: &str, id: openpt_model::ClipId) -> 
     Ok(true)
 }
 
-pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
-    let s = e.session();
-    let Some(tr) = s.track(t) else { return Ok(None) };
+pub fn commit_range(s: &Session, t: TrackId) -> Option<Range> {
+    let tr = s.track(t)?;
     if !tr.kind.is_audio_path() || tr.kind == TrackKind::Master {
-        return Ok(None);
+        return None;
     }
     let feeding = openpt_mix::feeding_tracks(s, t);
     let end = std::iter::once(t).chain(feeding).filter_map(|x| s.track(x)).flat_map(|x| x.clips().iter().map(Clip::end)).max().unwrap_or(0);
-    if end <= 0 {
-        return Ok(None);
-    }
-    let range = Range::new(0, end + s.sample_rate.samples(2.0));
+    (end > 0).then(|| Range::new(0, end + s.sample_rate.samples(2.0)))
+}
+
+pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
+    let s = e.session();
+    let Some(range) = commit_range(s, t) else { return Ok(None) };
+    let Some(tr) = s.track(t) else { return Ok(None) };
     refuse_longer(s, "track.commit", &tr.name, "commit", range.len(), render_limit(tr.channels().max(2)))?;
     let audio = openpt_mix::render_track_pre_fader(s, t, range);
-    let name = format!("{}.cm", tr.name);
+    Ok(place_commit(e, t, range, audio))
+}
+
+pub fn commit_captured(e: &mut Engine, captured: Vec<(TrackId, Vec<Vec<f32>>)>) -> Vec<TrackId> {
+    let before = e.session_arc();
+    let mut out = Vec::new();
+    for (t, mut audio) in captured {
+        let Some(range) = commit_range(e.session(), t) else { continue };
+        let len = usize::try_from(range.len()).unwrap_or(0);
+        audio.iter_mut().for_each(|c| c.resize(len, 0.0));
+        out.extend(place_commit(e, t, range, audio));
+    }
+    e.push_undo("Commit", before);
+    out
+}
+
+fn place_commit(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) -> Option<TrackId> {
+    let s = e.session();
+    let (name, mixer) = s.track(t).map(|tr| (format!("{}.cm", tr.name), tr.mixer.clone()))?;
     let fmt = ChannelFormat::for_channels(audio.len().clamp(1, 2));
-    let mixer = tr.mixer.clone();
     let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
     let s = e.session_mut();
     let src = add_source(s, &name, buf, None, FileFormat::Wav);
@@ -805,7 +824,7 @@ pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
         old.inactive = true;
         old.hidden = true;
     }
-    Ok(Some(nt))
+    Some(nt)
 }
 
 pub fn export_clips(e: &Engine, ids: &[openpt_model::ClipId], dir: &str) -> Result<usize> {

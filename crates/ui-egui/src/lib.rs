@@ -422,6 +422,7 @@ pub struct SoundApp {
     pub video: video_track::VideoPool,
     pub bounce: Option<openpt_engine::io::Bounce>,
     pub(crate) rt_bounce: Option<bounce::RealtimeBounce>,
+    pub(crate) live_commit: Option<bounce::LiveCommit>,
     pub(crate) ara_selection: Option<Vec<openpt_model::ClipId>>,
     #[cfg(test)]
     _palette_lock: theme::TestPaletteGuard,
@@ -512,6 +513,7 @@ impl SoundApp {
             video: video_track::VideoPool::default(),
             bounce: None,
             rt_bounce: None,
+            live_commit: None,
             ara_selection: None,
             #[cfg(test)]
             _palette_lock: theme::lock_test_palette(),
@@ -533,6 +535,16 @@ impl SoundApp {
         }
         if let Some(r) = menus::run_ui_command(self, id, &params) {
             return r;
+        }
+        if matches!(id, "track.commit" | "track.bounce") && self.player.is_some() {
+            let tracks = openpt_engine::cmd::tracks_param(&self.engine, id, &params).map_err(|e| e.to_string())?;
+            let s = self.engine.session();
+            let (live, offline): (Vec<TrackId>, Vec<TrackId>) = tracks.into_iter().partition(|t| bounce::commits_live(s, *t));
+            if !live.is_empty() {
+                let out = json!({"live": live.iter().map(|t| t.0).collect::<Vec<_>>(), "then": offline.iter().map(|t| t.0).collect::<Vec<_>>()});
+                bounce::start_live_commit(self, live, id, offline);
+                return Ok(out);
+            }
         }
         if id.starts_with("session.save") || id.starts_with("file.bounce") {
             self.capture_plugin_states();
@@ -1508,6 +1520,7 @@ impl SoundApp {
         self.sync_editor_headers();
         bounce::step(self, ctx);
         bounce::step_realtime(self, ctx);
+        bounce::step_live_commit(self, ctx);
         let clips = &self.engine.session().edit.selected_clips;
         if self.ara_selection.as_ref() != Some(clips) {
             openpt_mix::ara_select_clips(clips);

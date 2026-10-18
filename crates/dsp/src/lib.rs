@@ -178,6 +178,7 @@ pub trait Plugin: Send {
         None
     }
     fn set_multi_output(&mut self, _on: bool) {}
+    fn set_offline(&mut self, _on: bool) {}
     fn extra_outputs(&self) -> usize {
         0
     }

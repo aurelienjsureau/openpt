@@ -14,7 +14,7 @@ use openpt_model::{Session, TrackId};
 use openpt_time::{Range, Samples};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
-use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
+use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
 use std::sync::{Arc, Mutex, PoisonError};
 
 const BLOCK: usize = 512;
@@ -65,6 +65,8 @@ enum Cmd {
     OldSessions(SyncSender<Arc<Session>>),
     Input(Arc<record::InputRing>),
     Capture(Option<Arc<CaptureRing>>),
+    Lend { placeholder: Box<MixEngine>, reply: SyncSender<Box<MixEngine>> },
+    Return(Box<MixEngine>),
     MidiInput(Arc<midi::MidiInputRing>),
     MidiRecord(Arc<midi::MidiRecordRing>),
     Recording(bool),
@@ -153,6 +155,7 @@ struct AudioState {
     device_rate: f64,
     input: Option<Arc<record::InputRing>>,
     capture: Option<Arc<CaptureRing>>,
+    lent: bool,
     midi_input: Option<Arc<midi::MidiInputRing>>,
     midi_record: Option<Arc<midi::MidiRecordRing>>,
     recording: bool,
@@ -193,6 +196,7 @@ impl AudioState {
             device_rate,
             input: None,
             capture: None,
+            lent: false,
             midi_input: None,
             midi_record: None,
             recording: false,
@@ -207,6 +211,22 @@ impl AudioState {
             match c {
                 Cmd::Input(r) => self.input = Some(r),
                 Cmd::Capture(c) => self.capture = c,
+                Cmd::Lend { placeholder, reply } if !self.lent => {
+                    let eng = Box::new(std::mem::replace(&mut self.mix, *placeholder));
+                    match reply.try_send(eng) {
+                        Ok(()) => {
+                            self.lent = true;
+                            self.playing = false;
+                        }
+                        Err(TrySendError::Full(eng) | TrySendError::Disconnected(eng)) => self.mix = *eng,
+                    }
+                }
+                Cmd::Lend { .. } => {}
+                Cmd::Return(eng) => {
+                    drop(std::mem::replace(&mut self.mix, *eng));
+                    self.lent = false;
+                    self.latency_probe = true;
+                }
                 Cmd::MidiInput(r) => self.midi_input = Some(r),
                 Cmd::MidiRecord(r) => self.midi_record = Some(r),
                 Cmd::Recording(r) => self.recording = r,
@@ -384,6 +404,10 @@ impl AudioState {
 
     fn fill(&mut self, out: &mut [f32], channels: usize) {
         self.drain();
+        if self.lent {
+            out.iter_mut().for_each(|x| *x = 0.0);
+            return;
+        }
         let channels = channels.max(1);
         let audio_monitoring = self.input.is_some() && self.session.tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm);
         let midi_monitoring = self.midi_input.is_some()
@@ -857,6 +881,18 @@ impl Player {
 
     pub fn set_capture(&self, ring: Option<Arc<CaptureRing>>) {
         let _ = self.tx.send(Cmd::Capture(ring));
+    }
+
+    pub fn lend_engine(&self) -> Option<Box<MixEngine>> {
+        self.shared.playing.store(false, Ordering::Relaxed);
+        let (reply, rx) = sync_channel(1);
+        let placeholder = Box::new(new_engine(48_000.0));
+        self.tx.send(Cmd::Lend { placeholder, reply }).ok()?;
+        rx.recv_timeout(std::time::Duration::from_secs(2)).ok()
+    }
+
+    pub fn return_engine(&self, eng: Box<MixEngine>) {
+        let _ = self.tx.send(Cmd::Return(eng));
     }
 
     pub fn set_input(&self, ring: Arc<record::InputRing>) {

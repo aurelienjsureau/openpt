@@ -5,6 +5,7 @@ pub(crate) struct MultiMono {
     info: &'static PluginInfo,
     state: Option<Vec<u8>>,
     inner: Vec<Box<dyn Plugin>>,
+    offline: bool,
 }
 
 impl MultiMono {
@@ -13,12 +14,13 @@ impl MultiMono {
         let refused = state.is_some_and(|st| !first.load_state(st));
         let info = first.info();
         let state = if refused { None } else { state.map(<[u8]>::to_vec) };
-        Some((MultiMono { id: id.to_string(), info, state, inner: vec![first] }, refused))
+        Some((MultiMono { id: id.to_string(), info, state, inner: vec![first], offline: false }, refused))
     }
 
     fn grow(&mut self, channels: usize) {
         while self.inner.len() < channels {
             let Some(mut p) = super::create_plugin(&self.id) else { break };
+            p.set_offline(self.offline);
             if let Some(st) = &self.state {
                 p.load_state(st);
             }
@@ -45,6 +47,11 @@ impl Plugin for MultiMono {
         for p in &mut self.inner {
             p.prepare(sample_rate, max_block, 1);
         }
+    }
+
+    fn set_offline(&mut self, on: bool) {
+        self.offline = on;
+        self.inner.iter_mut().for_each(|p| p.set_offline(on));
     }
 
     fn reset(&mut self) {

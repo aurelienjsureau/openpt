@@ -402,6 +402,7 @@ impl Bundle {
             active: false,
             processing: false,
             max_frames: 0,
+            offline: false,
             in_params: ComWrapper::new(ParamChanges::new(PARAM_QUEUE_CAP)),
             out_params: ComWrapper::new(ParamChanges::new(PARAM_QUEUE_CAP)),
             in_events: ComWrapper::new(EventList::new(EVENT_CAP)),
@@ -1170,6 +1171,7 @@ pub(crate) struct Instance {
     active: bool,
     processing: bool,
     max_frames: usize,
+    offline: bool,
     in_params: ComWrapper<ParamChanges>,
     out_params: ComWrapper<ParamChanges>,
     in_events: ComWrapper<EventList>,
@@ -1187,6 +1189,14 @@ unsafe impl Send for Instance {}
 impl Instance {
     fn processor(&self) -> Option<&ComPtr<sv::IAudioProcessor>> {
         self.processor.as_ref()
+    }
+
+    pub fn set_offline(&mut self, on: bool) {
+        self.offline = on;
+    }
+
+    fn process_mode(&self) -> i32 {
+        if self.offline { sv::ProcessModes_::kOffline as i32 } else { sv::ProcessModes_::kRealtime as i32 }
     }
 
     pub fn host(&self) -> &HostContext {
@@ -1453,7 +1463,7 @@ impl Instance {
         }
         let max = i32::try_from(max_frames).unwrap_or(i32::MAX);
         let mut setup = sv::ProcessSetup {
-            processMode: sv::ProcessModes_::kRealtime as i32,
+            processMode: self.process_mode(),
             symbolicSampleSize: sample32,
             maxSamplesPerBlock: max,
             sampleRate: sample_rate,
@@ -1550,7 +1560,7 @@ impl Instance {
             None => self.context.projectTimeSamples = project_time,
         }
         let mut data = sv::ProcessData {
-            processMode: sv::ProcessModes_::kRealtime as i32,
+            processMode: self.process_mode(),
             symbolicSampleSize: sv::SymbolicSampleSizes_::kSample32 as i32,
             numSamples: i32::try_from(frames).unwrap_or(0),
             numInputs: i32::try_from(inputs.bufs.len()).unwrap_or(0),
@@ -1964,6 +1974,7 @@ impl EditorLink {
 pub(crate) fn pump_editor_timers() {
     window::pump_timers();
 }
+
 
 #[cfg(target_os = "macos")]
 mod window {
