@@ -606,8 +606,12 @@ pub fn run_ui_command(app: &mut SoundApp, id: &str, p: &Value) -> Option<Result<
             let sec = p.get("section").and_then(Value::as_str).unwrap_or("");
             match sec {
                 "all" => {
-                    app.ui.mix_views =
-                        ["inserts_ae", "inserts_fj", "sends_ae", "sends_fj", "io", "comments", "color"].iter().map(|s| s.to_string()).collect()
+                    app.ui.mix_views = mix_view_aliases()
+                        .iter()
+                        .filter_map(|(path, _)| path.rsplit(" > ").next().map(mix_section_id))
+                        .filter(|s| !matches!(*s, "" | "all" | "minimal" | "heat"))
+                        .map(str::to_string)
+                        .collect()
                 }
                 "minimal" => app.ui.mix_views.clear(),
                 "" => return Some(Err("`section` required".into())),

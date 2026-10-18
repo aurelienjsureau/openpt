@@ -10,7 +10,6 @@ fn painted_labels(narrow: bool) -> Vec<(String, f32, bool)> {
     let mut app = SoundApp::new(openpt_engine::demo::demo_engine(), None, Services::default());
     app.run("window.mix", json!({})).unwrap();
     app.run("view.mix_section", json!({"section": "all"})).unwrap();
-    app.run("view.mix_section", json!({"section": "instruments"})).unwrap();
     app.ui.narrow_mix = narrow;
     let mut harness = egui_kittest::Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut SoundApp| {
