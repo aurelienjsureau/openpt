@@ -1387,8 +1387,12 @@ pub(crate) fn send_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: us
             ui.label(egui::RichText::new("DESTINATION").size(8.0).color(Tokens::current().text_dim));
             send_route_menu(app, ui, id, slot, Some(&send.target));
             ui.separator();
-            if ui.button("Remove send").clicked() {
-                let _ = app.run("mix.send_remove", json!({"track": id.0, "slot": slot}));
+            let resp = ui.button("Remove send").on_hover_text("Alt+Shift: on every selected track · Alt: on every track");
+            if resp.clicked() {
+                let tracks: Vec<u64> = scoped_tracks(app, ui, id).into_iter().map(|t| t.0).collect();
+                if let Err(e) = app.run("mix.send_remove", json!({"tracks": tracks, "slot": slot})) {
+                    app.ui.status = e;
+                }
                 ui.close();
             }
         });

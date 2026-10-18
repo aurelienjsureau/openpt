@@ -167,14 +167,9 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             send
         ),
-        cmd!("mix.send_remove", "Remove Send", [], None, "{track?, slot}", has_selection, |e, p| {
-            let (t, slot) = track_slot(e, p, "mix.send_remove", SEND_SLOTS)?;
-            if let Some(tr) = e.session_mut().track_mut(t)
-                && let Some(s) = tr.mixer.sends.get_mut(slot)
-            {
-                *s = None
-            }
-            Ok(json!({}))
+        cmd!("mix.send_remove", "Remove Send", [], None, "{tracks?, slot}", has_selection, |e, p| remove_sends(e, p, "mix.send_remove", true)),
+        cmd!("mix.sends_remove_all", "Remove All Sends", ["Track"], None, "{tracks?, slot?} — every send, or `slot`, of each track", has_selection, |e, p| {
+            remove_sends(e, p, "mix.sends_remove_all", false)
         }),
         cmd!("mix.send_level", "Send Level", [], None, "{track?, slot, db?, pan?, mute?, pre_fader?}", has_selection, send_level),
         cmd!("mix.new_bus", "New Bus", [], None, "{name, format?: stereo}", always, |e, p| {
@@ -377,6 +372,26 @@ fn slot_of(p: &Value, key: &str, max: usize) -> Option<usize> {
         if s.len() == 1 && c.is_ascii_lowercase() { (c as u8 - b'a') as usize } else { s.parse().ok()? }
     };
     (i < max).then_some(i)
+}
+
+fn remove_sends(e: &mut Engine, p: &Value, cmd: &str, slot_required: bool) -> Result<Value> {
+    let tracks = tracks_required(e, cmd, p)?;
+    let slot = slot_of(p, "slot", SEND_SLOTS);
+    if slot.is_none() && (slot_required || p.get("slot").is_some()) {
+        return Err(bad(cmd, format!("`slot` must be 0..{} or a..{}", SEND_SLOTS - 1, (b'a' + SEND_SLOTS as u8 - 1) as char)));
+    }
+    let s = e.session_mut();
+    let mut removed = 0;
+    for t in tracks {
+        if let Some(tr) = s.track_mut(t) {
+            for (k, send) in tr.mixer.sends.iter_mut().enumerate() {
+                if slot.is_none_or(|n| n == k) && send.take().is_some() {
+                    removed += 1
+                }
+            }
+        }
+    }
+    Ok(json!({"removed": removed}))
 }
 
 fn track_slot(e: &Engine, p: &Value, cmd: &str, max: usize) -> Result<(TrackId, usize)> {
@@ -1174,5 +1189,29 @@ mod tests {
         let delay = e.session().busses.iter().find(|b| b.name == "Delay").unwrap().id;
         assert_eq!(sl.target, openpt_model::Route::Bus(delay));
         assert_eq!((sl.level_db, sl.pan, sl.mute, sl.pre_fader), (-9.0, 0.5, true, true));
+    }
+
+    #[test]
+    fn sends_are_removed_on_every_selected_track() {
+        let mut e = Engine::default();
+        e.execute("track.new", &json!({"count": 3, "name": "Gtr", "format": "mono"})).unwrap();
+        let ids: Vec<u64> = e.session().tracks.iter().map(|t| t.id.0).collect();
+        for &t in &ids {
+            e.execute("mix.send", &json!({"track": t, "slot": 0, "bus": "Verb"})).unwrap();
+            e.execute("mix.send", &json!({"track": t, "slot": 1, "bus": "Delay"})).unwrap();
+        }
+        let count = |e: &Engine, i: usize| e.session().tracks[i].mixer.sends.iter().flatten().count();
+
+        let r = e.execute("mix.send_remove", &json!({"tracks": [ids[0], ids[1]], "slot": "b"})).unwrap();
+        assert_eq!(r["removed"], 2);
+        assert_eq!((count(&e, 0), count(&e, 1), count(&e, 2)), (1, 1, 2));
+        assert!(e.execute("mix.send_remove", &json!({"tracks": [ids[0]]})).is_err());
+
+        e.session_mut().edit.selected_tracks = vec![TrackId(ids[1]), TrackId(ids[2])];
+        let r = e.execute("mix.sends_remove_all", &json!({})).unwrap();
+        assert_eq!(r["removed"], 3);
+        assert_eq!((count(&e, 0), count(&e, 1), count(&e, 2)), (1, 0, 0));
+        assert!(e.undo());
+        assert_eq!(count(&e, 2), 2);
     }
 }
