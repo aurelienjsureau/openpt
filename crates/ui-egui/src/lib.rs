@@ -414,6 +414,7 @@ pub struct SoundApp {
     pub arrange_request: bool,
     touched: std::collections::HashSet<TrackId>,
     param_touch: std::collections::HashMap<(TrackId, String), (f32, std::time::Instant)>,
+    send_seen: std::collections::HashMap<(TrackId, usize), (f32, f32, bool)>,
     last_write_at: Samples,
     pub frame_ms: f32,
     pub cpu_ms: f32,
@@ -505,6 +506,7 @@ impl SoundApp {
             arrange_request: false,
             touched: std::collections::HashSet::new(),
             param_touch: std::collections::HashMap::new(),
+            send_seen: std::collections::HashMap::new(),
             last_write_at: i64::MIN,
             frame_ms: 0.0,
             cpu_ms: 0.0,
@@ -783,6 +785,35 @@ impl SoundApp {
             let lane = format!("plugin:{}:{param}", char::from(b'a' + slot as u8));
             self.param_touch.insert((t, lane), (value, std::time::Instant::now()));
         }
+    }
+
+    fn touch_moved_sends(&mut self, may_write: bool) {
+        use openpt_model::AutomationMode as M;
+        let now = std::time::Instant::now();
+        let mut seen = std::collections::HashMap::new();
+        for t in &self.engine.session().tracks {
+            let writing = matches!(t.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch);
+            for (i, snd) in t.mixer.sends.iter().enumerate() {
+                let Some(snd) = snd else { continue };
+                let cur = (snd.level_db, snd.pan, snd.mute);
+                seen.insert((t.id, i), cur);
+                let Some(&(level, pan, mute)) = self.send_seen.get(&(t.id, i)) else { continue };
+                if !(may_write && writing) || i >= 26 {
+                    continue;
+                }
+                let which = char::from(b'a' + i as u8);
+                if level.to_bits() != cur.0.to_bits() {
+                    self.param_touch.insert((t.id, format!("send_{which}_level")), (cur.0, now));
+                }
+                if pan.to_bits() != cur.1.to_bits() {
+                    self.param_touch.insert((t.id, format!("send_{which}_pan")), (cur.1, now));
+                }
+                if mute != cur.2 {
+                    self.param_touch.insert((t.id, format!("send_{which}_mute")), (f32::from(u8::from(cur.2)), now));
+                }
+            }
+        }
+        self.send_seen = seen;
     }
 
     fn apply_editor_edits(&mut self) {
@@ -1209,6 +1240,7 @@ impl SoundApp {
         if !playing {
             self.param_touch.clear();
         }
+        self.touch_moved_sends(may_write);
         if !playing && self.touched.is_empty() {
             self.last_write_at = i64::MIN;
             return;

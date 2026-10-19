@@ -12,7 +12,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "edit.restore_last_selection", "Restore Last Selection", ["Edit"], Some("Cmd+Alt+Z"), "{}", has_last_selection, restore_selection),
         cmd!("edit.cut", "Cut", ["Edit"], Some("Cmd+X"), "{tracks?, start?, end?}", has_range, |e, p| cut_copy(e, p, true, "edit.cut")),
         cmd!(noundo "edit.copy", "Copy", ["Edit"], Some("Cmd+C"), "{tracks?, start?, end?}", has_range, |e, p| cut_copy(e, p, false, "edit.copy")),
-        cmd!("edit.paste", "Paste", ["Edit"], Some("Cmd+V"), "{tracks?, at?}", has_clipboard, paste),
+        cmd!("edit.paste", "Paste", ["Edit"], Some("Cmd+V"), "{tracks?, at?}", has_any_clipboard, paste),
         cmd!("edit.clear", "Clear", ["Edit"], Some("Cmd+B"), "{tracks?, start?, end?}", has_range, clear),
         cmd!("edit.cut_clip_gain", "Clip Gain", ["Edit", "Cut Special"], Some("Cmd+Ctrl+X"), "{}", has_range, |e, p| {
             super::edit_more::copy_clip_gain(e, p)?;
@@ -294,20 +294,23 @@ fn cut_copy(e: &mut Engine, p: &Value, cut: bool, id: &str) -> Result<Value> {
     }
     let mut cb = Clipboard::of_range(e.session(), range);
     let follow = e.session().edit.automation_follows_edit;
+    cb.automation_only = tracks.iter().all(|t| shown_lane(e.session(), *t).is_some());
     for t in &tracks {
-        cb.tracks.push(ops::copy_range(e.session(), *t, range));
+        let shown = shown_lane(e.session(), *t);
+        cb.tracks.push(if shown.is_some() { Vec::new() } else { ops::copy_range(e.session(), *t, range) });
         let lanes = e
             .session()
             .track(*t)
             .map(|tr| {
                 tr.automation
                     .iter()
+                    .filter(|l| shown.as_ref().is_none_or(|p| *p == l.param))
                     .map(|l| {
                         let mut l2 = l.clone();
                         l2.points = l
                             .points
                             .iter()
-                            .filter(|p| range.contains(p.at))
+                            .filter(|p| if shown.is_some() { p.at >= range.start && p.at <= range.end } else { range.contains(p.at) })
                             .map(|p| openpt_model::AutomationPoint { at: p.at - range.start, value: p.value })
                             .collect();
                         l2
@@ -334,13 +337,25 @@ fn cut_copy(e: &mut Engine, p: &Value, cut: bool, id: &str) -> Result<Value> {
         let sh = shuffle(e.session());
         let s = e.session_mut();
         for t in &tracks {
-            cut_track(s, *t, range, sh, follow);
+            if !clear_shown_lane(s, *t, range).1 {
+                cut_track(s, *t, range, sh, follow);
+            }
         }
         s.edit.selection = openpt_time::Range::point(range.start);
     }
     let n: usize = cb.tracks.iter().map(Vec::len).sum();
     e.clipboard = cb;
     Ok(json!({"clips": n, "length": range.len()}))
+}
+
+fn shown_lane(s: &Session, t: TrackId) -> Option<openpt_model::AutoParam> {
+    s.track(t).and_then(|tr| openpt_model::AutoParam::parse(&tr.view))
+}
+
+fn clear_shown_lane(s: &mut Session, t: TrackId, r: openpt_time::Range) -> (usize, bool) {
+    let Some(param) = shown_lane(s, t) else { return (0, false) };
+    let n = s.track_mut(t).and_then(|tr| tr.automation.iter_mut().find(|l| l.param == param)).map_or(0, |l| l.clear_range(r.start, r.end.saturating_add(1)));
+    (n, true)
 }
 
 fn cut_track(s: &mut Session, t: TrackId, r: openpt_time::Range, sh: bool, follow: bool) {
@@ -352,7 +367,20 @@ fn cut_track(s: &mut Session, t: TrackId, r: openpt_time::Range, sh: bool, follo
     ops::clear_range(s, t, r, sh);
 }
 
+fn has_any_clipboard(e: &Engine) -> std::result::Result<(), String> {
+    let cb = &e.clipboard;
+    if cb.tracks.is_empty() && cb.clip_gain.is_empty() && cb.clip_effects.is_empty() { Err("the clipboard is empty".into()) } else { Ok(()) }
+}
+
 fn paste(e: &mut Engine, p: &Value) -> Result<Value> {
+    if e.clipboard.tracks.is_empty() {
+        if !e.clipboard.clip_gain.is_empty() {
+            return super::edit_more::paste_clip_gain(e, p);
+        }
+        if !e.clipboard.clip_effects.is_empty() {
+            return super::edit_more::paste_clip_effects(e, p);
+        }
+    }
     let tracks = tracks_required(e, "edit.paste", p)?;
     let given = position_param(e, "edit.paste", p, "at")?;
     let cb = e.clipboard.clone();
@@ -373,7 +401,7 @@ fn paste(e: &mut Engine, p: &Value) -> Result<Value> {
             cut_track(s, *t, r, true, follow);
         }
         pasted += ops::paste(s, *t, at, clips, cb.length, sh).map_err(|why| bad("edit.paste", why))?.len();
-        if follow && let (Some(lanes), Some(tr)) = (cb.automation.get(i % cb.automation.len().max(1)), s.track_mut(*t)) {
+        if (follow || cb.automation_only) && let (Some(lanes), Some(tr)) = (cb.automation.get(i % cb.automation.len().max(1)), s.track_mut(*t)) {
             for l in lanes {
                 let dst = tr.lane_mut(&l.param);
                 if !l.points.is_empty() {
@@ -407,7 +435,10 @@ fn clear(e: &mut Engine, p: &Value) -> Result<Value> {
         s.edit.selected_clips.clear();
     } else {
         for t in &tracks {
-            n += ops::clear_range(s, *t, range, sh).len();
+            match clear_shown_lane(s, *t, range) {
+                (k, true) => n += k,
+                _ => n += ops::clear_range(s, *t, range, sh).len(),
+            }
         }
     }
     Ok(json!({"removed": n}))
@@ -1083,6 +1114,28 @@ fn consolidate(e: &mut Engine, p: &Value) -> Result<Value> {
 mod tests {
     use super::*;
     use openpt_model::{ChannelFormat, Clip, ClipContent, TrackId, TrackKind};
+
+    #[test]
+    fn clear_in_automation_view_removes_the_shown_lane_only() {
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let id = s.new_clip_id();
+        crate::edit::place_clip(&mut s, t, Clip::audio(id, "c", openpt_model::SourceId(9), 0, 0, 10_000));
+        s.edit.selected_tracks = vec![t];
+        let mut e = Engine::new(s);
+        for (at, v) in [(100, -3.0), (500, -6.0), (1000, -9.0), (2000, 0.0)] {
+            e.execute("automation.set_point", &json!({"track": t.0, "param": "volume", "at": at, "value": v})).unwrap();
+        }
+        e.execute("automation.set_point", &json!({"track": t.0, "param": "pan", "at": 500, "value": -1.0})).unwrap();
+        e.execute("track.view", &json!({"view": "volume"})).unwrap();
+        e.execute("edit.select", &json!({"tracks": [t.0], "start": 100, "end": 1000})).unwrap();
+        e.execute("edit.clear", &json!({})).unwrap();
+        let tr = e.session().track(t).unwrap();
+        assert_eq!(tr.lane(&openpt_model::AutoParam::Volume).unwrap().points.iter().map(|p| p.at).collect::<Vec<_>>(), vec![2000]);
+        assert_eq!(tr.lane(&openpt_model::AutoParam::Pan(0)).unwrap().points.len(), 1, "other lanes stay");
+        assert_eq!(tr.clips().len(), 1, "the clip stays whole");
+        assert_eq!(tr.clips()[0].range(), openpt_time::Range::new(0, 10_000));
+    }
 
     #[test]
     fn batch_fades_fade_lone_edges_and_crossfade_touching_clips() {

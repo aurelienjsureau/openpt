@@ -1069,7 +1069,7 @@ impl MixEngine {
                     line.process(&mut strip.send_buf, frames);
                 }
             }
-            if snd.mute || strip.muted {
+            if send_muted(t, i, snd.mute, pos) || strip.muted {
                 continue;
             }
             let lvl = send_level(t, i, snd.level_db, pos);
@@ -1088,7 +1088,7 @@ impl MixEngine {
             }
             let stereo = match (src.len(), snd.follow_main_pan) {
                 (1, true) => [pan_at(t, 0, pos), 0.0],
-                (1, false) => [snd.pan, 0.0],
+                (1, false) => [send_pan(t, i, snd.pan, pos), 0.0],
                 (_, true) => [pan_at(t, 0, pos), pan_at(t, 1, pos)],
                 _ => [-1.0, 1.0],
             };
@@ -1689,13 +1689,13 @@ fn feed_keys(
     for (i, snd) in t.mixer.sends.iter().enumerate() {
         let Some(snd) = snd else { continue };
         let Route::Bus(b) = &snd.target else { continue };
-        if snd.mute || !keys.contains_key(b) {
+        if send_muted(t, i, snd.mute, pos) || !keys.contains_key(b) {
             continue;
         }
         let gain = db_to_gain(send_level(t, i, snd.level_db, pos));
         let stereo = match (mono, snd.follow_main_pan) {
             (true, true) => [pan_at(t, 0, pos), 0.0],
-            (true, false) => [snd.pan, 0.0],
+            (true, false) => [send_pan(t, i, snd.pan, pos), 0.0],
             (false, true) => [pan_at(t, 0, pos), pan_at(t, 1, pos)],
             _ => [-1.0, 1.0],
         };
@@ -2321,6 +2321,26 @@ fn lerp_gain(db0: f32, db1: f32, i: usize, n: usize) -> f32 {
     let g0 = db_to_gain(db0);
     let g1 = db_to_gain(db1);
     if n == 0 { g0 } else { g0 + (g1 - g0) * (i as f32 / n as f32) }
+}
+
+fn send_pan(t: &Track, i: usize, base: f32, pos: Samples) -> f32 {
+    if t.mixer.automation_mode.reads()
+        && let Some(l) = t.lane(&AutoParam::SendPan(u8::try_from(i).unwrap_or(0)))
+        && !l.points.is_empty()
+    {
+        return l.value_at(pos, base);
+    }
+    base
+}
+
+fn send_muted(t: &Track, i: usize, base: bool, pos: Samples) -> bool {
+    if t.mixer.automation_mode.reads()
+        && let Some(l) = t.lane(&AutoParam::SendMute(u8::try_from(i).unwrap_or(0)))
+        && !l.points.is_empty()
+    {
+        return l.value_at(pos, 0.0) >= 0.5;
+    }
+    base
 }
 
 fn peak(x: &[f32]) -> f32 {
@@ -3007,6 +3027,30 @@ mod tests {
         let stem = s.add_bus("Stem", ChannelFormat::Stereo);
         let empty = s.add_bus("Empty", ChannelFormat::Stereo);
         s.track_mut(t).unwrap().mixer.output = Route::Bus(stem);
+    #[test]
+    fn send_pan_and_mute_follow_their_automation() {
+        let (mut s, t) = session_with_dc(0.5, 9600);
+        let bus = s.add_bus("Verb", ChannelFormat::Stereo);
+        let aux = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Verb"));
+        s.track_mut(aux).unwrap().mixer.input = Route::Bus(bus);
+        {
+            let tr = s.track_mut(t).unwrap();
+            tr.mixer.output = Route::None;
+            let mut snd = openpt_model::SendSlot::new(Route::Bus(bus));
+            snd.level_db = 0.0;
+            snd.follow_main_pan = false;
+            tr.mixer.sends[0] = Some(snd);
+            tr.lane_mut(&AutoParam::SendPan(0)).set_point(0, -1.0);
+            let m = tr.lane_mut(&AutoParam::SendMute(0));
+            m.set_point(0, 0.0);
+            m.set_point(4799, 0.0);
+            m.set_point(4800, 1.0);
+        }
+        let out = render_range(&s, Range::new(0, 9600), 512);
+        assert!(out[0][1000] > 0.1 && out[1][1000].abs() < 1e-4, "send panned hard left: {} {}", out[0][1000], out[1][1000]);
+        assert!(out[0][8000].abs() < 1e-4, "send muted by automation: {}", out[0][8000]);
+    }
+
         let main = render_range(&s, Range::new(0, 4800), 512);
         let bus = render_bus(&s, stem, Range::new(0, 4800), 512);
         let silent = render_bus(&s, empty, Range::new(0, 4800), 512);

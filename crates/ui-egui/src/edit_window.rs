@@ -1781,6 +1781,20 @@ fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
             let _ = app.run("track.view", json!({"track": id, "view": o}));
         }
     }
+    for (slot, snd) in track.mixer.sends.iter().enumerate() {
+        let Some(snd) = snd else { continue };
+        let which = (b'a' + slot as u8) as char;
+        let title = format!("Send {} · {}", which.to_ascii_uppercase(), crate::mix_window::route_name(app, &snd.target));
+        ui.menu_button(title, |ui| {
+            for (kind, label) in [("level", "Level"), ("pan", "Pan"), ("mute", "Mute")] {
+                let v = format!("send_{which}_{kind}");
+                if ui.selectable_label(track.view == v, label).clicked() {
+                    let _ = app.run("track.view", json!({"track": id, "view": v}));
+                    ui.close();
+                }
+            }
+        });
+    }
     for (slot, ins) in track.mixer.inserts.iter().enumerate() {
         let Some(ins) = ins else { continue };
         let Some(info) = crate::mix_window::plugin_info(&ins.plugin) else { continue };
@@ -2293,12 +2307,8 @@ fn draw_automation(painter: &egui::Painter, s: &Session, track: &Track, p: &Auto
     } else {
         (lo, hi)
     };
-    let def = match p {
-        AutoParam::Volume => track.mixer.volume_db,
-        AutoParam::Pan(i) => track.mixer.pan.get(usize::from(*i)).copied().unwrap_or(0.0),
-        _ => 0.0,
-    };
-    let yv = |v: f32| -> f32 {
+    let def = auto_default(track, p);
+    let yv =|v: f32| -> f32 {
         let k = ((v.clamp(lo, hi) - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0);
         lane.max.y - 4.0 - k * (lane.height() - 8.0)
     };
@@ -2363,7 +2373,16 @@ fn auto_default(track: &Track, p: &AutoParam) -> f32 {
     match p {
         AutoParam::Volume => track.mixer.volume_db,
         AutoParam::Pan(i) => track.mixer.pan.get(usize::from(*i)).copied().unwrap_or(0.0),
-        _ => 0.0,
+        AutoParam::Mute => f32::from(u8::from(track.mixer.mute)),
+        AutoParam::SendLevel(i) | AutoParam::SendPan(i) | AutoParam::SendMute(i) => {
+            let Some(Some(snd)) = track.mixer.sends.get(usize::from(*i)) else { return 0.0 };
+            match p {
+                AutoParam::SendLevel(_) => snd.level_db,
+                AutoParam::SendPan(_) => snd.pan,
+                _ => f32::from(u8::from(snd.mute)),
+            }
+        }
+        AutoParam::Plugin { .. } => 0.0,
     }
 }
 

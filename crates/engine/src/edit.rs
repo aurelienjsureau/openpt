@@ -134,6 +134,11 @@ pub fn copy_range(s: &Session, track: TrackId, range: Range) -> Vec<Clip> {
         }
         if isect.end < part.end() {
             part.trim_end_to(isect.end);
+            if let ClipContent::Midi { sequence } = &mut part.content {
+                let len = t.ticks(isect.end) - t.ticks(isect.start);
+                sequence.notes.retain(|n| n.start < len);
+                sequence.ctrls.retain(|c| c.tick < len);
+            }
         }
         part.start -= range.start;
         out.push(part);

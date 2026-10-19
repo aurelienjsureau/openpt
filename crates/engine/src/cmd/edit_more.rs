@@ -357,7 +357,7 @@ pub(super) fn copy_clip_gain(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"points": n, "length": r.len()}))
 }
 
-fn paste_clip_gain(e: &mut Engine, p: &Value) -> Result<Value> {
+pub(super) fn paste_clip_gain(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "edit.paste_clip_gain";
     let tracks = tracks_required(e, id, p)?;
     let at = position_param(e, id, p, "at")?.unwrap_or(e.session().edit.selection.start);
@@ -425,7 +425,7 @@ fn clip_effects(e: &mut Engine, p: &Value, copy: bool, remove: bool, id: &str) -
     Ok(json!({"clips": ids.len(), "copied": e.clipboard.clip_effects.len(), "removed": removed}))
 }
 
-fn paste_clip_effects(e: &mut Engine, p: &Value) -> Result<Value> {
+pub(super) fn paste_clip_effects(e: &mut Engine, p: &Value) -> Result<Value> {
     let ids = clip_ids_param(e, p);
     if ids.is_empty() {
         return Err(bad("edit.paste_clip_effects", "select a clip"));
@@ -450,57 +450,107 @@ fn paste_merge_midi(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let tempo = s.tempo.clone();
     let sr = s.sample_rate;
+    let ticks = |x: Samples| tempo.samples_to_ticks(x, sr);
+    let samples = |x: i64| tempo.tick_to_samples(x, sr);
     let mut merged = 0;
     let mut placed = 0;
     for (i, t) in tracks.iter().enumerate() {
         let Some(clips) = cb.tracks.get(i % cb.tracks.len().max(1)) else { continue };
+        let is_midi = s.track(*t).is_some_and(|tr| tr.kind.is_midi());
         for c in clips {
             let pos = at.saturating_add(c.start);
             let ClipContent::Midi { sequence } = &c.content else {
-                let mut nc = c.clone();
-                nc.id = s.new_clip_id();
-                nc.start = pos;
-                ops::place_clip(s, *t, nc);
-                placed += 1;
-                continue;
-            };
-            let target = s.track(*t).and_then(|tr| {
-                let host = tr.clips().iter().find(|x| matches!(x.content, ClipContent::Midi { .. }) && x.range().contains(pos))?;
-                let next_start = tr.clips().iter().filter(|x| x.start > host.start && x.id != host.id).map(|x| x.start).min();
-                Some((host.id, host.start, next_start))
-            });
-            match target {
-                Some((hid, hstart, next_start)) => {
-                    let diff = tempo.samples_to_ticks(pos, sr) - tempo.samples_to_ticks(hstart, sr);
-                    let want_end = pos.saturating_add(c.length);
-                    let limit = next_start.unwrap_or(Samples::MAX);
-                    if let Some(h) = s.find_clip_mut(hid)
-                        && let ClipContent::Midi { sequence: hs } = &mut h.content
-                    {
-                        for n in &sequence.notes {
-                            let mut n = *n;
-                            n.start = n.start.saturating_add(diff);
-                            hs.notes.push(n);
-                        }
-                        for cc in &sequence.ctrls {
-                            let mut cc = *cc;
-                            cc.tick = cc.tick.saturating_add(diff);
-                            hs.ctrls.push(cc);
-                        }
-                        hs.sort();
-                        if want_end > h.end() {
-                            h.trim_end_to(want_end.min(limit));
-                        }
-                        merged += 1;
-                    }
-                }
-                None => {
+                if !is_midi {
                     let mut nc = c.clone();
                     nc.id = s.new_clip_id();
                     nc.start = pos;
                     ops::place_clip(s, *t, nc);
                     placed += 1;
                 }
+                continue;
+            };
+            if !is_midi {
+                continue;
+            }
+            let end = pos.saturating_add(c.length);
+            let base = ticks(pos);
+            let mut hosted: Vec<(ClipId, openpt_midi::Sequence)> = Vec::new();
+            let mut gaps: Vec<(Range, openpt_midi::Sequence)> = Vec::new();
+            let mut grow: Vec<(ClipId, Samples)> = Vec::new();
+            let existing: Vec<(ClipId, Range, bool)> =
+                s.track(*t).map(|tr| tr.clips().iter().map(|x| (x.id, x.range(), matches!(x.content, ClipContent::Midi { .. }))).collect()).unwrap_or_default();
+            let next_after = |x: Samples, me: ClipId| existing.iter().filter(|(id, r, _)| *id != me && r.start >= x).map(|(_, r, _)| r.start).min();
+            let slot = |abs: Samples| -> std::result::Result<(ClipId, Samples), Range> {
+                if let Some((id, r, _)) = existing.iter().find(|(_, r, m)| *m && r.contains(abs)) {
+                    return Ok((*id, r.start));
+                }
+                let lo = existing.iter().filter(|(_, r, _)| r.end <= abs).map(|(_, r, _)| r.end).max().unwrap_or(pos).max(pos);
+                let hi = existing.iter().filter(|(_, r, _)| r.start > abs).map(|(_, r, _)| r.start).min().unwrap_or(end).min(end);
+                Err(Range::new(lo, hi))
+            };
+            for n in &sequence.notes {
+                let tick = base.saturating_add(n.start);
+                let abs = samples(tick);
+                let mut n = *n;
+                match slot(abs) {
+                    Ok((id, hstart)) => {
+                        n.start = tick - ticks(hstart);
+                        let note_end = samples(tick.saturating_add(n.length));
+                        grow.push((id, note_end.min(next_after(abs, id).unwrap_or(Samples::MAX))));
+                        match hosted.iter_mut().find(|h| h.0 == id) {
+                            Some(h) => h.1.notes.push(n),
+                            None => hosted.push((id, openpt_midi::Sequence { notes: vec![n], ctrls: Vec::new() })),
+                        }
+                    }
+                    Err(gap) if !gap.is_empty() => {
+                        n.start = tick - ticks(gap.start);
+                        match gaps.iter_mut().find(|g| g.0 == gap) {
+                            Some(g) => g.1.notes.push(n),
+                            None => gaps.push((gap, openpt_midi::Sequence { notes: vec![n], ctrls: Vec::new() })),
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+            for cc in &sequence.ctrls {
+                let tick = base.saturating_add(cc.tick);
+                let mut cc = *cc;
+                match slot(samples(tick)) {
+                    Ok((id, hstart)) => {
+                        cc.tick = tick - ticks(hstart);
+                        match hosted.iter_mut().find(|h| h.0 == id) {
+                            Some(h) => h.1.ctrls.push(cc),
+                            None => hosted.push((id, openpt_midi::Sequence { notes: Vec::new(), ctrls: vec![cc] })),
+                        }
+                    }
+                    Err(gap) if !gap.is_empty() => {
+                        cc.tick = tick - ticks(gap.start);
+                        match gaps.iter_mut().find(|g| g.0 == gap) {
+                            Some(g) => g.1.ctrls.push(cc),
+                            None => gaps.push((gap, openpt_midi::Sequence { notes: Vec::new(), ctrls: vec![cc] })),
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+            for (id, add) in hosted {
+                if let Some(h) = s.find_clip_mut(id)
+                    && let ClipContent::Midi { sequence: hs } = &mut h.content
+                {
+                    hs.notes.extend(add.notes);
+                    hs.ctrls.extend(add.ctrls);
+                    hs.sort();
+                    if let Some(to) = grow.iter().filter(|g| g.0 == id).map(|g| g.1).max().filter(|to| *to > h.end()) {
+                        h.trim_end_to(to);
+                    }
+                    merged += 1;
+                }
+            }
+            for (gap, mut seq) in gaps {
+                seq.sort();
+                let id = s.new_clip_id();
+                ops::place_clip(s, *t, Clip::midi(id, c.name.clone(), gap.start, gap.len(), seq));
+                placed += 1;
             }
         }
     }
@@ -1124,6 +1174,77 @@ mod tests {
             _ => 0,
         };
         assert_eq!(after, before + copied);
+    }
+
+    fn midi_session() -> (Engine, openpt_model::TrackId) {
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
+        s.edit.selected_tracks = vec![t];
+        (Engine::new(s), t)
+    }
+
+    fn note(start: i64) -> openpt_midi::Note {
+        openpt_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start, length: 100 }
+    }
+
+    fn put_midi(e: &mut Engine, t: openpt_model::TrackId, start: Samples, len: Samples, notes: Vec<openpt_midi::Note>) -> ClipId {
+        let s = e.session_mut();
+        let id = s.new_clip_id();
+        ops::place_clip(s, t, Clip::midi(id, "m", start, len, openpt_midi::Sequence { notes, ctrls: Vec::new() }));
+        id
+    }
+
+    fn notes_of(e: &Engine, id: ClipId) -> usize {
+        match &e.session().find_clip(id).unwrap().1.content {
+            ClipContent::Midi { sequence } => sequence.notes.len(),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn merge_midi_skips_notes_past_the_copied_range() {
+        let (mut e, t) = midi_session();
+        let tpq = e.session().tempo.samples_to_ticks(24_000, e.session().sample_rate);
+        let src = put_midi(&mut e, t, 0, 96_000, vec![note(0), note(tpq * 2)]);
+        let host = put_midi(&mut e, t, 192_000, 96_000, Vec::new());
+        e.execute("edit.select", &json!({"tracks": [t.0], "start": 0, "end": 24_000})).unwrap();
+        e.execute("edit.copy", &json!({})).unwrap();
+        e.execute("edit.paste_merge_midi", &json!({"at": 192_000})).unwrap();
+        assert_eq!(notes_of(&e, host), 1, "only the note inside the copied beat is merged");
+        assert_eq!(notes_of(&e, src), 2);
+    }
+
+    #[test]
+    fn merge_midi_never_overwrites_a_clip_it_runs_into() {
+        let (mut e, t) = midi_session();
+        let tpq = e.session().tempo.samples_to_ticks(24_000, e.session().sample_rate);
+        put_midi(&mut e, t, 0, 96_000, vec![note(0), note(tpq * 3)]);
+        let later = put_midi(&mut e, t, 160_000, 96_000, vec![note(0), note(tpq)]);
+        e.execute("edit.select", &json!({"tracks": [t.0], "start": 0, "end": 96_000})).unwrap();
+        e.execute("edit.copy", &json!({})).unwrap();
+        let out = e.execute("edit.paste_merge_midi", &json!({"at": 136_000})).unwrap();
+        assert_eq!((out["merged"].as_u64(), out["placed"].as_u64()), (Some(1), Some(1)), "{out}");
+        assert_eq!(notes_of(&e, later), 3);
+        let clips = e.session().track(t).unwrap().clips().to_vec();
+        assert_eq!(clips.len(), 3);
+        assert!(clips.iter().any(|c| c.range() == Range::new(136_000, 160_000)));
+    }
+
+    #[test]
+    fn plain_paste_after_copy_special() {
+        let (mut e, t, ids) = session_with_clips(&[(0, 1000), (2000, 1000)]);
+        e.execute("clip.gain", &json!({"clip": ids[0].0, "db": -6.0})).unwrap();
+        e.execute("edit.copy_clip_gain", &json!({"start": 0, "end": 1000})).unwrap();
+        e.execute("edit.select", &json!({"tracks": [t.0], "start": 2000, "end": 2000})).unwrap();
+        e.execute("edit.paste", &json!({})).unwrap();
+        assert!((clip_db(&e.session().track(t).unwrap().clips()[1], 500) + 6.0).abs() < 1e-3);
+
+        e.session_mut().edit.automation_follows_edit = false;
+        e.execute("automation.set_point", &json!({"track": t.0, "param": "pan", "at": 100, "value": -1.0})).unwrap();
+        e.execute("edit.copy_pan_automation", &json!({"start": 0, "end": 200})).unwrap();
+        e.execute("edit.paste", &json!({"at": 2000})).unwrap();
+        let pan = e.session().track(t).unwrap().lane(&AutoParam::Pan(0)).unwrap().clone();
+        assert!(pan.points.iter().any(|p| p.at >= 2000), "{:?}", pan.points);
     }
 
     #[test]

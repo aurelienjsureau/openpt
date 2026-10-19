@@ -266,20 +266,16 @@ fn shelf(d: &mut Design, high: bool, order: usize, gain: f64, q: f64, w0: f64) {
 
 fn cut(d: &mut Design, high: bool, order: usize, q: f64, w0: f64) {
     let res = q / BUTTER_Q;
-    for k in 1..=order / 2 {
-        let qk = butter_q(k, order) * if k == 1 { res } else { 1.0 };
-        if high {
-            d.add(matched2(1.0, 0.0, 0.0, 1.0, 1.0 / qk, 1.0, w0));
-        } else {
-            d.add(matched2(0.0, 0.0, 1.0, 1.0, 1.0 / qk, 1.0, w0));
-        }
+    let k = (0.5 * w0.min(0.98 * PI)).tan();
+    for i in 1..=order / 2 {
+        let qk = butter_q(i, order) * if i == 1 { res } else { 1.0 };
+        let norm = 1.0 / (1.0 + k / qk + k * k);
+        let (b0, b1) = if high { (norm, -2.0 * norm) } else { (k * k * norm, 2.0 * k * k * norm) };
+        d.add(Sec { b0, b1, b2: b0, a1: 2.0 * (k * k - 1.0) * norm, a2: (1.0 - k / qk + k * k) * norm });
     }
     if order % 2 == 1 {
-        if high {
-            d.add(matched1(1.0, 0.0, 1.0, 1.0, w0));
-        } else {
-            d.add(matched1(0.0, 1.0, 1.0, 1.0, w0));
-        }
+        let b0 = if high { 1.0 / (1.0 + k) } else { k / (1.0 + k) };
+        d.add(Sec { b0, b1: if high { -b0 } else { b0 }, b2: 0.0, a1: (k - 1.0) / (k + 1.0), a2: 0.0 });
     }
 }
 
@@ -1313,5 +1309,24 @@ mod tests {
         let c = design(LOW_CUT, 3, 1000.0, BUTTER_Q, 0.0, 48_000.0);
         assert!(c.mag_db_at(250.0, 48_000.0) < -40.0);
         assert!(c.mag_db_at(10_000.0, 48_000.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn cuts_never_bulge_and_meet_minus_3_db_at_the_corner() {
+        for fs in [44_100.0, 48_000.0, 96_000.0] {
+            for f in [30.0, 1000.0, 10_000.0, 16_000.0, 20_000.0] {
+                for slope in 0..SLOPE_DB.len() {
+                    for shape in [LOW_CUT, HIGH_CUT] {
+                        let d = design(shape, slope, f, BUTTER_Q, 0.0, fs);
+                        assert!((d.mag_db_at(f, fs) + 3.0).abs() < 0.05, "{} at {f} Hz, {fs}: {}", SHAPES[shape], d.mag_db_at(f, fs));
+                        let mut x = 20.0;
+                        while x < 0.5 * fs {
+                            assert!(d.mag_db_at(x, fs) < 0.05, "{} {} dB/oct at {f} Hz, {fs}: {:.1} dB at {x:.0} Hz", SHAPES[shape], SLOPE_DB[slope], d.mag_db_at(x, fs));
+                            x *= 1.05;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
