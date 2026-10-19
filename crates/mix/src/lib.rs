@@ -44,6 +44,7 @@ pub struct PreparedInstance {
     pub id: String,
     pub ch: usize,
     pub plugin: Box<dyn Plugin>,
+    pub state_loaded: bool,
 }
 
 pub fn instance_specs(s: &Session) -> Vec<InstanceSpec> {
@@ -448,9 +449,9 @@ impl SlotCtx<'_> {
 
     fn make(&mut self, t: TrackId, idx: usize, ins: &openpt_model::Insert, ch: usize) -> Option<PluginSlot> {
         let third = is_third_party(&ins.plugin);
-        let plugin = if third && self.external {
+        let (plugin, state_loaded) = if third && self.external {
             match self.adopt.remove(&(t, idx)) {
-                Some(p) if ins.is_instance(&p.id) && p.ch == ch => Some(p.plugin),
+                Some(p) if ins.is_instance(&p.id) && p.ch == ch => Some((p.plugin, p.state_loaded)),
                 Some(p) => {
                     self.retired.push(p.plugin);
                     None
@@ -459,12 +460,14 @@ impl SlotCtx<'_> {
             }
         } else {
             let state = if third { ins.state_bytes() } else { None };
-            create_instance_with(&ins.instance_id(), state.as_deref(), self.sr, self.mb, ch, None, !self.external).map(|n| n.plugin)
+            create_instance_with(&ins.instance_id(), state.as_deref(), self.sr, self.mb, ch, None, !self.external)
+                .map(|n| (n.plugin, state.is_some() && !n.refused_state))
         }?;
         if let Some(sc) = plugin.scope() {
             openpt_dsp::scope::publish(t.0, idx, &sc);
         }
-        Some(PluginSlot { id: ins.instance_id(), ch, plugin, applied: Vec::new(), failed: false })
+        let applied = if state_loaded { ins.params.values().copied().collect() } else { Vec::new() };
+        Some(PluginSlot { id: ins.instance_id(), ch, plugin, applied, failed: false })
     }
 }
 
@@ -2317,12 +2320,6 @@ fn send_level(t: &Track, i: usize, base: f32, pos: Samples) -> f32 {
     base
 }
 
-fn lerp_gain(db0: f32, db1: f32, i: usize, n: usize) -> f32 {
-    let g0 = db_to_gain(db0);
-    let g1 = db_to_gain(db1);
-    if n == 0 { g0 } else { g0 + (g1 - g0) * (i as f32 / n as f32) }
-}
-
 fn send_pan(t: &Track, i: usize, base: f32, pos: Samples) -> f32 {
     if t.mixer.automation_mode.reads()
         && let Some(l) = t.lane(&AutoParam::SendPan(u8::try_from(i).unwrap_or(0)))
@@ -2341,6 +2338,12 @@ fn send_muted(t: &Track, i: usize, base: bool, pos: Samples) -> bool {
         return l.value_at(pos, 0.0) >= 0.5;
     }
     base
+}
+
+fn lerp_gain(db0: f32, db1: f32, i: usize, n: usize) -> f32 {
+    let g0 = db_to_gain(db0);
+    let g1 = db_to_gain(db1);
+    if n == 0 { g0 } else { g0 + (g1 - g0) * (i as f32 / n as f32) }
 }
 
 fn peak(x: &[f32]) -> f32 {
@@ -3022,12 +3025,6 @@ mod tests {
     }
 
     #[test]
-    fn render_bus_is_the_bus_not_the_main_mix() {
-        let (mut s, t) = session_with_dc(0.5, 4800);
-        let stem = s.add_bus("Stem", ChannelFormat::Stereo);
-        let empty = s.add_bus("Empty", ChannelFormat::Stereo);
-        s.track_mut(t).unwrap().mixer.output = Route::Bus(stem);
-    #[test]
     fn send_pan_and_mute_follow_their_automation() {
         let (mut s, t) = session_with_dc(0.5, 9600);
         let bus = s.add_bus("Verb", ChannelFormat::Stereo);
@@ -3051,6 +3048,12 @@ mod tests {
         assert!(out[0][8000].abs() < 1e-4, "send muted by automation: {}", out[0][8000]);
     }
 
+    #[test]
+    fn render_bus_is_the_bus_not_the_main_mix() {
+        let (mut s, t) = session_with_dc(0.5, 4800);
+        let stem = s.add_bus("Stem", ChannelFormat::Stereo);
+        let empty = s.add_bus("Empty", ChannelFormat::Stereo);
+        s.track_mut(t).unwrap().mixer.output = Route::Bus(stem);
         let main = render_range(&s, Range::new(0, 4800), 512);
         let bus = render_bus(&s, stem, Range::new(0, 4800), 512);
         let silent = render_bus(&s, empty, Range::new(0, 4800), 512);
@@ -3157,7 +3160,7 @@ mod tests {
         let clock = Clock { inner: openpt_dsp::create("gain").unwrap(), seen: Arc::clone(&seen) };
         let mut eng = MixEngine::new(48_000.0, 512);
         eng.set_external_instances(true);
-        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.clock".into(), ch: 1, plugin: Box::new(clock) }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.clock".into(), ch: 1, plugin: Box::new(clock), state_loaded: false }]);
         render_block(&mut eng, &s, 96_000);
         eng.monitor_only = true;
         render_block(&mut eng, &s, 96_000);
@@ -3212,7 +3215,7 @@ mod tests {
         let ears = Ears { inner: openpt_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut eng = MixEngine::new(48_000.0, 512);
         eng.set_external_instances(true);
-        eng.adopt(vec![PreparedInstance { track: t, slot: INSTRUMENT_SLOT, id: "vst3:test.ears".into(), ch: 2, plugin: Box::new(ears) }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: INSTRUMENT_SLOT, id: "vst3:test.ears".into(), ch: 2, plugin: Box::new(ears), state_loaded: false }]);
         render_block(&mut eng, &s, 0);
         assert_eq!(std::mem::take(&mut *heard.lock().unwrap()), vec![(0, [0xB0, 121, 0]), (100, [0xB0, 64, 127])]);
         render_block(&mut eng, &s, 36_000);
@@ -3265,7 +3268,7 @@ mod tests {
         let keys = Keys { inner: openpt_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut eng = MixEngine::new(48_000.0, 512);
         eng.set_external_instances(true);
-        eng.adopt(vec![PreparedInstance { track: t, slot: INSTRUMENT_SLOT, id: "vst3:test.keys".into(), ch: 2, plugin: Box::new(keys) }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: INSTRUMENT_SLOT, id: "vst3:test.keys".into(), ch: 2, plugin: Box::new(keys), state_loaded: false }]);
         render_block(&mut eng, &s, 0);
         assert_eq!(*heard.lock().unwrap(), vec![(72, 80)]);
     }
@@ -3320,10 +3323,10 @@ mod tests {
         gain.prepare(48_000.0, 512, 1);
         let fake = Stateful { inner: gain, blob: Vec::new(), sets: Arc::clone(&sets) };
         let wrong = Stateful { inner: openpt_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
-        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 2, plugin: Box::new(wrong) }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 2, plugin: Box::new(wrong), state_loaded: false }]);
         assert!(render_block(&mut eng, &s, 512) > 0.3);
         assert_eq!(eng.take_retired().len(), 1);
-        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 1, plugin: Box::new(fake) }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 1, plugin: Box::new(fake), state_loaded: false }]);
         let mut wet = 0.0;
         for b in 2..20 {
             wet = render_block(&mut eng, &s, b * 512);
@@ -3334,7 +3337,7 @@ mod tests {
         s.track_mut(t).unwrap().mixer.inserts[0] = None;
         render_block(&mut eng, &s, 20 * 512);
         assert_eq!(eng.take_retired().len(), 1);
-        eng.adopt(vec![PreparedInstance { track: t, slot: 3, id: "vst3:x".into(), ch: 1, plugin: openpt_dsp::create("gain").unwrap() }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: 3, id: "vst3:x".into(), ch: 1, plugin: openpt_dsp::create("gain").unwrap(), state_loaded: false }]);
         render_block(&mut eng, &s, 21 * 512);
         assert_eq!(eng.take_retired().len(), 1);
         assert!(eng.drain_plugins().is_empty());
@@ -3364,7 +3367,7 @@ mod tests {
     }
 
     fn nan(track: TrackId, slot: usize, ch: usize) -> Vec<PreparedInstance> {
-        vec![PreparedInstance { track, slot, id: "vst3:test.nan".into(), ch, plugin: Box::new(Nan(openpt_dsp::create("gain").unwrap())) }]
+        vec![PreparedInstance { track, slot, id: "vst3:test.nan".into(), ch, plugin: Box::new(Nan(openpt_dsp::create("gain").unwrap())), state_loaded: false }]
     }
 
     #[test]
@@ -3419,10 +3422,10 @@ mod tests {
             gain.prepare(48_000.0, 512, 1);
             Box::new(Stateful { inner: gain, blob: blob.to_vec(), sets: Arc::clone(&sets) })
         };
-        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 1, plugin: make(b"old") }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 1, plugin: make(b"old"), state_loaded: false }]);
         render_block(&mut eng, &s, 0);
         assert!(eng.take_retired().is_empty());
-        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 1, plugin: make(b"new") }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:test.fake".into(), ch: 1, plugin: make(b"new"), state_loaded: false }]);
         render_block(&mut eng, &s, 512);
         let mut retired = eng.take_retired();
         assert_eq!(retired.len(), 1, "the old instance is retired");
@@ -3430,7 +3433,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_state_comes_first_then_session_params() {
+    fn stored_state_wins_over_stale_session_params() {
         let (mut s, t) = session_with_dc(0.5, 48_000);
         let mut ins = Insert::new("vst3:00000000000000000000000000000001");
         ins.params.insert("gain".into(), -6.0);
@@ -3441,14 +3444,14 @@ mod tests {
         eng.set_external_instances(true);
         let sets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let fake = Stateful { inner: openpt_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
-        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:00000000000000000000000000000001".into(), ch: 1, plugin: Box::new(fake) }]);
+        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:00000000000000000000000000000001".into(), ch: 1, plugin: Box::new(fake), state_loaded: true }]);
         render_block(&mut eng, &s, 0);
-        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 1, "session params apply once");
+        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 0, "the state wins over stored values");
         render_block(&mut eng, &s, 512);
-        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 0);
         s.track_mut(t).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("gain".into(), -12.0);
         render_block(&mut eng, &s, 1024);
-        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 2, "later session edits apply");
+        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 1, "later session edits apply");
         let out = render_range(&s, Range::new(0, 1024), 512);
         assert!(out[0][100] > 0.3);
     }
@@ -3759,7 +3762,7 @@ mod tests {
             s.track_mut(track).unwrap().mixer.inserts[0] = Some(Insert::new("vst3:test.latent"));
             let mut gain = openpt_dsp::create("gain").unwrap();
             gain.prepare(48_000.0, 512, 1);
-            eng.adopt(vec![PreparedInstance { track, slot: 0, id: "vst3:test.latent".into(), ch: 1, plugin: Box::new(Latent(gain)) }]);
+            eng.adopt(vec![PreparedInstance { track, slot: 0, id: "vst3:test.latent".into(), ch: 1, plugin: Box::new(Latent(gain)), state_loaded: false }]);
         }
         render_block(&mut eng, &s, 0);
         assert_eq!((eng.track_latency, eng.latency), (MAX_LATENCY, 2 * MAX_LATENCY));

@@ -1019,7 +1019,8 @@ impl Side {
                 if refused_state {
                     self.refused.insert(key);
                 }
-                out.push(PreparedInstance { track: spec.track, slot: spec.slot, id: spec.id, ch: spec.ch, plugin });
+                let state_loaded = spec.state.is_some() && !refused_state;
+                out.push(PreparedInstance { track: spec.track, slot: spec.slot, id: spec.id, ch: spec.ch, plugin, state_loaded });
             }
         }
         openpt_mix::ara_follow(s, &mut self.ara_seen);
@@ -1278,7 +1279,7 @@ mod tests {
         let (gtx, grx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(openpt_model::Session::default()), 48_000.0, gtx);
         let plugin = openpt_dsp::create("gain").unwrap();
-        tx.send(Cmd::Session(Arc::clone(&s), vec![PreparedInstance { track: t, slot: 1, id: "vst3:test.fake".into(), ch: 2, plugin }])).unwrap();
+        tx.send(Cmd::Session(Arc::clone(&s), vec![PreparedInstance { track: t, slot: 1, id: "vst3:test.fake".into(), ch: 2, plugin, state_loaded: false }])).unwrap();
         let mut out = vec![0.0f32; 256];
         st.fill(&mut out, 2);
         assert!(grx.try_recv().is_err(), "nothing retired yet");
@@ -1287,7 +1288,7 @@ mod tests {
         assert_eq!(grx.try_recv().unwrap().len(), 1);
         tx.send(Cmd::Session(
             Arc::clone(&s),
-            vec![PreparedInstance { track: t, slot: 1, id: "vst3:test.fake".into(), ch: 2, plugin: openpt_dsp::create("gain").unwrap() }],
+            vec![PreparedInstance { track: t, slot: 1, id: "vst3:test.fake".into(), ch: 2, plugin: openpt_dsp::create("gain").unwrap(), state_loaded: false }],
         ))
         .unwrap();
         st.fill(&mut out, 2);

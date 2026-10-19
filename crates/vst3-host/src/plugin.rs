@@ -206,12 +206,6 @@ impl Plugin for Vst3Plugin {
                 self.latency = 0;
             }
         }
-        self.pending.clear();
-        for i in 0..self.ids.len().min(PARAM_QUEUE_CAP) {
-            if let (Some(&id), Some(n)) = (self.ids.get(i), self.values.get(i).and_then(|&v| self.normalized_from_plain(i, v))) {
-                self.pending.push((id, n));
-            }
-        }
     }
 
     fn reset(&mut self) {
