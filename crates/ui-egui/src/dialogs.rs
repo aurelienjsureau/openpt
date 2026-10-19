@@ -215,6 +215,14 @@ impl Dialogs {
                 },
                 key: "path".into(),
             },
+            "session.save_template" => Dialog::PathPrompt {
+                cmd: id.into(),
+                title: "Save As Template".into(),
+                path: crate::dashboard::template_dirs()
+                    .first()
+                    .map_or_else(|| format!("{name}.openpt"), |d| d.join(format!("{name}.openpt")).display().to_string()),
+                key: "path".into(),
+            },
             "edit.repeat" => Dialog::Number { cmd: id.into(), title: "Repeat".into(), key: "count".into(), value: 2.0, suffix: "times".into() },
             "edit.shift" => {
                 Dialog::Number { cmd: id.into(), title: "Shift (seconds)".into(), key: "by_seconds".into(), value: 1.0, suffix: "s".into() }
@@ -596,6 +604,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         && key == "path"
                         && cmd != "session.save_as"
                         && cmd != "session.save_copy"
+                        && cmd != "session.save_template"
                         && key != "dir"
                         && ui.button("Browse…").clicked()
                         && let Some(p) = pick(cmd, &[])
@@ -610,7 +619,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         *path = p;
                     }
                     if let Some(pick) = &app.services.pick_save
-                        && (cmd == "session.save_as" || cmd == "session.save_copy")
+                        && (cmd == "session.save_as" || cmd == "session.save_copy" || cmd == "session.save_template")
                         && ui.button("Browse…").clicked()
                         && let Some(p) = pick(cmd, path)
                     {

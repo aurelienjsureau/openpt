@@ -6,6 +6,9 @@ fn main() {
             println!("{} · {:?} Hz · {:?} bit", s.app, s.sample_rate, s.bit_depth);
             println!("tempos {:?}", s.tempos.iter().take(12).collect::<Vec<_>>());
             println!("meters {} {:?}", s.meters.len(), s.meters.iter().take(6).collect::<Vec<_>>());
+            for g in &s.groups {
+                println!("group {} vca={:?} {:?}", g.name, g.vca, g.members);
+            }
             for m in &s.markers {
                 println!("marker {} {} {:?} {:?}", m.number, m.name, m.start, m.end);
             }

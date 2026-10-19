@@ -219,6 +219,11 @@ pub fn specs() -> Vec<CommandSpec> {
             {
                 return Err(bad("track.vca", "`vca` must be a VCA Master track"));
             }
+            if let Some(v) = vca
+                && tracks.iter().any(|t| vca_loops(e.session(), *t, v))
+            {
+                return Err(bad("track.vca", "a VCA cannot control itself, even through another VCA"));
+            }
             let s = e.session_mut();
             for t in &tracks {
                 if let Some(tr) = s.track_mut(*t) {
@@ -226,6 +231,31 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
             }
             Ok(json!({"vca": vca}))
+        }),
+        cmd!("track.vca_group", "VCA Group", [], None, "{vca: VCA track id|name, group: group id|name|letter | null}", has_tracks, |e, p| {
+            const CMD: &str = "track.vca_group";
+            let v = track_param(e, CMD, p, "vca")?.ok_or_else(|| bad(CMD, "`vca` required"))?;
+            if e.session().track(v).is_none_or(|t| t.kind != TrackKind::Vca) {
+                return Err(bad(CMD, "`vca` must be a VCA Master track"));
+            }
+            let members: Vec<TrackId> = match p.get("group") {
+                None | Some(Value::Null) => Vec::new(),
+                _ => {
+                    let g = find_group(e, p, CMD)?;
+                    let s = e.session();
+                    let all = s.groups.iter().find(|x| x.id == g).map(|x| x.members.clone()).unwrap_or_default();
+                    all.into_iter().filter(|t| !vca_loops(s, *t, v)).collect()
+                }
+            };
+            let s = e.session_mut();
+            for tr in &mut s.tracks {
+                if members.contains(&tr.id) {
+                    tr.mixer.vca = Some(v.0);
+                } else if tr.mixer.vca == Some(v.0) {
+                    tr.mixer.vca = None;
+                }
+            }
+            Ok(json!({"members": members.len()}))
         }),
         cmd!(
             "track.playlist_promote",
@@ -432,6 +462,18 @@ fn group(e: &mut Engine, p: &Value) -> Result<Value> {
         attributes: vec!["volume".into(), "mute".into(), "solo".into(), "record".into()],
     });
     Ok(json!({"group": id}))
+}
+
+fn vca_loops(s: &openpt_model::Session, t: TrackId, v: TrackId) -> bool {
+    let mut cur = Some(v.0);
+    for _ in 0..=s.tracks.len() {
+        let Some(id) = cur else { return false };
+        if id == t.0 {
+            return true;
+        }
+        cur = s.tracks.iter().find(|x| x.id.0 == id).and_then(|x| x.mixer.vca);
+    }
+    true
 }
 
 fn find_group(e: &Engine, p: &Value, cmd: &str) -> Result<GroupId> {
@@ -1331,5 +1373,24 @@ mod tests {
         assert_eq!(vca(&e), None);
         assert!(e.undo());
         assert_eq!(vca(&e), Some(master.0));
+    }
+
+    #[test]
+    fn a_vca_takes_a_mix_group_and_never_loops() {
+        let mut e = Engine::default();
+        for (kind, name) in [("audio", "Kick"), ("audio", "Snare"), ("audio", "Bass"), ("vca", "Drums"), ("vca", "All")] {
+            e.execute("track.new", &json!({"kind": kind, "name": name})).unwrap();
+        }
+        let id = |e: &Engine, n: &str| e.session().tracks.iter().find(|t| t.name == n).unwrap().id;
+        let vca = |e: &Engine, n: &str| e.session().tracks.iter().find(|t| t.name == n).unwrap().mixer.vca;
+        let (drums, all) = (id(&e, "Drums"), id(&e, "All"));
+        e.execute("track.group", &json!({"tracks": ["Kick", "Snare"], "name": "Kit"})).unwrap();
+        e.execute("track.vca_group", &json!({"vca": drums.0, "group": "Kit"})).unwrap();
+        assert_eq!((vca(&e, "Kick"), vca(&e, "Snare"), vca(&e, "Bass")), (Some(drums.0), Some(drums.0), None));
+        e.execute("track.vca", &json!({"tracks": [drums.0], "vca": all.0})).unwrap();
+        assert!(e.execute("track.vca", &json!({"tracks": [all.0], "vca": drums.0})).is_err());
+        assert!(e.execute("track.vca", &json!({"tracks": [all.0], "vca": all.0})).is_err());
+        e.execute("track.vca_group", &json!({"vca": drums.0, "group": null})).unwrap();
+        assert_eq!((vca(&e, "Kick"), vca(&e, "Snare"), vca(&e, "Drums")), (None, None, Some(all.0)));
     }
 }

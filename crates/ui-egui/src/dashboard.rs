@@ -49,7 +49,7 @@ fn create_params(d: &Draft) -> Value {
     p
 }
 
-fn template_dirs() -> Vec<std::path::PathBuf> {
+pub(crate) fn template_dirs() -> Vec<std::path::PathBuf> {
     let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
     let home = env("USERPROFILE").or_else(|| env("HOME"));
     let mut dirs = Vec::new();

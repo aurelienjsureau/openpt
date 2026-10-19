@@ -77,6 +77,14 @@ pub struct PtxSession {
     pub tempos: Vec<(u64, f64)>,
     pub meters: Vec<(u32, u32, u32)>,
     pub markers: Vec<Marker>,
+    pub groups: Vec<Group>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    pub name: String,
+    pub members: Vec<String>,
+    pub vca: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,6 +265,24 @@ fn timeline(d: &[u8], all: &[&Block], s: &mut PtxSession) {
             s.markers.push(Marker { number, name, start, end });
         }
     }
+}
+
+fn groups(d: &[u8], all: &[&Block], s: &mut PtxSession) {
+    let name_of = |i: u16| s.tracks.get(usize::from(i)).map(|t| t.name.clone());
+    let mut out: Vec<Group> = Vec::new();
+    for b in all.iter().filter(|b| b.content_type == 0x202A) {
+        let Some((name, after)) = string_at(d, b.start) else { continue };
+        let Some(n) = u32_at(d, after + 7).filter(|&n| n <= 4096) else { continue };
+        let list = after + 11;
+        let tail = list + 2 * n as usize;
+        if name == "<ALL>" || out.iter().any(|g| g.name == name) || u16_at(d, tail) != Some(0xFFFE) || tail + 12 > b.end {
+            continue;
+        }
+        let members = (0..n as usize).filter_map(|k| u16_at(d, list + 2 * k).and_then(name_of)).collect();
+        let vca = u16_at(d, tail + 10).filter(|&v| v != 0xFFFF).and_then(name_of);
+        out.push(Group { name, members, vca });
+    }
+    s.groups = out;
 }
 
 fn regions(d: &[u8], all: &[&Block], s: &mut PtxSession) {
@@ -470,6 +496,7 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
     }
     regions(&d, &all, &mut s);
     timeline(&d, &all, &mut s);
+    groups(&d, &all, &mut s);
     Ok(s)
 }
 

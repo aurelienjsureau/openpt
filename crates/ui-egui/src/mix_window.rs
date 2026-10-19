@@ -443,10 +443,35 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         y = sec.max.y + 4.0;
     }
     let no_group = if narrow { "nogrp" } else { "no group" };
-    let gname = app.engine.session().groups.iter().find(|g| g.members.contains(&id)).map_or(no_group.to_string(), |g| g.name.clone());
     let gr = Rect::from_min_size(pos2(x0 + 2.0, y), vec2(inner_w - 4.0, 16.0));
-    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(gr));
-    let _ = selector_box(&mut c, gr.width(), gr.height(), &gname, t.text_dim);
+    let mut c = ui.new_child(egui::UiBuilder::new().id_salt(("mix-group", id.0)).max_rect(gr));
+    if track.kind == TrackKind::Vca {
+        let s = app.engine.session();
+        let members: Vec<openpt_model::TrackId> = s.tracks.iter().filter(|x| x.mixer.vca == Some(id.0)).map(|x| x.id).collect();
+        let current = s.groups.iter().find(|g| !members.is_empty() && g.members.len() == members.len() && members.iter().all(|m| g.members.contains(m)));
+        let label = match current {
+            Some(g) => g.name.clone(),
+            None if members.is_empty() => no_group.to_string(),
+            None => format!("{} trk", members.len()),
+        };
+        let groups: Vec<(u64, String)> = s.groups.iter().filter(|g| g.mix).map(|g| (g.id.0, g.name.clone())).collect();
+        let current = current.map(|g| g.id.0);
+        let resp = selector_box(&mut c, gr.width(), gr.height(), &label, t.counter_text);
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "VCA group"));
+        egui::Popup::menu(&resp).show(|ui| {
+            if ui.selectable_label(current.is_none() && members.is_empty(), "none").clicked() {
+                let _ = app.run("track.vca_group", json!({"vca": id.0, "group": null}));
+            }
+            for (gid, name) in &groups {
+                if ui.selectable_label(current == Some(*gid), name).clicked() {
+                    let _ = app.run("track.vca_group", json!({"vca": id.0, "group": gid}));
+                }
+            }
+        });
+    } else {
+        let gname = app.engine.session().groups.iter().find(|g| g.members.contains(&id)).map_or(no_group.to_string(), |g| g.name.clone());
+        let _ = selector_box(&mut c, gr.width(), gr.height(), &gname, t.text_dim);
+    }
     y += 22.0;
     let out_fmt = output_format(app, track);
     let surround_out =

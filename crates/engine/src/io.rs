@@ -2294,6 +2294,35 @@ pub fn ptx_session_media(path: &str) -> Result<(Session, Vec<String>)> {
             }
         }
     }
+    let by_name = |s: &Session, n: &str| s.tracks.iter().find(|t| t.name == n).map(|t| t.id);
+    for g in &p.groups {
+        let members: Vec<TrackId> = g.members.iter().filter_map(|m| by_name(&s, m)).collect();
+        if members.is_empty() {
+            continue;
+        }
+        let vca = g.vca.as_deref().and_then(|v| by_name(&s, v)).filter(|v| s.track(*v).is_some_and(|t| t.kind == openpt_model::TrackKind::Vca));
+        let id = openpt_model::GroupId(s.alloc());
+        let letter = (b'a'..=b'z').map(char::from).find(|c| !s.groups.iter().any(|x| x.letter == *c)).unwrap_or('z');
+        let color = s.next_track_color();
+        s.groups.push(openpt_model::Group {
+            id,
+            name: g.name.clone(),
+            letter,
+            members: members.clone(),
+            edit: true,
+            mix: true,
+            active: true,
+            color,
+            attributes: vec!["volume".into(), "mute".into(), "solo".into(), "record".into()],
+        });
+        if let Some(v) = vca {
+            for m in members.into_iter().filter(|m| *m != v) {
+                if let Some(tr) = s.track_mut(m) {
+                    tr.mixer.vca = Some(v.0);
+                }
+            }
+        }
+    }
     let mut meters = p.meters.clone();
     meters.sort_by_key(|m| m.0);
     for (bar, num, den) in meters {

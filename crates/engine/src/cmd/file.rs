@@ -43,6 +43,9 @@ pub fn specs() -> Vec<CommandSpec> {
             if cfg!(target_arch = "wasm32") {
                 crate::io::write_file(&file.to_string_lossy(), text.as_bytes())?;
             } else {
+                if let Some(dir) = file.parent().filter(|d| !d.as_os_str().is_empty()) {
+                    crate::io::make_dir(dir)?;
+                }
                 crate::io::replace_file(&file.with_extension("openpt.tmp"), &file, text.as_bytes())?;
             }
             Ok(json!({"path": file}))

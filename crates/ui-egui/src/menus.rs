@@ -144,6 +144,7 @@ const DIALOG_COMMANDS: &[&str] = &[
     "session.save",
     "session.save_as",
     "session.save_copy",
+    "session.save_template",
     "track.group",
     "edit.repeat",
     "edit.shift",

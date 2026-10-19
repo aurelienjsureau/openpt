@@ -690,7 +690,7 @@ impl MixEngine {
         for c in &mut self.main {
             c.iter_mut().take(frames).for_each(|x| *x = 0.0);
         }
-        let any_solo = s.tracks.iter().any(|t| t.mixer.solo && !t.inactive);
+        let any_solo = any_solo(s);
         let order = std::mem::take(&mut self.order);
         let live = |t: &Track| !(t.kind == TrackKind::Master || t.inactive || t.kind == TrackKind::Vca);
         let is_aux = reads_bus;
@@ -893,9 +893,13 @@ impl MixEngine {
         let transport = transport_at(s, pos, !self.monitor_only, self.recording);
         for t in s.tracks.iter().filter(|t| t.kind == TrackKind::Master && !t.inactive) {
             if let Some(strip) = self.strips.get_mut(&t.id) {
+                let v0 = volume_db_at(t, pos);
+                let v1 = volume_db_at(t, pos + frames as i64);
                 for (dst, src) in strip.buf.iter_mut().zip(self.main.iter()) {
                     if let (Some(d), Some(sr)) = (dst.get_mut(..frames), src.get(..frames)) {
-                        d.copy_from_slice(sr);
+                        for (i, (d, x)) in d.iter_mut().zip(sr).enumerate() {
+                            *d = x * lerp_gain(v0, v1, i, frames);
+                        }
                     }
                 }
                 for (i, ins) in t.mixer.inserts.iter().enumerate() {
@@ -912,16 +916,9 @@ impl MixEngine {
                         }
                     }
                 }
-                let v0 = volume_db_at(t, pos);
-                let v1 = volume_db_at(t, pos + frames as i64);
-                for (ch, src) in strip.buf.iter().enumerate().take(self.main.len()) {
-                    if let Some(m) = self.main.get_mut(ch) {
-                        for i in 0..frames {
-                            let g = lerp_gain(v0, v1, i, frames);
-                            if let (Some(d), Some(x)) = (m.get_mut(i), src.get(i)) {
-                                *d = x * g;
-                            }
-                        }
+                for (m, src) in self.main.iter_mut().zip(strip.buf.iter()) {
+                    if let (Some(d), Some(x)) = (m.get_mut(..frames), src.get(..frames)) {
+                        d.copy_from_slice(x);
                     }
                 }
                 let m = self.meters.entry(t.id).or_default();
@@ -1390,7 +1387,7 @@ fn process_strip(
     strip.gr = gr;
     strip.latency = latency.min(MAX_LATENCY);
     let auto_mute = t.mixer.automation_mode.reads() && t.lane(&AutoParam::Mute).is_some_and(|l| l.value_at(pos, 0.0) >= 0.5);
-    let soloed_out = any_solo && !t.mixer.solo && !t.mixer.solo_safe && !receives_solo(s, t);
+    let soloed_out = any_solo && !soloed(s, t) && !t.mixer.solo_safe && !receives_solo(s, t);
     strip.muted = t.mixer.mute || auto_mute || soloed_out;
     if strip.tap || t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
         strip.pre.resize_with(strip.buf.len(), Vec::new);
@@ -1411,12 +1408,10 @@ fn process_strip(
         v0 += l.value_at(pos, 0.0);
         v1 += l.value_at(last, 0.0);
     }
-    if let Some(vid) = t.mixer.vca
-        && let Some(vca) = s.tracks.iter().find(|x| x.id.0 == vid && x.kind == TrackKind::Vca)
-    {
+    for vca in vca_chain(s, t) {
         v0 += volume_db_at(vca, pos);
         v1 += volume_db_at(vca, last);
-        if vca.mixer.mute {
+        if vca.mixer.mute || (vca.mixer.automation_mode.reads() && vca.lane(&AutoParam::Mute).is_some_and(|l| l.value_at(pos, 0.0) >= 0.5)) {
             strip.muted = true;
         }
     }
@@ -1827,7 +1822,26 @@ fn receives_solo(s: &Session, t: &Track) -> bool {
     let Route::Bus(b) = &t.mixer.input else { return false };
     s.tracks
         .iter()
-        .any(|o| o.mixer.solo && (o.mixer.output == Route::Bus(*b) || o.mixer.sends.iter().flatten().any(|sn| sn.target == Route::Bus(*b))))
+        .any(|o| soloed(s, o) && (o.mixer.output == Route::Bus(*b) || o.mixer.sends.iter().flatten().any(|sn| sn.target == Route::Bus(*b))))
+}
+
+pub fn vca_chain<'a>(s: &'a Session, t: &Track) -> impl Iterator<Item = &'a Track> {
+    let mut next = t.mixer.vca;
+    let mut left = s.tracks.len();
+    std::iter::from_fn(move || {
+        left = left.checked_sub(1)?;
+        let vca = s.tracks.iter().find(|x| Some(x.id.0) == next && x.kind == TrackKind::Vca)?;
+        next = vca.mixer.vca;
+        Some(vca)
+    })
+}
+
+pub fn soloed(s: &Session, t: &Track) -> bool {
+    t.mixer.solo || vca_chain(s, t).any(|v| v.mixer.solo)
+}
+
+pub fn any_solo(s: &Session) -> bool {
+    s.tracks.iter().any(|t| t.kind != TrackKind::Vca && !t.inactive && soloed(s, t))
 }
 
 mod click {
@@ -2913,6 +2927,70 @@ mod tests {
             pl.clips.push(Clip::audio(id, "dc", SourceId(900), 0, 0, frames as i64));
         }
         t
+    }
+
+    #[test]
+    fn nested_vcas_offset_solo_and_mute_their_members() {
+        let (mut s, a) = session_with_dc(0.5, 4800);
+        let b = add_dc_track(&mut s, 0.5, 4800);
+        let inner = s.add_track(TrackKind::Vca, ChannelFormat::Mono, Some("Drums"));
+        let outer = s.add_track(TrackKind::Vca, ChannelFormat::Mono, Some("All"));
+        s.track_mut(a).unwrap().mixer.vca = Some(inner.0);
+        s.track_mut(inner).unwrap().mixer.vca = Some(outer.0);
+        s.track_mut(inner).unwrap().mixer.volume_db = -6.0;
+        s.track_mut(outer).unwrap().mixer.volume_db = -6.0;
+        s.track_mut(b).unwrap().mixer.output = Route::None;
+        let level = |s: &Session| render_range(s, Range::new(0, 4800), 512)[0][100];
+        let expect = 0.5 * CENTER * db_to_gain(-12.0);
+        assert!((level(&s) - expect).abs() < 1e-4, "{} vs {expect}", level(&s));
+        s.track_mut(b).unwrap().mixer.output = Route::Main;
+        s.track_mut(outer).unwrap().mixer.solo = true;
+        assert!((level(&s) - expect).abs() < 1e-4, "{}", level(&s));
+        s.track_mut(outer).unwrap().mixer.solo = false;
+        s.track_mut(b).unwrap().mixer.output = Route::None;
+        let tr = s.track_mut(inner).unwrap();
+        tr.mixer.automation_mode = openpt_model::AutomationMode::Read;
+        tr.lane_mut(&AutoParam::Mute).set_point(0, 1.0);
+        assert!(level(&s).abs() < 1e-6, "{}", level(&s));
+    }
+
+    #[test]
+    fn master_fader_inserts_are_post_fader() {
+        let (mut s, _) = session_with_dc(0.5, 4800);
+        let m = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
+        s.track_mut(m).unwrap().mixer.volume_db = -6.0;
+        let mut eng = MixEngine::new(48_000.0, 512);
+        eng.set_external_instances(true);
+        let seen = Arc::new(std::sync::Mutex::new(0.0f32));
+        struct Peek(Box<dyn Plugin>, Arc<std::sync::Mutex<f32>>);
+        impl Plugin for Peek {
+            fn info(&self) -> &'static openpt_dsp::PluginInfo {
+                self.0.info()
+            }
+            fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+                self.0.prepare(sr, mb, ch);
+            }
+            fn set_param(&mut self, id: &str, v: f32) -> bool {
+                self.0.set_param(id, v)
+            }
+            fn param(&self, id: &str) -> Option<f32> {
+                self.0.param(id)
+            }
+            fn reset(&mut self) {
+                self.0.reset();
+            }
+            fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+                *self.1.lock().unwrap() = io[0][100];
+                self.0.process(io, frames);
+            }
+        }
+        s.track_mut(m).unwrap().mixer.inserts[0] = Some(Insert::new("vst3:test.peek"));
+        let peek = Peek(openpt_dsp::create("gain").unwrap(), Arc::clone(&seen));
+        eng.adopt(vec![PreparedInstance { track: m, slot: 0, id: "vst3:test.peek".into(), ch: 2, plugin: Box::new(peek), state_loaded: false }]);
+        render_block(&mut eng, &s, 0);
+        let expect = 0.5 * CENTER * db_to_gain(-6.0);
+        let got = *seen.lock().unwrap();
+        assert!((got - expect).abs() < 1e-4, "the insert hears the faded mix: {got} vs {expect}");
     }
 
     #[test]
