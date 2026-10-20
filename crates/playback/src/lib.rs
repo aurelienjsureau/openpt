@@ -149,6 +149,7 @@ struct AudioState {
     end: Option<Samples>,
     looped: Option<Range>,
     pending: Vec<Vec<f32>>,
+    fold_channels: usize,
     fold: [(f32, f32); MAX_CHANNELS],
     pending_len: usize,
     read: f64,
@@ -176,7 +177,8 @@ fn new_engine(sr: f32) -> MixEngine {
 impl AudioState {
     fn new(rx: Receiver<Cmd>, shared: Arc<Shared>, session: Arc<Session>, device_rate: f64, garbage: Sender<Vec<Box<dyn Plugin>>>) -> Self {
         let sr = session.sample_rate.as_f64() as f32;
-        let nch = main_channels(&session);
+        let nch = openpt_mix::output_channels(&session);
+        let fold_channels = main_channels(&session);
         AudioState {
             garbage,
             old_sessions: None,
@@ -191,6 +193,7 @@ impl AudioState {
             end: None,
             looped: None,
             pending: vec![vec![0.0; BLOCK]; nch],
+            fold_channels,
             pending_len: 0,
             read: 0.0,
             device_rate,
@@ -238,13 +241,14 @@ impl AudioState {
                         let _ = self.garbage.send(old.drain_plugins());
                     }
                     self.mix.adopt(instances);
-                    let nch = main_channels(&s);
+                    let nch = openpt_mix::output_channels(&s);
                     if self.pending.len() != nch {
                         self.pending = vec![vec![0.0; BLOCK]; nch];
                         self.pending_len = 0;
                         self.read = 0.0;
                     }
                     self.fold = fold_gains(&s);
+                    self.fold_channels = main_channels(&s);
                     let old = std::mem::replace(&mut self.session, s);
                     if let Some(tx) = &self.old_sessions {
                         let _ = tx.try_send(old);
@@ -466,16 +470,17 @@ impl AudioState {
             let fr = (self.read - i0 as f64) as f32;
             let sounding = self.playing || monitoring;
             let nch = self.pending.len();
+            let main_nch = self.fold_channels;
             let sample = |c: usize| {
                 let ch = self.pending.get(c);
                 let a = ch.and_then(|v| v.get(i0)).copied().unwrap_or(0.0);
                 let b = ch.and_then(|v| v.get(i0 + 1)).copied().unwrap_or(a);
                 a + (b - a) * fr
             };
-            if nch > 2 && channels < nch {
+            if main_nch > 2 && channels < main_nch {
                 let (mut l, mut r) = (0.0f32, 0.0f32);
                 if sounding {
-                    for (c, (gl, gr)) in self.fold.iter().enumerate().take(nch) {
+                    for (c, (gl, gr)) in self.fold.iter().enumerate().take(main_nch) {
                         let v = sample(c);
                         l += v * gl;
                         r += v * gr;
@@ -606,7 +611,7 @@ impl Player {
             meters: Mutex::new(MeterSnapshot::default()),
         });
         let want = session.sample_rate.hz();
-        let want_ch = u16::try_from(main_channels(&session)).unwrap_or(2);
+        let want_ch: u16 = 64;
         let side_rate = session.sample_rate.as_f64() as f32;
         let new_side = |garbage: Receiver<Vec<Box<dyn Plugin>>>| Mutex::new(Side::new(side_rate, garbage));
         let midi_input = midi::MidiInputRing::new(midi::DEFAULT_RING_CAPACITY);

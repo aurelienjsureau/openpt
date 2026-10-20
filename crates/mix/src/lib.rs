@@ -21,6 +21,10 @@ pub fn main_channels(s: &Session) -> usize {
     s.main_format().channels().clamp(MAIN_CHANNELS, MAX_CHANNELS)
 }
 
+pub fn output_channels(s: &Session) -> usize {
+    s.outputs.iter().map(|o| usize::from(o.first_channel) + o.format.channels()).fold(main_channels(s), usize::max).min(64)
+}
+
 pub const INSTRUMENT_SLOT: usize = usize::MAX;
 
 pub fn is_third_party(id: &str) -> bool {
@@ -274,6 +278,7 @@ struct Strip {
     heat: openpt_dsp::heat::Heat,
     pre: Vec<Vec<f32>>,
     tap: bool,
+    listen: bool,
     scratch: Vec<f32>,
     plugins: Vec<Option<PluginSlot>>,
     instrument: Option<PluginSlot>,
@@ -363,6 +368,7 @@ impl Strip {
             buf: Vec::new(),
             pre: Vec::new(),
             tap: false,
+            listen: false,
             scratch: Vec::new(),
             plugins: Vec::new(),
             instrument: None,
@@ -401,6 +407,9 @@ pub struct MixEngine {
     busses: HashMap<BusId, BusBuf>,
     main: Vec<Vec<f32>>,
     main_fmt: ChannelFormat,
+    solo_bus: Vec<Vec<f32>>,
+    solo: Solo,
+    hw: HashMap<String, BusBuf>,
     pub meters: HashMap<TrackId, StripMeter>,
     pub main_meter: StripMeter,
     pub pan_law: PanLaw,
@@ -481,6 +490,9 @@ impl MixEngine {
             busses: HashMap::new(),
             main: vec![vec![0.0; max_block]; MAIN_CHANNELS],
             main_fmt: ChannelFormat::Stereo,
+            solo_bus: vec![vec![0.0; max_block]; MAIN_CHANNELS],
+            solo: Solo::None,
+            hw: HashMap::new(),
             meters: HashMap::new(),
             main_meter: StripMeter::default(),
             pan_law: PanLaw::Minus2_5,
@@ -589,6 +601,13 @@ impl MixEngine {
         self.main_fmt = s.main_format();
         if self.main.len() != main_ch {
             self.main = vec![vec![0.0; mb]; main_ch];
+            self.solo_bus = vec![vec![0.0; mb]; main_ch];
+        }
+        self.hw.retain(|n, b| s.outputs.iter().any(|o| &o.name == n && o.format == b.fmt));
+        for o in &s.outputs {
+            if !self.hw.contains_key(&o.name) {
+                self.hw.insert(o.name.clone(), BusBuf { fmt: o.format, buf: vec![vec![0.0; mb]; o.format.channels()] });
+            }
         }
         let mut cx = SlotCtx { sr: self.sample_rate, mb, external: self.external, adopt: &mut self.adopt, retired: &mut self.retired };
         let gone: Vec<TrackId> = self.strips.keys().filter(|id| s.track(**id).is_none()).copied().collect();
@@ -687,10 +706,26 @@ impl MixEngine {
                 c.iter_mut().take(frames).for_each(|x| *x = 0.0);
             }
         }
+        for b in self.hw.values_mut() {
+            for c in b.buf.iter_mut() {
+                c.iter_mut().take(frames).for_each(|x| *x = 0.0);
+            }
+        }
         for c in &mut self.main {
             c.iter_mut().take(frames).for_each(|x| *x = 0.0);
         }
-        let any_solo = any_solo(s);
+        self.solo = match (any_solo(s), if self.metronome { s.edit.solo_listen() } else { "sip" }) {
+            (false, _) => Solo::None,
+            (true, "afl") => Solo::Afl,
+            (true, "pfl") => Solo::Pfl,
+            _ => Solo::InPlace,
+        };
+        if self.solo.listens() {
+            for c in &mut self.solo_bus {
+                c.iter_mut().take(frames).for_each(|x| *x = 0.0);
+            }
+        }
+        let any_solo = self.solo;
         let order = std::mem::take(&mut self.order);
         let live = |t: &Track| !(t.kind == TrackKind::Master || t.inactive || t.kind == TrackKind::Vca);
         let is_aux = reads_bus;
@@ -926,6 +961,14 @@ impl MixEngine {
                 m.plugin_failures = strip.failures;
             }
         }
+        let solo_path = if self.solo.listens() { s.outputs.iter().find(|o| !s.edit.afl_pfl_path.is_empty() && o.name == s.edit.afl_pfl_path) } else { None };
+        if self.solo.listens() && solo_path.is_none() {
+            for (m, b) in self.main.iter_mut().zip(&self.solo_bus) {
+                if let (Some(d), Some(x)) = (m.get_mut(..frames), b.get(..frames)) {
+                    d.copy_from_slice(x);
+                }
+            }
+        }
         if self.metronome && !self.monitor_only && s.edit.click && (!s.edit.flag("click.only_during_record") || self.recording) {
             click::render(s, pos, frames, &mut self.main);
         }
@@ -935,6 +978,31 @@ impl MixEngine {
                 let v = src.and_then(|m| m.get(i)).copied().unwrap_or(0.0);
                 if let Some(d) = o.get_mut(i) {
                     *d = if v.is_finite() { v } else { 0.0 };
+                }
+            }
+        }
+        for p in &s.outputs {
+            let Some(b) = self.hw.get(&p.name) else { continue };
+            let first = usize::from(p.first_channel);
+            for (c, src) in b.buf.iter().enumerate() {
+                let Some(o) = out.get_mut(first + c) else { break };
+                for (d, x) in o.iter_mut().zip(src).take(frames) {
+                    if x.is_finite() {
+                        *d += *x;
+                    }
+                }
+            }
+        }
+        if let Some(p) = solo_path {
+            let first = usize::from(p.first_channel);
+            for c in 0..p.format.channels() {
+                let src = self.solo_bus.get(c.min(self.solo_bus.len().saturating_sub(1)));
+                let Some(o) = out.get_mut(first + c) else { break };
+                for i in 0..frames {
+                    let v = src.and_then(|m| m.get(i)).copied().unwrap_or(0.0);
+                    if let Some(d) = o.get_mut(i) {
+                        *d = if v.is_finite() { v } else { 0.0 };
+                    }
                 }
             }
         }
@@ -1015,7 +1083,7 @@ impl MixEngine {
     fn wait_for(&self, t: &Track, dest: &Route) -> usize {
         let Some(d) = self.departure(t) else { return 0 };
         match dest {
-            Route::Main => self.main_arrive.saturating_sub(d),
+            Route::Main | Route::Hardware(_) => self.main_arrive.saturating_sub(d),
             Route::Bus(b) => self.arrive.get(b).map_or(0, |a| a.saturating_sub(d)),
             _ => 0,
         }
@@ -1081,8 +1149,12 @@ impl MixEngine {
             } else {
                 &strip.buf
             };
-            let Route::Bus(b) = &snd.target else { continue };
-            let Some(dst) = self.busses.get_mut(b) else { continue };
+            let dst = match &snd.target {
+                Route::Bus(b) => self.busses.get_mut(b),
+                Route::Hardware(h) => self.hw.get_mut(h),
+                _ => None,
+            };
+            let Some(dst) = dst else { continue };
             if gain <= 0.0 {
                 continue;
             }
@@ -1097,7 +1169,7 @@ impl MixEngine {
             apply_matrix(src, frames, &mut dst.buf, &m, gain);
         }
         let src: &[Vec<f32>] = match &t.mixer.output {
-            Route::Main | Route::Bus(_) if strip.out_extra.len > 0 => {
+            Route::Main | Route::Bus(_) | Route::Hardware(_) if strip.out_extra.len > 0 => {
                 if strip.outbuf.len() != strip.buf.len() {
                     strip.outbuf = vec![Vec::new(); strip.buf.len()];
                 }
@@ -1110,9 +1182,25 @@ impl MixEngine {
             }
             _ => &strip.buf,
         };
+        if strip.listen {
+            let from: &[Vec<f32>] = if self.solo == Solo::Pfl && !strip.pre.is_empty() { &strip.pre } else { src };
+            let (fmt, n) = (self.main_fmt, self.solo_bus.len());
+            let mut start = 0;
+            while start < frames {
+                let (at, end) = pan_segment(t, pos, start, frames);
+                let spec = PanSpec { stereo: [pan_at(t, 0, at), pan_at(t, 1, at)], surround: t.mixer.surround.as_ref() };
+                let m = build_matrix(src_fmt, from.len(), fmt, n, &spec, law);
+                apply_matrix_span(from, start..end, &mut self.solo_bus, &m, 1.0);
+                start = end;
+            }
+        }
         let (dst, dst_fmt) = match &t.mixer.output {
             Route::Main => (&mut self.main, self.main_fmt),
             Route::Bus(b) => match self.busses.get_mut(b) {
+                Some(d) => (&mut d.buf, d.fmt),
+                None => return,
+            },
+            Route::Hardware(h) => match self.hw.get_mut(h) {
                 Some(d) => (&mut d.buf, d.fmt),
                 None => return,
             },
@@ -1137,6 +1225,24 @@ struct LiveInput<'a> {
     recording: bool,
 }
 
+fn hardware_input(s: &Session, t: &Track, strip: &mut Strip, live: &LiveInput<'_>, frames: usize) {
+    if live.input.is_empty() {
+        return;
+    }
+    let first = match &t.mixer.input {
+        Route::Hardware(h) => s.input_first_channel(h),
+        _ => 0,
+    };
+    let n_in = live.input.len();
+    for (k, dst) in strip.buf.iter_mut().enumerate() {
+        if let Some(src) = live.input.get((first + k) % n_in) {
+            for (d, x) in dst.iter_mut().zip(src.iter()).take(frames) {
+                *d = *x;
+            }
+        }
+    }
+}
+
 fn process_strip(
     s: &Session,
     t: &Track,
@@ -1146,7 +1252,7 @@ fn process_strip(
     live: &LiveInput<'_>,
     pos: Samples,
     frames: usize,
-    any_solo: bool,
+    solo: Solo,
 ) {
     strip.midi_out.clear();
     for c in strip.buf.iter_mut() {
@@ -1165,18 +1271,7 @@ fn process_strip(
             bus_input(t, strip, busses, frames);
         }
         TrackKind::Audio if !live.input.is_empty() && (t.mixer.input_monitor || (t.mixer.record_arm && (live.monitor_only || live.recording))) => {
-            let first = match &t.mixer.input {
-                Route::Hardware(h) => s.input_first_channel(h),
-                _ => 0,
-            };
-            let n_in = live.input.len().max(1);
-            for (k, dst) in strip.buf.iter_mut().enumerate() {
-                if let Some(src) = live.input.get((first + k) % n_in) {
-                    for (d, x) in dst.iter_mut().zip(src.iter()).take(frames) {
-                        *d = *x;
-                    }
-                }
-            }
+            hardware_input(s, t, strip, live, frames);
         }
         TrackKind::Audio if live.monitor_only => {}
         TrackKind::Audio => {
@@ -1208,6 +1303,7 @@ fn process_strip(
                 }
             }
         }
+        TrackKind::Aux if matches!(t.mixer.input, Route::Hardware(_)) => hardware_input(s, t, strip, live, frames),
         TrackKind::Aux | TrackKind::Folder => {
             bus_input(t, strip, busses, frames);
         }
@@ -1387,9 +1483,10 @@ fn process_strip(
     strip.gr = gr;
     strip.latency = latency.min(MAX_LATENCY);
     let auto_mute = t.mixer.automation_mode.reads() && t.lane(&AutoParam::Mute).is_some_and(|l| l.value_at(pos, 0.0) >= 0.5);
-    let soloed_out = any_solo && !soloed(s, t) && !t.mixer.solo_safe && !receives_solo(s, t);
+    let soloed_out = solo == Solo::InPlace && !soloed(s, t) && !t.mixer.solo_safe && !receives_solo(s, t);
+    strip.listen = solo.listens() && soloed(s, t);
     strip.muted = t.mixer.mute || auto_mute || soloed_out;
-    if strip.tap || t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
+    if strip.tap || (strip.listen && solo == Solo::Pfl) || t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
         strip.pre.resize_with(strip.buf.len(), Vec::new);
         for (d, src) in strip.pre.iter_mut().zip(strip.buf.iter()) {
             d.clear();
@@ -1842,6 +1939,20 @@ pub fn soloed(s: &Session, t: &Track) -> bool {
 
 pub fn any_solo(s: &Session) -> bool {
     s.tracks.iter().any(|t| t.kind != TrackKind::Vca && !t.inactive && soloed(s, t))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Solo {
+    None,
+    InPlace,
+    Afl,
+    Pfl,
+}
+
+impl Solo {
+    fn listens(self) -> bool {
+        matches!(self, Solo::Afl | Solo::Pfl)
+    }
 }
 
 mod click {
@@ -3844,6 +3955,59 @@ mod tests {
         }
         render_block(&mut eng, &s, 0);
         assert_eq!((eng.track_latency, eng.latency), (MAX_LATENCY, 2 * MAX_LATENCY));
+    }
+
+    #[test]
+    fn afl_hears_the_soloed_track_without_muting_the_mix() {
+        let (mut s, _a) = session_with_dc(0.5, 4800);
+        let b = add_dc_track(&mut s, 0.5, 4800);
+        s.track_mut(b).unwrap().mixer.solo = true;
+        s.track_mut(b).unwrap().mixer.volume_db = -6.0;
+        let run = |s: &Session, ch: usize| {
+            let mut eng = MixEngine::new(48_000.0, 512);
+            eng.metronome = true;
+            let mut out = vec![vec![0.0; 512]; ch];
+            eng.render(s, 0, 512, &mut out);
+            out.iter().map(|c| c[100]).collect::<Vec<f32>>()
+        };
+        let sip = run(&s, 2)[0];
+        s.edit.solo_mode = "afl".into();
+        let afl = run(&s, 2)[0];
+        s.edit.solo_mode = "pfl+momentary".into();
+        let pfl = run(&s, 2)[0];
+        assert!((sip - afl).abs() < 1e-4, "AFL on the main output = the soloed track post-fader: {sip} {afl}");
+        assert!(pfl > afl * 1.8, "PFL is before the fader: {pfl} {afl}");
+        s.outputs.push(openpt_model::OutputPath { name: "Out 3-4".into(), first_channel: 2, format: ChannelFormat::Stereo });
+        s.edit.afl_pfl_path = "Out 3-4".into();
+        let out = run(&s, 4);
+        assert!(out[0] > pfl, "the main mix keeps both tracks: {out:?}");
+        assert!((out[2] - pfl).abs() < 1e-4, "the solo is on its own path: {out:?}");
+    }
+
+    #[test]
+    fn hardware_outputs_sends_and_returns_reach_the_interface() {
+        let (mut s, t) = session_with_dc(0.5, 4800);
+        s.outputs.push(openpt_model::OutputPath { name: "Out 3-4".into(), first_channel: 2, format: ChannelFormat::Stereo });
+        s.outputs.push(openpt_model::OutputPath { name: "Out 5".into(), first_channel: 4, format: ChannelFormat::Mono });
+        assert_eq!(output_channels(&s), 5);
+        s.track_mut(t).unwrap().mixer.output = Route::Hardware("Out 3-4".into());
+        let mut eng = MixEngine::new(48_000.0, 512);
+        let mut out = vec![vec![0.0; 512]; 6];
+        eng.render(&s, 0, 512, &mut out);
+        assert!(out[0][100].abs() < 1e-6, "not on the main mix: {}", out[0][100]);
+        assert!((out[2][100] - 0.5 * CENTER).abs() < 1e-3 && (out[3][100] - 0.5 * CENTER).abs() < 1e-3, "on Out 3-4: {}", out[2][100]);
+        s.track_mut(t).unwrap().mixer.output = Route::Main;
+        let mut send = openpt_model::SendSlot::new(Route::Hardware("Out 5".into()));
+        send.level_db = 0.0;
+        s.track_mut(t).unwrap().mixer.sends[0] = Some(send);
+        let ret = s.add_track(TrackKind::Aux, ChannelFormat::Mono, Some("Return"));
+        s.track_mut(ret).unwrap().mixer.input = Route::Hardware("In 2".into());
+        let mut eng = MixEngine::new(48_000.0, 512);
+        eng.input = vec![vec![0.0; 512], vec![0.25; 512]];
+        let mut out = vec![vec![0.0; 512]; 6];
+        eng.render(&s, 0, 512, &mut out);
+        assert!((out[4][100] - 0.5 * CENTER).abs() < 1e-3, "the send on Out 5: {}", out[4][100]);
+        assert!((out[0][100] - 0.75 * CENTER).abs() < 1e-3, "the track and its return on the main mix: {}", out[0][100]);
     }
 
     #[test]

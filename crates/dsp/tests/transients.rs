@@ -147,3 +147,17 @@ fn channels_that_cancel_when_mixed_still_show_their_transients() {
     let found = detect_transients(&[left, right], SR, 0.5);
     assert!(near(&found, &onsets, at(0.001)), "{found:?} vs {onsets:?}");
 }
+
+#[test]
+fn weak_hits_inside_a_blast_beat_count() {
+    let mut seed = 11;
+    let (mut parts, mut onsets) = (Vec::new(), Vec::new());
+    let step = 60.0 / 280.0 / 4.0;
+    for k in 0..48 {
+        let t = 0.3 + k as f32 * step;
+        parts.push((t, hit(if k % 2 == 0 { 0.9 } else { 0.2 }, 0.025, &mut seed)));
+        onsets.push(at(t));
+    }
+    let found = detect_transients(&[mix(3.5, &parts)], SR, 0.5);
+    assert!(near(&found, &onsets, at(0.0035)), "{} found of {}: {found:?}", found.len(), onsets.len());
+}

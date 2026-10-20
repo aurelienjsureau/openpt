@@ -117,6 +117,7 @@ fn mix_view_aliases() -> &'static [(&'static str, &'static str)] {
 pub const AUDIOSUITE: &[(&str, &str)] = &[
     ("AudioSuite > EQ > OpenEQ", "open_eq"),
     ("AudioSuite > Dynamics > OpenComp", "open_comp"),
+    ("AudioSuite > Dynamics > OpenG", "open_g"),
     ("AudioSuite > Dynamics > OpenMB", "open_mb"),
     ("AudioSuite > Pitch Shift > Pitch II", "pitch_shift"),
     ("AudioSuite > Pitch Shift > Pitch Shift Legacy", "pitch_shift"),
@@ -146,6 +147,7 @@ const DIALOG_COMMANDS: &[&str] = &[
     "session.save_copy",
     "session.save_template",
     "track.group",
+    "track.move_to_new_folder",
     "edit.repeat",
     "edit.shift",
     "edit.fades_create",
@@ -318,6 +320,12 @@ fn checked_state(app: &SoundApp, path: &str, id: Option<&str>) -> bool {
         Some("options.click") => e.click,
         Some("options.delay_compensation") => e.delay_compensation,
         Some("options.pre_fader_metering") => e.pre_fader_metering,
+        Some("options.solo_mode") => path.rsplit(" > ").next().is_some_and(|l| match l {
+            "Latch" => e.solo_latch() == "latch",
+            "Momentary" => e.solo_latch() == "momentary",
+            l if l.starts_with("X-OR") => e.solo_latch() == "xor",
+            l => e.solo_listen() == solo_listen_id(l),
+        }),
         Some("view.ruler") => path.rsplit(" > ").next().map(ruler_id).is_some_and(|r| e.rulers.iter().any(|x| x == r)),
         Some("view.main_counter") => path.rsplit(" > ").next().map(ruler_id).is_some_and(|r| e.main_counter.id() == r),
         Some("window.mix") => app.ui.window == MainWindow::Mix,
@@ -379,9 +387,12 @@ fn params_for(path: &str, id: &str) -> Value {
         "options.scrolling" => {
             json!({"mode": match leaf { "No Scrolling" => "none", "After Playback" => "after_playback", "Continuous" => "continuous", "Center Playhead" => "center", _ => "page" }})
         }
-        "options.solo_mode" => {
-            json!({"mode": if leaf.starts_with("AFL") { "afl" } else if leaf.starts_with("PFL") { "pfl" } else { "sip" }, "xor": leaf.starts_with("X-OR")})
-        }
+        "options.solo_mode" => match leaf {
+            "Latch" => json!({"latch": "latch"}),
+            l if l.starts_with("X-OR") => json!({"latch": "xor"}),
+            "Momentary" => json!({"latch": "momentary"}),
+            l => json!({"mode": solo_listen_id(l)}),
+        },
         "clip.rating" => json!({"rating": leaf.parse::<u8>().unwrap_or(0)}),
         "track.change_width" => json!({"format": leaf}),
         "view.mix_section" => json!({"section": mix_section_id(leaf)}),
@@ -733,5 +744,15 @@ mod tests {
         assert!(app.dialogs.open.is_none());
         assert!(!app.engine.is_dirty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+fn solo_listen_id(label: &str) -> &'static str {
+    if label.starts_with("AFL") {
+        "afl"
+    } else if label.starts_with("PFL") {
+        "pfl"
+    } else {
+        "sip"
     }
 }

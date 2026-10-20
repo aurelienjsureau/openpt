@@ -138,7 +138,7 @@ enum PaletteTarget {
 fn color_palette(app: &mut SoundApp, ctx: &egui::Context) {
     let mut open = app.ui.show_color_palette;
     let id = egui::Id::new("color_palette_state");
-    let (mut target, mut sat, mut val) = ctx.data(|d| d.get_temp::<(u8, f32, f32)>(id)).map_or((PaletteTarget::Tracks, 0.65, 0.85), |(t, s, v)| {
+    let (mut target, mut sat, mut val) = ctx.data(|d| d.get_temp::<(u8, f32, f32)>(id)).map_or((PaletteTarget::Tracks, 0.42, 0.72), |(t, s, v)| {
         ([PaletteTarget::Tracks, PaletteTarget::Clips, PaletteTarget::Groups, PaletteTarget::Markers][usize::from(t).min(3)], s, v)
     });
     win(ctx, &mut open, "Color Palette", vec2(560.0, 230.0), |ui| {
@@ -188,6 +188,13 @@ fn color_palette(app: &mut SoundApp, ctx: &egui::Context) {
     });
     ctx.data_mut(|d| d.insert_temp(id, (target as u8, sat, val)));
     app.ui.show_color_palette = open;
+}
+
+pub(crate) fn open_color_palette_for_tracks(app: &mut SoundApp, ctx: &egui::Context) {
+    let id = egui::Id::new("color_palette_state");
+    let (_, sat, val) = ctx.data(|d| d.get_temp::<(u8, f32, f32)>(id)).unwrap_or((0, 0.42, 0.72));
+    ctx.data_mut(|d| d.insert_temp(id, (PaletteTarget::Tracks as u8, sat, val)));
+    app.ui.show_color_palette = true;
 }
 
 fn apply_color(app: &mut SoundApp, target: PaletteTarget, c: Option<[u8; 3]>) {
@@ -798,6 +805,19 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
                                 }
                             }
                         });
+                        ui.separator();
+                        ui.label("AFL/PFL path:");
+                        let cur = s.edit.afl_pfl_path.clone();
+                        let shown = if cur.is_empty() { "Main output".to_string() } else { cur.clone() };
+                        egui::ComboBox::from_id_salt("afl_pfl_path").selected_text(shown).show_ui(ui, |ui| {
+                            let names = std::iter::once(String::new()).chain(s.outputs.iter().map(|o| o.name.clone()));
+                            for n in names {
+                                let label = if n.is_empty() { "Main output (replaces the mix)".to_string() } else { n.clone() };
+                                if ui.selectable_label(n == cur, label).clicked() && n != cur {
+                                    runs.push(json!({"afl_pfl_path": n}));
+                                }
+                            }
+                        });
                     }
                 });
             }
@@ -809,6 +829,8 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
     for p in runs {
         let r = if let Some(f) = p.get("main_format").and_then(Value::as_str) {
             app.run("setup.main_format", json!({"format": f}))
+        } else if let Some(path) = p.get("afl_pfl_path").and_then(Value::as_str) {
+            app.run("options.solo_mode", json!({"path": path}))
         } else {
             app.run("setup.io", p)
         };

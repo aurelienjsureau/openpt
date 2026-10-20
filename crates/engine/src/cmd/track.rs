@@ -49,7 +49,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Move to New Folder...",
             ["Track"],
             Some("Cmd+Alt+Shift+N"),
-            "{tracks?, name?}",
+            "{tracks?, name?, routing?, route?} — routing: false makes a basic folder (no bus); route: false leaves the members' outputs alone",
             has_selection,
             move_to_folder
         ),
@@ -417,7 +417,7 @@ fn new_track(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         if kind == TrackKind::Folder {
             let folder_name = s.track(id).map(|track| track.name.clone()).unwrap_or_else(|| "Folder".into());
-            let bus_name = unique_folder_bus_name(s, &format!("{folder_name} Bus"), None);
+            let bus_name = unique_folder_bus_name(s, &folder_name, None);
             let bus = s.add_bus(&bus_name, format);
             if let Some(track) = s.track_mut(id) {
                 track.mixer.input = Route::Bus(bus);
@@ -602,7 +602,12 @@ fn split_mono(e: &mut Engine, p: &Value) -> Result<Value> {
                 c.id = s.new_clip_id();
                 c.name = format!("{}.{suffix}", c.name);
             }
+            if let (Some(from), Some(at)) = (s.track_index(id), s.track_index(src.id)) {
+                let nt = s.tracks.remove(from);
+                s.tracks.insert((at + 1 + ch).min(s.tracks.len()), nt);
+            }
             if let Some(tr) = s.track_mut(id) {
+                tr.folder = src.folder;
                 tr.mixer.pan = vec![if ch == 0 { -1.0 } else { 1.0 }];
                 tr.comments = format!("source_channel={ch}");
                 if let Some(pl) = tr.playlist_mut() {
@@ -641,6 +646,7 @@ fn unique_folder_bus_name(s: &Session, base: &str, own: Option<openpt_model::Bus
 fn move_to_folder(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.move_to_new_folder", p)?;
     let name = str_param(p, "name").map(str::to_string);
+    let (routing, route) = (bool_or(p, "routing", true), bool_or(p, "route", true));
     let s = e.session_mut();
     let first_idx = tracks.iter().filter_map(|t| s.track_index(*t)).min().unwrap_or(0);
     let fid = s.add_track(TrackKind::Folder, ChannelFormat::Stereo, Some(name.as_deref().unwrap_or("Folder")));
@@ -648,16 +654,20 @@ fn move_to_folder(e: &mut Engine, p: &Value) -> Result<Value> {
         let f = s.tracks.remove(i);
         s.tracks.insert(first_idx.min(s.tracks.len()), f);
     }
-    let fname = s.track(fid).map(|x| x.name.clone()).unwrap_or_else(|| "Folder".into());
-    let bus_name = unique_folder_bus_name(s, &format!("{fname} Bus"), None);
-    let bus = s.add_bus(&bus_name, ChannelFormat::Stereo);
+    let bus = routing.then(|| {
+        let fname = s.track(fid).map(|x| x.name.clone()).unwrap_or_else(|| "Folder".into());
+        let bus_name = unique_folder_bus_name(s, &fname, None);
+        s.add_bus(&bus_name, ChannelFormat::Stereo)
+    });
     if let Some(f) = s.track_mut(fid) {
-        f.mixer.input = Route::Bus(bus);
+        f.mixer.input = bus.map_or(Route::None, Route::Bus);
     }
     for t in &tracks {
         if let Some(tr) = s.track_mut(*t) {
             tr.folder = Some(fid);
-            if tr.mixer.output == Route::Main {
+            if let Some(bus) = bus.filter(|_| route)
+                && tr.mixer.output == Route::Main
+            {
                 tr.mixer.output = Route::Bus(bus);
             }
         }
@@ -678,7 +688,7 @@ fn in_folder(s: &Session, track: TrackId, folder: TrackId) -> bool {
     false
 }
 
-fn place_under(s: &mut Session, folder: TrackId, tracks: &[TrackId]) {
+pub(crate) fn place_under(s: &mut Session, folder: TrackId, tracks: &[TrackId]) {
     let moved: Vec<_> = s
         .tracks
         .iter()
@@ -831,7 +841,7 @@ fn rename(e: &mut Engine, p: &Value) -> Result<Value> {
         track.name.clone_from(&name);
     }
     if let Some(bus) = bus {
-        let bus_name = unique_folder_bus_name(s, &format!("{name} Bus"), Some(bus));
+        let bus_name = unique_folder_bus_name(s, &name, Some(bus));
         if let Some(bus) = s.busses.iter_mut().find(|candidate| candidate.id == bus) {
             bus.name = bus_name;
         }
@@ -1250,6 +1260,22 @@ mod tests {
     }
 
     #[test]
+    fn split_into_mono_puts_the_tracks_under_the_source() {
+        let mut e = crate::demo::demo_engine();
+        let kick = e.session().track_by_name("Kick").unwrap().id;
+        e.execute("edit.select", &serde_json::json!({"tracks": [kick.0]})).unwrap();
+        let r = e.execute("track.new", &serde_json::json!({"format": "stereo", "name": "Gtr"})).unwrap();
+        let st = TrackId(r["tracks"][0].as_u64().unwrap());
+        let at = e.session().track_index(st).unwrap();
+        let r = e.execute("track.split_into_mono", &serde_json::json!({"tracks": [st.0]})).unwrap();
+        let ids: Vec<u64> = r["tracks"].as_array().unwrap().iter().filter_map(|v| v.as_u64()).collect();
+        let s = e.session();
+        assert_eq!(s.track_index(TrackId(ids[0])), Some(at + 1));
+        assert_eq!(s.track_index(TrackId(ids[1])), Some(at + 2));
+        assert_eq!(s.track(TrackId(ids[1])).unwrap().name, "Gtr.R");
+    }
+
+    #[test]
     fn comp_from_alternate_playlist() {
         let mut e = crate::demo::demo_engine();
         let kick = e.session().track_by_name("Kick").map(|t| t.id.0).unwrap();
@@ -1281,6 +1307,21 @@ mod tests {
     }
 
     #[test]
+    fn a_basic_folder_or_an_unrouted_one_leaves_outputs_alone() {
+        let mut e = crate::demo::demo_engine();
+        let r = e.execute("track.move_to_new_folder", &json!({"tracks": ["Kick"], "name": "Drums", "routing": false})).unwrap();
+        assert!(r["bus"].is_null());
+        let s = e.session();
+        assert_eq!(s.track_by_name("Kick").unwrap().mixer.output, Route::Main);
+        assert_eq!(s.track_by_name("Drums").unwrap().mixer.input, Route::None);
+        let r = e.execute("track.move_to_new_folder", &json!({"tracks": ["Snare"], "name": "Snares", "route": false})).unwrap();
+        let s = e.session();
+        assert!(r["bus"].is_u64());
+        assert_eq!(s.track_by_name("Snare").unwrap().mixer.output, Route::Main);
+        assert!(s.busses.iter().any(|b| b.name == "Snares"));
+    }
+
+    #[test]
     fn empty_folder_owns_a_unique_bus_and_renames_it() {
         let mut e = crate::demo::demo_engine();
         let first = e.execute("track.new", &json!({"kind": "folder", "name": "Guitars"})).unwrap();
@@ -1296,10 +1337,10 @@ mod tests {
             _ => panic!("folder did not receive a bus"),
         };
         assert_ne!(first_bus, second_bus);
-        e.session_mut().add_bus("Percussion Bus", ChannelFormat::Stereo);
+        e.session_mut().add_bus("Percussion", ChannelFormat::Stereo);
         e.execute("track.rename", &json!({"track": first.0, "name": "Percussion"})).unwrap();
         let renamed = e.session().busses.iter().find(|bus| bus.id == first_bus).unwrap();
-        assert_eq!(renamed.name, "Percussion Bus 2");
+        assert_eq!(renamed.name, "Percussion 2");
     }
 
     #[test]

@@ -13,8 +13,10 @@ fn tap(app: &mut SoundApp, key: PadKey) {
     shortcuts::pad(app, key, false, Held::default());
 }
 
-fn marker_at(app: &mut SoundApp, at: i64) {
+fn marker_at(app: &mut SoundApp, at: i64) -> Vec<PadKey> {
     app.engine.execute("markers.add", &json!({"at": at})).unwrap();
+    let n = app.engine.session().markers.iter().find(|m| m.start == at).unwrap().number;
+    n.to_string().bytes().map(|b| PadKey::Digit(b - b'0')).collect()
 }
 
 #[test]
@@ -26,8 +28,8 @@ fn transport_mode_digits_run_the_transport_and_period_number_period_recalls_a_ma
     let click = app.engine.session().edit.click;
     tap(&mut app, PadKey::Digit(7));
     assert_ne!(app.engine.session().edit.click, click, "7 toggles the click");
-    marker_at(&mut app, 48_000);
-    for k in [PadKey::Dot, PadKey::Digit(1), PadKey::Dot] {
+    let number = marker_at(&mut app, 48_000);
+    for k in [vec![PadKey::Dot], number, vec![PadKey::Dot]].concat() {
         tap(&mut app, k);
     }
     assert_eq!(app.engine.session().edit.selection.start, 48_000);
@@ -37,8 +39,9 @@ fn transport_mode_digits_run_the_transport_and_period_number_period_recalls_a_ma
 fn classic_mode_takes_the_number_first() {
     let mut app = app();
     app.ui.numeric_keypad = "classic".into();
-    marker_at(&mut app, 96_000);
-    tap(&mut app, PadKey::Digit(1));
+    for k in marker_at(&mut app, 96_000) {
+        tap(&mut app, k);
+    }
     tap(&mut app, PadKey::Dot);
     assert_eq!(app.engine.session().edit.selection.start, 96_000);
 }

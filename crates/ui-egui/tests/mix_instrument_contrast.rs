@@ -178,7 +178,7 @@ fn populated_mix_instrument_uses_readable_palette_in_real_frames() {
     }
     assert_eq!(app.engine.session().edit.selected_tracks, session.edit.selected_tracks);
     assert_eq!(app.engine.session().pool, session.pool);
-    assert!(app.ui.plugin_windows.is_empty(), "a built-in instrument opens its picker");
+    assert_eq!(app.ui.plugin_windows, vec![(instrument, openpt_mix::INSTRUMENT_SLOT)], "the picked instrument opens its window");
     harness.state_mut().run("edit.undo", json!({})).unwrap();
     assert_eq!(harness.state().engine.session(), &session);
 }

@@ -40,12 +40,27 @@ pub fn specs() -> Vec<CommandSpec> {
             e.session_mut().edit.scrolling = m.clone();
             Ok(json!({"mode": m}))
         }),
-        cmd!(noundo "options.solo_mode", "Solo Mode", ["Options", "Solo Mode"], None, "{mode: sip|afl|pfl, latch?: bool, xor?: bool}", always, |e, p| {
-            let m = str_param(p, "mode").unwrap_or("sip").to_string();
-            let mut v = m.clone();
-            if bool_or(p, "xor", false) { v.push_str("+xor") }
-            e.session_mut().edit.solo_mode = v.clone();
-            Ok(json!({"mode": v}))
+        cmd!(noundo "options.solo_mode", "Solo Mode", ["Options", "Solo Mode"], None, "{mode?: sip|afl|pfl, latch?: latch|xor|momentary, path?: output path name (empty = main output)} — each part kept when omitted", always, |e, p| {
+            let s = e.session_mut();
+            let mode = match str_param(p, "mode") {
+                Some(m @ ("sip" | "afl" | "pfl")) => m.to_string(),
+                Some(other) => return Err(bad("options.solo_mode", format!("unknown mode `{other}`"))),
+                None => s.edit.solo_listen().to_string(),
+            };
+            let latch = match (str_param(p, "latch"), p.get("xor").and_then(Value::as_bool)) {
+                (Some(l @ ("latch" | "xor" | "momentary")), _) => l.to_string(),
+                (Some(other), _) => return Err(bad("options.solo_mode", format!("unknown latch `{other}`"))),
+                (None, Some(x)) => if x { "xor".into() } else { "latch".into() },
+                (None, None) => s.edit.solo_latch().to_string(),
+            };
+            if let Some(path) = str_param(p, "path") {
+                if !path.is_empty() && !s.outputs.iter().any(|o| o.name == path) {
+                    return Err(bad("options.solo_mode", format!("no output path `{path}`")));
+                }
+                s.edit.afl_pfl_path = path.to_string();
+            }
+            s.edit.solo_mode = if latch == "latch" { mode } else { format!("{mode}+{latch}") };
+            Ok(json!({"mode": s.edit.solo_listen(), "latch": s.edit.solo_latch(), "path": s.edit.afl_pfl_path}))
         }),
         cmd!(noundo "options.keyboard_focus", "Keyboard Focus", [], None, "{focus?: commands|clips|groups|none} — toggles Commands Keyboard Focus when omitted", always, |e, p| {
             let s = e.session_mut();

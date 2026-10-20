@@ -37,6 +37,7 @@ pub struct Track {
     pub volume_db: f32,
     pub pan: Vec<f32>,
     pub sends: Vec<Send>,
+    pub folder: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,6 +173,36 @@ fn string_at(d: &[u8], at: usize) -> Option<(String, usize)> {
     }
     let raw = d.get(at + 4..at + 4 + n)?;
     Some((String::from_utf8_lossy(raw).into_owned(), at + 4 + n))
+}
+
+fn folders(d: &[u8], b: &Block, refs: &[[u8; 16]], tracks: &mut [Track]) {
+    let same = |a: &[u8], t: &[u8; 16]| if a.get(4..8) == Some(&[0x2A, 0, 0, 0][..]) { a.get(8..16) == t.get(8..16) } else { a == t };
+    let find = |r: &[u8]| refs.iter().position(|t| r.iter().any(|x| *x != 0) && same(r, t));
+    let Some(n) = u32_at(d, b.start) else { return };
+    let mut at = b.start + 4;
+    let mut best: Vec<Option<(usize, u32)>> = vec![None; tracks.len()];
+    for _ in 0..n.min(4096) {
+        let (Some(folder), Some(count)) = (d.get(at + 1..at + 17), u32_at(d, at + 17)) else { return };
+        if count > 100_000 {
+            return;
+        }
+        let folder = find(folder);
+        at += 21;
+        for _ in 0..count {
+            let Some(m) = d.get(at + 1..at + 17) else { return };
+            if let (Some(f), Some(t)) = (folder, find(m))
+                && f != t
+                && best.get(t).is_some_and(|x| x.is_none_or(|(_, c)| count < c))
+            {
+                best[t] = Some((f, count));
+            }
+            at += 17;
+        }
+    }
+    let names: Vec<String> = tracks.iter().map(|t| t.name.clone()).collect();
+    for (t, f) in tracks.iter_mut().zip(best) {
+        t.folder = f.and_then(|(f, _)| names.get(f).cloned());
+    }
 }
 
 fn walk<'a>(list: &'a [Block], out: &mut Vec<&'a Block>) {
@@ -370,12 +401,14 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
         s.bit_depth = d.get(b.start + 1).copied();
         s.sample_rate = u32_at(&d, b.start + 2).filter(|r| (8_000..=384_000).contains(r));
     }
+    let mut refs: Vec<[u8; 16]> = Vec::new();
     for b in all.iter().filter(|b| b.content_type == 0x251A) {
         let Some(code) = d.get(b.start).copied() else { continue };
         let Some((name, after)) = string_at(&d, b.start + 2) else { continue };
         if s.tracks.iter().any(|t| t.name == name) {
             continue;
         }
+        refs.push(d.get(after + 24..after + 40).and_then(|r| r.try_into().ok()).unwrap_or([0; 16]));
         let kind = match code {
             0x00 => TrackKind::Audio,
             0x01 => TrackKind::Midi,
@@ -395,7 +428,11 @@ pub fn read(bytes: &[u8]) -> Result<PtxSession, PtxError> {
             volume_db: 0.0,
             pan: Vec::new(),
             sends: Vec::new(),
+            folder: None,
         });
+    }
+    if let Some(b) = all.iter().find(|b| b.content_type == 0x210C) {
+        folders(&d, b, &refs, &mut s.tracks);
     }
     let rulers = ["Tempo", "Meter", "Key Signature", "Chord Symbols", "Markers"];
     let mut next = 0usize;

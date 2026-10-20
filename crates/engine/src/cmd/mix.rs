@@ -334,7 +334,7 @@ fn pan(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn solo(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "mix.solo", p)?;
-    let exclusive = bool_or(p, "exclusive", e.session().edit.solo_mode.contains("xor"));
+    let exclusive = bool_or(p, "exclusive", e.session().edit.solo_latch() == "xor");
     let s = e.session_mut();
     let v = p.get("value").and_then(Value::as_bool).unwrap_or_else(|| !tracks.iter().all(|t| s.track(*t).is_some_and(|tr| tr.mixer.solo)));
     if exclusive && v {

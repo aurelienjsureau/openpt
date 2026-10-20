@@ -19,7 +19,7 @@ pub use mixer::{
     SendSlot, Speaker, SurroundPan, default_inputs, fader_db_to_pos, fader_pos_to_db,
 };
 pub use session::{
-    BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session, SessionError, Tool,
+    BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session, SessionError, SessionLink, Tool,
     TrackView, ZoomState, ZoomToggle, truncate_chars,
 };
 pub use source::{Source, SourceAudio, SourcePool, VideoSource};

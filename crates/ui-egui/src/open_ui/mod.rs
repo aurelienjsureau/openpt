@@ -1,6 +1,7 @@
 pub mod comp;
 pub mod drt;
 pub mod eq;
+pub mod gate;
 pub mod mb;
 pub mod sat;
 
@@ -45,7 +46,7 @@ pub fn band_color(b: usize) -> Color32 {
 }
 
 pub fn handles(id: &str) -> bool {
-    matches!(id, "open_eq" | "open_mb" | "open_comp" | "open_sat" | "open_drt")
+    matches!(id, "open_eq" | "open_mb" | "open_comp" | "open_g" | "open_sat" | "open_drt")
 }
 
 pub fn width(id: &str) -> f32 {
@@ -53,6 +54,7 @@ pub fn width(id: &str) -> f32 {
         "open_eq" => eq::W,
         "open_mb" => mb::W,
         "open_comp" => comp::W,
+        "open_g" => gate::W,
         "open_sat" => sat::W,
         "open_drt" => drt::W,
         _ => 400.0,
@@ -97,6 +99,7 @@ pub fn panel(ui: &mut Ui, info: &'static PluginInfo, params: &BTreeMap<String, f
         "open_eq" => eq::show(ui, &mut cx),
         "open_mb" => mb::show(ui, &mut cx),
         "open_comp" => comp::show(ui, &mut cx),
+        "open_g" => gate::show(ui, &mut cx),
         "open_sat" => sat::show(ui, &mut cx),
         "open_drt" => drt::show(ui, &mut cx),
         _ => {}

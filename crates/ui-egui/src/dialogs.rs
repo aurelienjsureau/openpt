@@ -74,6 +74,17 @@ pub enum Dialog {
         shape: String,
         batch: Option<BatchFades>,
     },
+    ImportSessionData(Box<ImportSessionData>),
+    LinkedChanged {
+        path: String,
+        tracks: Vec<String>,
+    },
+    NewFolder {
+        name: String,
+        routing: bool,
+        route: bool,
+        tracks: Vec<u64>,
+    },
     StripSilence {
         threshold: f64,
         min_ms: f64,
@@ -133,6 +144,9 @@ impl Dialogs {
             Dialog::Spot(_) => "spot",
             Dialog::Fades { .. } => "fades",
             Dialog::StripSilence { .. } => "strip_silence",
+            Dialog::NewFolder { .. } => "new_folder",
+            Dialog::ImportSessionData(_) => "import_session_data",
+            Dialog::LinkedChanged { .. } => "linked_changed",
             Dialog::Group { .. } => "group",
             Dialog::Conform { .. } => "conform",
             Dialog::Session { .. } => "session",
@@ -146,6 +160,46 @@ impl Dialogs {
         let Some(g) = s.groups.iter().find(|g| g.id.0 == group) else { return };
         let members = s.tracks.iter().map(|t| (t.id.0, t.name.clone(), g.members.contains(&t.id))).collect();
         self.open = Some(Dialog::Group { name: g.name.clone(), edit: g.edit, mix: g.mix, members, modify: Some(group) });
+    }
+
+    pub fn open_import_session_data(&mut self, e: &mut Engine, path: &str) -> Result<(), String> {
+        let v = e.execute("file.session_data_tracks", &json!({"path": path})).map_err(|e| e.to_string())?;
+        let rows = v["tracks"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|t| ImportRow {
+                        name: t["name"].as_str().unwrap_or_default().to_string(),
+                        kind: t["kind"].as_str().unwrap_or_default().to_string(),
+                        folder: t["folder"].as_str().map(str::to_string),
+                        clips: t["clips"].as_u64().unwrap_or(0),
+                        on: true,
+                        dest: String::new(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.open = Some(Dialog::ImportSessionData(Box::new(ImportSessionData {
+            path: path.to_string(),
+            name: v["name"].as_str().unwrap_or_default().to_string(),
+            rows,
+            data: [true; openpt_engine::cmd::TRACK_DATA.len()],
+            markers: false,
+            tempo: false,
+            link: false,
+            has_markers: v["markers"].as_u64().unwrap_or(0) > 0,
+            has_tempo: v["tempo_changes"].as_u64().unwrap_or(0) > 1,
+        })));
+        Ok(())
+    }
+
+    pub fn open_new_folder(&mut self, tracks: Vec<u64>) -> bool {
+        if tracks.is_empty() {
+            self.open = None;
+            return false;
+        }
+        self.open = Some(Dialog::NewFolder { name: "Folder".into(), routing: true, route: true, tracks });
+        true
     }
 
     pub fn open_rename_track(&mut self, id: TrackId, name: &str) {
@@ -247,6 +301,10 @@ impl Dialogs {
                     })
                     .collect();
                 Dialog::Conform { bpm: String::new(), bar: 1, grid: "1/16".into(), refs, all_tracks: true }
+            }
+            "track.move_to_new_folder" => {
+                let tracks = e.session().edit.selected_tracks.iter().map(|t| t.0).collect();
+                return self.open_new_folder(tracks);
             }
             "track.group" => {
                 let s = e.session();
@@ -394,6 +452,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     crate::bounce::show(app, ctx);
     crate::bounce::show_realtime(app, ctx);
     crate::bounce::show_live_commit(app, ctx);
+    check_linked_sessions(app, ctx);
     let Some(mut d) = app.dialogs.open.take() else { return };
     let mut keep = true;
     let mut action: Option<(String, Value)> = None;
@@ -411,6 +470,9 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         Dialog::Spot(_) => "Spot",
         Dialog::Fades { .. } => "Fades",
         Dialog::StripSilence { .. } => "Strip Silence",
+        Dialog::NewFolder { .. } => "Move to New Folder",
+        Dialog::ImportSessionData(_) => "Import Session Data",
+        Dialog::LinkedChanged { .. } => "Linked Session Changed",
         Dialog::Group { modify: Some(_), .. } => "Modify Group",
         Dialog::Group { .. } => "Create Group",
         Dialog::Conform { .. } => "Conform Song to Tempo",
@@ -706,6 +768,42 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         ));
                     }
                 }
+                Dialog::ImportSessionData(d) => {
+                    if let Some(a) = import_session_data_ui(ui, d, app.engine.session(), enter) {
+                        action = Some(a);
+                    }
+                }
+                Dialog::LinkedChanged { path, tracks } => {
+                    ui.set_max_width(420.0);
+                    let file = std::path::Path::new(path.as_str()).file_name().map_or(path.clone(), |f| f.to_string_lossy().into_owned());
+                    ui.label(format!("“{file}” was saved since its tracks were imported ({}). Import its changes?", tracks.join(", ")));
+                    ui.label(egui::RichText::new("The tracks of the same name take its new data; what they had stays as alternate playlists.").weak());
+                    ui.horizontal(|ui| {
+                        if ui.button("Not Now").clicked() {
+                            action = Some(("file.update_linked_session".into(), json!({"path": path, "dismiss": true})));
+                        }
+                        if ui.button("Import Changes").clicked() || enter {
+                            action = Some(("file.update_linked_session".into(), json!({"path": path})));
+                        }
+                    });
+                }
+                Dialog::NewFolder { name, routing, route, tracks } => {
+                    ui.horizontal(|ui| {
+                        ui.label("Name");
+                        let r = ui.text_edit_singleline(name);
+                        if !r.has_focus() && ui.memory(|m| m.focused().is_none()) {
+                            r.request_focus();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.radio_value(routing, false, "Basic Folder");
+                        ui.radio_value(routing, true, "Routing Folder");
+                    });
+                    ui.add_enabled_ui(*routing, |ui| crate::widgets::checkbox(ui, route, "Route the tracks to the folder"));
+                    if buttons(ui, "Create", enter) {
+                        action = Some(("track.move_to_new_folder".into(), json!({"tracks": tracks, "name": if name.trim().is_empty() { "Folder" } else { name.trim() }, "routing": routing, "route": route})));
+                    }
+                }
                 Dialog::Group { name, edit, mix, members, modify } => {
                     ui.horizontal(|ui| {
                         ui.label("Name");
@@ -861,6 +959,15 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     let saving = action.as_ref().is_some_and(|(cmd, _)| cmd.starts_with("session.save"));
     if let Some((cmd, params)) = action {
         keep = false;
+        if cmd == "file.import_session_data"
+            && params.get("tracks").is_none()
+            && let Some(path) = params["path"].as_str()
+        {
+            if let Err(e) = app.dialogs.open_import_session_data(&mut app.engine, path) {
+                app.ui.status = e;
+            }
+            return;
+        }
         if cmd == "file.import_audio"
             && let Some(path) = params["path"].as_str()
         {
@@ -892,6 +999,130 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     if keep {
         app.dialogs.open = Some(d);
     }
+}
+
+fn check_linked_sessions(app: &mut SoundApp, ctx: &egui::Context) {
+    if app.engine.session().linked_sessions.is_empty() {
+        return;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_secs(5));
+    let id = egui::Id::new("linked_sessions_checked");
+    let now = ctx.input(|i| i.time);
+    if app.dialogs.open.is_some() || ctx.data(|d| d.get_temp::<f64>(id)).is_some_and(|t| now - t < 5.0) {
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(id, now));
+    let Ok(v) = app.engine.execute("file.linked_sessions", &json!({})) else { return };
+    if let Some(c) = v["changed"].as_array().and_then(|a| a.first()) {
+        let tracks = c["tracks"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+        app.dialogs.open = Some(Dialog::LinkedChanged { path: c["path"].as_str().unwrap_or_default().to_string(), tracks });
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportRow {
+    pub name: String,
+    pub kind: String,
+    pub folder: Option<String>,
+    pub clips: u64,
+    pub on: bool,
+    pub dest: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportSessionData {
+    pub path: String,
+    pub name: String,
+    pub rows: Vec<ImportRow>,
+    pub data: [bool; openpt_engine::cmd::TRACK_DATA.len()],
+    pub markers: bool,
+    pub tempo: bool,
+    pub link: bool,
+    pub has_markers: bool,
+    pub has_tempo: bool,
+}
+
+const TRACK_DATA_LABELS: [&str; openpt_engine::cmd::TRACK_DATA.len()] =
+    ["Clips and media", "Alternate playlists", "Plug-ins", "Sends", "I/O", "Volume", "Pan", "Mute / Solo", "Automation", "Comments"];
+
+fn import_session_data_ui(ui: &mut egui::Ui, d: &mut ImportSessionData, s: &openpt_model::Session, enter: bool) -> Option<(String, Value)> {
+    ui.set_min_width(640.0);
+    ui.label(egui::RichText::new(format!("Source: {}", if d.name.is_empty() { &d.path } else { &d.name })).strong());
+    let here: Vec<String> = s.tracks.iter().filter(|t| !matches!(t.kind, openpt_model::TrackKind::Master | openpt_model::TrackKind::Video)).map(|t| t.name.clone()).collect();
+    ui.horizontal(|ui| {
+        if ui.button("All").clicked() {
+            d.rows.iter_mut().for_each(|r| r.on = true);
+        }
+        if ui.button("None").clicked() {
+            d.rows.iter_mut().for_each(|r| r.on = false);
+        }
+        if ui.button("Match Tracks").on_hover_text("Each track onto the track of the same name here, when there is one").clicked() {
+            for r in &mut d.rows {
+                r.dest = if here.contains(&r.name) { r.name.clone() } else { String::new() };
+            }
+        }
+        if ui.button("All New").clicked() {
+            d.rows.iter_mut().for_each(|r| r.dest.clear());
+        }
+    });
+    egui::ScrollArea::vertical().max_height(320.0).auto_shrink([false, true]).show(ui, |ui| {
+        egui::Grid::new("isd_tracks").num_columns(3).striped(true).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+            ui.label(egui::RichText::new("Source track").strong());
+            ui.label(egui::RichText::new("Clips").strong());
+            ui.label(egui::RichText::new("Destination").strong());
+            ui.end_row();
+            for (i, r) in d.rows.iter_mut().enumerate() {
+                let label = match &r.folder {
+                    Some(f) => format!("{f} › {}", r.name),
+                    None => r.name.clone(),
+                };
+                crate::widgets::checkbox(ui, &mut r.on, label);
+                ui.label(if r.kind == "folder" { "folder".to_string() } else { r.clips.to_string() });
+                ui.add_enabled_ui(r.on, |ui| {
+                    egui::ComboBox::from_id_salt(("isd_dest", i)).width(200.0).selected_text(if r.dest.is_empty() { "New Track" } else { r.dest.as_str() }).show_ui(
+                        ui,
+                        |ui| {
+                            ui.selectable_value(&mut r.dest, String::new(), "New Track");
+                            for n in &here {
+                                ui.selectable_value(&mut r.dest, n.clone(), n.as_str());
+                            }
+                        },
+                    );
+                });
+                ui.end_row();
+            }
+        });
+    });
+    ui.separator();
+    ui.label(egui::RichText::new("Track data to import").strong());
+    egui::Grid::new("isd_data").num_columns(4).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
+        for (k, (on, label)) in d.data.iter_mut().zip(TRACK_DATA_LABELS).enumerate() {
+            crate::widgets::checkbox(ui, on, label);
+            if k % 4 == 3 {
+                ui.end_row();
+            }
+        }
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(d.has_markers, |ui| crate::widgets::checkbox(ui, &mut d.markers, "Markers / Memory Locations"));
+        ui.add_enabled_ui(d.has_tempo, |ui| crate::widgets::checkbox(ui, &mut d.tempo, "Tempo / Meter map"));
+    });
+    crate::widgets::checkbox(ui, &mut d.link, "Link to this session: when it is saved again, offer to import its changes");
+    let picked: Vec<&ImportRow> = d.rows.iter().filter(|r| r.on).collect();
+    let ok = !picked.is_empty() || d.markers || d.tempo;
+    let mut go = false;
+    ui.add_enabled_ui(ok, |ui| go = buttons(ui, "Import", enter && ok));
+    if !go || !ok {
+        return None;
+    }
+    let tracks: Vec<&str> = picked.iter().map(|r| r.name.as_str()).collect();
+    let dest: serde_json::Map<String, Value> = picked.iter().filter(|r| !r.dest.is_empty()).map(|r| (r.name.clone(), json!(r.dest))).collect();
+    let data: serde_json::Map<String, Value> = openpt_engine::cmd::TRACK_DATA.iter().zip(d.data).map(|(k, on)| ((*k).to_string(), json!(on))).collect();
+    Some((
+        "file.import_session_data".into(),
+        json!({"path": d.path, "tracks": tracks, "dest": dest, "data": data, "markers": d.markers, "tempo": d.tempo, "link": d.link}),
+    ))
 }
 
 fn buttons(ui: &mut egui::Ui, ok: &str, enter: bool) -> bool {

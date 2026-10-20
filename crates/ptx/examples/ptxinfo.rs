@@ -14,10 +14,11 @@ fn main() {
             }
             for t in &s.tracks {
                 println!(
-                    "  {:?} {} {}  in={:?} out={:?} vol={} pan={:?}",
+                    "  {:?} {} {}  folder={:?} in={:?} out={:?} vol={} pan={:?}",
                     t.kind,
                     if t.stereo { "stereo" } else { "mono" },
                     t.name,
+                    t.folder,
                     t.input,
                     t.output,
                     t.volume_db,

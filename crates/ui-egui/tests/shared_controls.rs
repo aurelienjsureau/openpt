@@ -111,14 +111,14 @@ fn toolbar_keyboard_activation_changes_tools_without_transport_or_marker_actions
         app,
     );
     h.run_steps(5);
-    h.get_by_label("Trim (F6)").click();
+    h.get_by_label_contains("Trim (F6)").click();
     h.run_steps(3);
     assert_eq!(h.state().engine.session().edit.tool, openpt_model::Tool::Trim);
     let markers = h.state().engine.session().markers.len();
     for (label, tool, key) in [("Pencil (F10)", openpt_model::Tool::Pencil, Key::Enter), ("Grabber (F8)", openpt_model::Tool::Grabber, Key::Space)] {
-        h.get_by_label(label).focus();
+        h.get_by_label_contains(label).focus();
         h.run_steps(2);
-        assert!(h.get_by_label(label).is_focused());
+        assert!(h.get_by_label_contains(label).is_focused());
         h.key_press(key);
         h.run_steps(3);
         assert_eq!(h.state().engine.session().edit.tool, tool);

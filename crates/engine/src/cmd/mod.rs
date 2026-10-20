@@ -39,6 +39,7 @@ mod zoom_toggle;
 
 pub use edit::tool_variant;
 pub use file::{bounce_job, write_captured_bounce};
+pub use setup_more::TRACK_DATA;
 
 pub(crate) use edit::remember_selection;
 

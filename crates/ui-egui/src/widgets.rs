@@ -101,6 +101,10 @@ pub fn icon_button(ui: &mut Ui, size: egui::Vec2, icon: &str, on: bool, tip: &st
     resp.on_hover_text(tip)
 }
 
+pub fn pressed(ui: &Ui, resp: &Response) -> bool {
+    (resp.hovered() && ui.is_enabled() && ui.input(|i| i.pointer.primary_pressed())) || (resp.clicked() && !resp.clicked_by(egui::PointerButton::Primary))
+}
+
 pub fn text_toggle(ui: &mut Ui, size: egui::Vec2, text: &str, on: bool, on_color: Color32, tip: &str) -> Response {
     let t = Tokens::current();
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
@@ -581,6 +585,10 @@ fn drag_toggle(ui: &Ui, resp: &Response, on: &mut bool) -> bool {
         return true;
     }
     false
+}
+
+pub fn luma(c: Color32) -> f32 {
+    (0.299 * f32::from(c.r()) + 0.587 * f32::from(c.g()) + 0.114 * f32::from(c.b())) / 255.0
 }
 
 #[cfg(test)]

@@ -10,8 +10,10 @@ use openpt_playback::MeterSnapshot;
 use serde_json::json;
 
 pub fn strip_width(narrow: bool) -> f32 {
-    if narrow { 64.0 } else { 108.0 }
+    if narrow { 56.0 } else { 88.0 }
 }
+
+pub const DEFAULT_FADER_H: f32 = 230.0;
 
 pub fn show(app: &mut SoundApp, ui: &mut Ui) {
     let _prof = crate::prof::scope("mix");
@@ -76,7 +78,12 @@ fn heat_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
 
 fn strips(app: &mut SoundApp, ui: &mut Ui) {
     let s0 = app.engine.session();
-    let ids: Vec<TrackId> = s0.tracks.iter().filter(|x| openpt_engine::edit::shown(s0, x) && x.kind != TrackKind::Video).map(|x| x.id).collect();
+    let ids: Vec<TrackId> = s0
+        .tracks
+        .iter()
+        .filter(|x| openpt_engine::edit::shown(s0, x) && x.kind != TrackKind::Video && !(x.is_folder() && x.mixer.input == Route::None))
+        .map(|x| x.id)
+        .collect();
     let snap = app.player.as_ref().filter(|_| app.meters_live()).map(|p| p.meters());
     let old_bar = ui.spacing().scroll.floating_allocated_width;
     ui.spacing_mut().scroll.floating_allocated_width = ui.spacing().scroll.bar_width;
@@ -526,12 +533,13 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     );
     row.spacing_mut().item_spacing.x = 6.0;
     if track.kind.has_playlist() {
-        if text_toggle(&mut row, vec2(bw, 18.0), "I", track.mixer.input_monitor, t.input, "Input monitoring").clicked() {
+        let ir = text_toggle(&mut row, vec2(bw, 18.0), "I", track.mixer.input_monitor, t.input, "Input monitoring");
+        if crate::widgets::pressed(&row, &ir) {
             track_button(app, &row, "mix.input_monitor", id);
         }
         let rr = rec_toggle(&mut row, vec2(bw, 18.0), track.mixer.record_arm, "Record enable · Ctrl-click: Record Safe");
         safe_mark(&row, rr.rect, track.mixer.record_safe);
-        if rr.clicked() {
+        if crate::widgets::pressed(&row, &rr) {
             track_button(app, &row, "mix.record_arm", id);
         }
     }
@@ -543,16 +551,28 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     if track.kind != TrackKind::Master {
         let sr = text_toggle(&mut row, vec2(bw, 18.0), "S", track.mixer.solo, t.solo, "Solo · Ctrl-click: Solo Safe · Alt-click: all tracks");
         safe_mark(&row, sr.rect, track.mixer.solo_safe);
-        if sr.clicked() {
-            track_button(app, &row, "mix.solo", id);
-        }
-        if text_toggle(&mut row, vec2(bw, 18.0), "M", track.mixer.mute, t.mute, "Mute · Alt-click: all tracks").clicked() {
+        solo_button(app, &row, &sr, id);
+        let mr = text_toggle(&mut row, vec2(bw, 18.0), "M", track.mixer.mute, t.mute, "Mute · Alt-click: all tracks");
+        if crate::widgets::pressed(&row, &mr) {
             track_button(app, &row, "mix.mute", id);
         }
     }
     y += 26.0;
     let bottom_h = 64.0;
-    let fh = (r.max.y - bottom_h - y).max(120.0);
+    let fh = app.ui.mix_fader_h.clamp(120.0, (r.max.y - bottom_h - y).max(120.0));
+    let bot = y + fh + bottom_h;
+    let grip = ui.interact(
+        Rect::from_min_max(pos2(r.min.x, bot - 3.0), pos2(r.max.x, bot + 4.0)),
+        ui.id().with(("fader_length", id.0)),
+        Sense::drag(),
+    );
+    if grip.hovered() || grip.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    if grip.dragged() {
+        app.ui.mix_fader_h = (fh + grip.drag_delta().y).clamp(120.0, 1200.0);
+    }
+    ui.painter().hline(r.x_range(), bot + 0.5, Stroke::new(1.0, t.border));
     let wide_meter = (if track.kind == TrackKind::Master { app.engine.session().main_format() } else { track.format }).channels() > 2;
     let thin_bars = if track.kind == TrackKind::Master { 2.0 } else { track.channels().clamp(1, 2) as f32 };
     let thin_w = thin_bars * 6.0;
@@ -590,7 +610,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         let gr_bar = Rect::from_min_max(pos2(mr.max.x - 3.0, mr.min.y + 5.0), pos2(mr.max.x, mr.min.y + 5.0 + (mr.height() - 6.0) * (md.gr / 24.0).min(1.0)));
         ui.painter().rect_filled(gr_bar, 0.0, Color32::from_rgb(232, 160, 40));
     }
-    let vr = Rect::from_min_size(pos2(x0 + 4.0, r.max.y - bottom_h + 4.0), vec2(inner_w - 8.0, 15.0));
+    let vr = Rect::from_min_size(pos2(x0 + 4.0, bot - bottom_h + 4.0), vec2(inner_w - 8.0, 15.0));
     inset(ui.painter(), vr, t.counter_bg);
     let (_, entered) = editable_readout(ui, vr, ui.id().with(("volume-value", id.0)), &db_text(shown_db), &format!("{:.1}", shown_db), parse_db, 0.0);
     if let Some(db) = entered {
@@ -607,7 +627,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         TrackKind::Video => "video",
     };
     ui.painter().text(pos2(vr.center().x, vr.max.y + 9.0), Align2::CENTER_CENTER, kind, regular(9.5), t.text_dim);
-    let nr = Rect::from_min_size(pos2(x0, r.max.y - 26.0), vec2(inner_w, 18.0));
+    let nr = Rect::from_min_size(pos2(x0, bot - 26.0), vec2(inner_w, 18.0));
     let plate = if selected { t.name_field_sel } else { rgb(track.color) };
     let ink = if selected { t.text_dark } else { plate_ink(plate) };
     ui.painter().rect(nr, CornerRadius::same(2), plate, Stroke::new(1.0, Color32::BLACK), StrokeKind::Inside);
@@ -626,7 +646,14 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     }
     nresp.context_menu(|ui| crate::edit_window::track_context_menu(app, ui, id));
     if app.ui.mix_views.iter().any(|v| v == "color") {
-        ui.painter().rect_filled(Rect::from_min_size(pos2(r.min.x, r.max.y - 5.0), vec2(w, 5.0)), 0.0, rgb(track.color));
+        let cr = Rect::from_min_size(pos2(r.min.x, bot - 5.0), vec2(w, 5.0));
+        ui.painter().rect_filled(cr, 0.0, rgb(track.color));
+        if ui.interact(cr, ui.id().with(("strip_color", id.0)), Sense::click()).double_clicked() {
+            if !selected {
+                crate::edit_window::click_track(app, id, egui::Modifiers::NONE, |_, t| !t.hidden && t.kind != TrackKind::Video);
+            }
+            crate::windows::open_color_palette_for_tracks(app, ui.ctx());
+        }
     }
     ui.painter().line_segment([pos2(r.max.x, r.min.y), pos2(r.max.x, r.max.y)], Stroke::new(1.0, t.border));
 }
@@ -790,7 +817,7 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
     let dot = Rect::from_min_max(r.min, pos2(r.min.x + 13.0, r.max.y));
     if ins.is_some() && r.width() >= COMPACT_SLOT {
         let dot_resp = ui.interact(dot, ui.id().with(("ins_dot", id.0, slot)), Sense::click()).on_hover_text("Insert menu");
-        egui::Popup::menu(&dot_resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| plugin_menu(app, ui, id, slot, true));
+        egui::Popup::menu(&dot_resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| plugin_menu(app, ui, id, slot));
     }
     if resp.clicked() && ins.is_some() {
         let m = click_mods(ui);
@@ -801,14 +828,33 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
         }
     }
     let cmd = if ui.ctx().os().is_mac() { "⌘" } else { "Ctrl+" };
-    let tip = format!("{name}: click to open · {cmd}click to bypass · dot or right-click: menu · drag to move, Alt-drag to copy");
-    let menu_resp = if ins.is_none() { resp.clone() } else { resp.clone().on_hover_text(tip) };
-    let popup = if ins.is_none() { egui::Popup::menu(&menu_resp) } else { egui::Popup::context_menu(&menu_resp) };
-    let popup = popup.close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-    popup.show(|ui| plugin_menu(app, ui, id, slot, ins.is_some()));
+    let tip = format!("{name}: click to open · {cmd}click to bypass · dot: change plug-in · right-click: bypass, key input, remove · drag to move, Alt-drag to copy");
+    if ins.is_none() {
+        egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| plugin_menu(app, ui, id, slot));
+    } else {
+        egui::Popup::context_menu(&resp.clone().on_hover_text(tip)).show(|ui| insert_context_menu(app, ui, id, slot));
+    }
 }
 
-pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, occupied: bool) {
+fn insert_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize) {
+    let Some(ins) = app.engine.session().track(id).and_then(|t| t.mixer.inserts.get(slot).cloned().flatten()) else { return };
+    if ui.selectable_label(ins.bypass, "Bypass").clicked() {
+        run_pick(app, ui, "mix.insert_bypass", json!({"track": id.0, "slot": slot}));
+    }
+    if crate::plugin_ui::takes_key(&ins.plugin) {
+        ui.menu_button("Key Input", |ui| {
+            let busses: Vec<(u64, String)> = app.engine.session().busses.iter().map(|b| (b.id.0, b.name.clone())).collect();
+            crate::plugin_ui::key_menu(app, ui, id, slot, &ins, &busses);
+        });
+    } else {
+        ui.add_enabled(false, egui::Button::new("Key Input"));
+    }
+    if ui.button("no insert").clicked() {
+        run_pick(app, ui, "mix.insert_remove", json!({"track": id.0, "slot": slot}));
+    }
+}
+
+pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize) {
     let instrument_track = app.engine.session().track(id).is_some_and(|t| t.kind == TrackKind::Instrument);
     let search = MenuSearch::show(ui, egui::Id::new(("plugin-search", id.0, slot)), "Search plugins…");
     if search.typing() {
@@ -816,27 +862,6 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, oc
             pick_insert(app, ui, id, slot, &plugin, false);
         }
         return;
-    }
-    if occupied {
-        if ui.button("Generic Controls…").clicked() {
-            show_controls(app, id, slot);
-            ui.close();
-        }
-        if ui.button("Bypass").clicked() {
-            run_pick(app, ui, "mix.insert_bypass", json!({"track": id.0, "slot": slot}));
-        }
-        if let Some(ins) = app.engine.session().track(id).and_then(|t| t.mixer.inserts.get(slot).cloned().flatten())
-            && crate::plugin_ui::takes_key(&ins.plugin)
-        {
-            ui.menu_button("Key Input", |ui| {
-                let busses: Vec<(u64, String)> = app.engine.session().busses.iter().map(|b| (b.id.0, b.name.clone())).collect();
-                crate::plugin_ui::key_menu(app, ui, id, slot, &ins, &busses);
-            });
-        }
-        if ui.button("no insert").clicked() {
-            run_pick(app, ui, "mix.insert_remove", json!({"track": id.0, "slot": slot}));
-        }
-        ui.separator();
     }
     let channels = app.engine.session().track(id).map_or(1, |t| t.format.channels());
     let org = app.ui.plugin_menu_org.clone();
@@ -1027,6 +1052,22 @@ pub(crate) fn click_mods(ui: &Ui) -> egui::Modifiers {
         }
         m
     })
+}
+
+pub(crate) fn solo_button(app: &mut SoundApp, ui: &Ui, resp: &egui::Response, id: TrackId) {
+    let held_id = egui::Id::new(("momentary_solo", id.0));
+    let held = ui.ctx().data(|d| d.get_temp::<bool>(held_id)).unwrap_or(false);
+    if app.engine.session().edit.solo_latch() != "momentary" || (!held && click_mods(ui).command) {
+        if crate::widgets::pressed(ui, resp) {
+            track_button(app, ui, "mix.solo", id);
+        }
+        return;
+    }
+    let down = resp.is_pointer_button_down_on();
+    if down != held {
+        ui.ctx().data_mut(|d| d.insert_temp(held_id, down));
+        let _ = app.run("mix.solo", json!({"track": id.0, "value": down}));
+    }
 }
 
 pub(crate) fn track_button(app: &mut SoundApp, ui: &Ui, cmd: &str, id: TrackId) {

@@ -59,11 +59,11 @@ fn vox() -> openpt_engine::Engine {
 
 #[test]
 fn an_insert_menu_searches_as_soon_as_it_opens() {
-    let reverbs = built_in(false, "reverb");
-    assert!(reverbs.len() >= 2, "the test needs two built-in reverbs");
+    let reverbs = built_in(false, "open");
+    assert!(reverbs.len() >= 2, "the test needs two built-in Open plug-ins");
     let mut h = harness(vox());
     open(&mut h, "Insert A");
-    type_text(&mut h, "reverb");
+    type_text(&mut h, "open");
     assert!(h.query_by_label(reverbs[0].name).is_some(), "typing went to the search");
     assert!(h.query_by_label_contains("Dynamics").is_none(), "the matches replace the categories");
 
@@ -83,9 +83,9 @@ fn an_insert_menu_searches_as_soon_as_it_opens() {
 fn a_menu_opens_with_an_empty_search() {
     let mut h = harness(vox());
     open(&mut h, "Insert B");
-    type_text(&mut h, "reverb");
+    type_text(&mut h, "open");
     press(&mut h, Key::Escape);
-    assert!(h.query_by_label(built_in(false, "reverb")[0].name).is_none(), "Escape closes the menu");
+    assert!(h.query_by_label(built_in(false, "open")[0].name).is_none(), "Escape closes the menu");
 
     open(&mut h, "Insert B");
     let category = category_label(openpt_dsp::plugins().iter().find(|p| !p.is_instrument).unwrap().category);
@@ -98,20 +98,26 @@ fn a_menu_opens_with_an_empty_search() {
 
 #[test]
 fn picks_without_the_search_still_close_the_menu() {
-    let first = openpt_dsp::plugins().iter().find(|p| !p.is_instrument).unwrap();
-    let other = openpt_dsp::plugins().iter().find(|p| p.category == first.category && p.id != first.id).unwrap();
+    let offered = || openpt_dsp::plugins().iter().filter(|p| !p.is_instrument);
+    let first = offered().find(|p| offered().any(|o| o.category == p.category && o.id != p.id)).unwrap();
+    let other = offered().find(|p| p.category == first.category && p.id != first.id).unwrap();
     let category = format!("{} ⏵", category_label(first.category));
     let mut h = harness(vox());
-    for (plugin, click) in [(first, egui::PointerButton::Primary), (other, egui::PointerButton::Secondary)] {
-        h.get_by_label("Insert C").click_button(click);
+    for (plugin, slot) in [(first, 2usize), (other, 3)] {
+        h.get_by_label(&format!("Insert {}", (b'A' + slot as u8) as char)).click();
         h.run_steps(3);
         h.get_by_label(&category).hover();
         h.run_steps(3);
         h.get_by_label(plugin.name).click();
         h.run_steps(3);
-        assert_eq!(h.state().engine.session().tracks[0].mixer.inserts[2].as_ref().unwrap().plugin, plugin.id);
+        assert_eq!(h.state().engine.session().tracks[0].mixer.inserts[slot].as_ref().unwrap().plugin, plugin.id);
         assert!(h.query_by_label(&category).is_none(), "a plugin from a category closes the menu");
     }
+    h.get_by_label("Insert C").click_secondary();
+    h.run_steps(3);
+    assert!(h.query_by_label(&category).is_none(), "a used insert's right-click menu holds no plug-in list");
+    h.key_press(Key::Escape);
+    h.run_steps(2);
 
     for (item, bypassed) in [("Bypass", Some(true)), ("no insert", None)] {
         h.get_by_label("Insert C").click_secondary();
@@ -165,11 +171,11 @@ fn send_and_output_menus_search_buses_as_soon_as_they_open() {
 
 #[test]
 fn scripted_keys_reach_the_search_with_the_window_in_the_background() {
-    let plates = built_in(false, "plate");
+    let plates = built_in(false, "opendrt");
     let mut h = harness(vox());
     h.input_mut().focused = false;
     open(&mut h, "Insert A");
-    type_text(&mut h, "plate");
+    type_text(&mut h, "opendrt");
     press(&mut h, Key::Enter);
     let insert = h.state().engine.session().tracks[0].mixer.inserts[0].clone().expect("Enter works without window focus, as typing does");
     assert_eq!(insert.plugin, plates[0].id);

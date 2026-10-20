@@ -69,3 +69,14 @@ fn a_frozen_track_plays_its_render_without_its_plugins() {
     assert!(e.undo());
     assert!(e.session().track(t).unwrap().is_frozen());
 }
+
+#[test]
+fn a_committed_track_keeps_its_pan() {
+    let mut s = Session::default();
+    let t = audio_track(&mut s, "Tom", 0.25);
+    s.track_mut(t).unwrap().mixer.pan = vec![-0.6];
+    let mut e = Engine::new(s);
+    let r = e.execute("track.commit", &json!({"tracks": [t.0]})).unwrap();
+    let nt = TrackId(r["tracks"][0].as_u64().unwrap());
+    assert_eq!(e.session().track(nt).unwrap().mixer.pan, vec![-0.6]);
+}

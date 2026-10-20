@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 pub const HEADER_W: f32 = 136.0;
 pub const COLUMN_W: f32 = 112.0;
-const PLUGIN_COLUMN_W: f32 = 75.0;
+const PLUGIN_COLUMN_W: f32 = 92.0;
 const STRIP_W: f32 = 14.0;
 const COLUMN_TITLES_H: f32 = 16.0;
 
@@ -1125,6 +1125,9 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
     if bg.clicked() {
         click_track(app, id, ui.input(|i| i.modifiers), in_edit_window);
     }
+    if bg.double_clicked() && bg.interact_pointer_pos().is_some_and(|p| p.x < head.min.x + STRIP_W) {
+        crate::windows::open_color_palette_for_tracks(app, ui.ctx());
+    }
     bg.context_menu(|ui| track_context_menu(app, ui, id));
     let at = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(pos2(head.min.x + x, head.min.y + y), vec2(w, h));
     let strip = rgb(track.color);
@@ -1265,7 +1268,9 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
                 _ => false,
             };
             crate::mix_window::safe_mark(ui, r, safe);
-            if resp.clicked() {
+            if cmd == "mix.solo" {
+                crate::mix_window::solo_button(app, ui, &resp, id);
+            } else if crate::widgets::pressed(ui, &resp) {
                 crate::mix_window::track_button(app, ui, cmd, id);
             }
         }
@@ -1840,6 +1845,8 @@ pub(crate) fn track_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
             if cmd == "ui.rename_track" {
                 let name = app.engine.session().track(id).map(|t| t.name.clone()).unwrap_or_default();
                 app.dialogs.open_rename_track(id, &name);
+            } else if cmd == "track.move_to_new_folder" {
+                app.dialogs.open_new_folder(selection.clone());
             } else {
                 let _ = app.run(cmd, json!({"tracks": selection}));
             }
@@ -1996,7 +2003,7 @@ fn grid_lines(painter: &egui::Painter, s: &Session, tl: Rect, lane: Rect) {
 }
 
 fn clip_name_height(s: &Session, lane: Rect) -> f32 {
-    if lane.height() >= 40.0 && s.edit.flag("view.clip.name") { 13.0 } else { 0.0 }
+    if lane.height() >= 40.0 && s.edit.flag("view.clip.name") { 12.0 } else { 0.0 }
 }
 
 fn fade_curve_points(fade: openpt_model::Fade, fade_in: bool, a: f32, b: f32, body: Rect, pixels_per_point: f32) -> Vec<Pos2> {
@@ -2103,7 +2110,7 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
             && s.edit.selection.start <= clip.start
             && s.edit.selection.end >= clip.end());
     let color = clip.color.unwrap_or(track.color);
-    let (mut body, bar, mut wave) = clip_colors(color, selected);
+    let (mut body, _, mut wave) = clip_colors(color, selected);
     if clip.muted || dim {
         body = body.gamma_multiply(0.45);
         wave = Color32::from_rgb(70, 70, 70);
@@ -2112,18 +2119,14 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
     painter.rect(r, CornerRadius::same(2), body, Stroke::new(1.0, Color32::from_rgb(10, 10, 10)), StrokeKind::Inside);
     let name_h = clip_name_height(s, lane);
     if name_h > 0.0 {
-        let nb = Rect::from_min_max(r.min, pos2(r.max.x, r.min.y + name_h));
-        painter.rect_filled(nb, CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, if clip.muted { Color32::from_rgb(70, 70, 70) } else { bar });
-        let name_clip = nb.intersect(lane);
-        painter.with_clip_rect(name_clip).text(
-            pos2(nb.min.x.max(lane.min.x) + 4.0, nb.center().y),
-            Align2::LEFT_CENTER,
-            &clip.name,
-            bold(10.5),
-            Color32::from_rgb(12, 12, 12),
-        );
+        let nb = Rect::from_min_max(pos2(r.min.x + 1.0, r.max.y - name_h), pos2(r.max.x - 1.0, r.max.y - 1.0));
+        let strip = shade(body, if selected { -0.12 } else { -0.3 });
+        painter.rect_filled(nb, CornerRadius { nw: 0, ne: 0, sw: 2, se: 2 }, strip);
+        painter.hline(nb.x_range(), nb.min.y + 0.5, Stroke::new(1.0, Color32::from_black_alpha(90)));
+        let ink = if crate::widgets::luma(strip) > 0.5 { Color32::from_rgb(14, 14, 14) } else { Color32::from_rgb(214, 214, 214) };
+        painter.with_clip_rect(nb.intersect(lane)).text(pos2(nb.min.x.max(lane.min.x) + 3.0, nb.center().y), Align2::LEFT_CENTER, &clip.name, regular(10.0), ink);
     }
-    let body_r = Rect::from_min_max(pos2(r.min.x, r.min.y + name_h), r.max);
+    let body_r = Rect::from_min_max(r.min, pos2(r.max.x, r.max.y - name_h));
     let vis = body_r.intersect(lane);
     let (fade_in, fade_out) = clip_preview_fades(clip, app.gesture.as_ref().filter(|_| !dim));
     match &clip.content {
@@ -2241,7 +2244,7 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
     }
     let ov = Color32::from_rgb(16, 16, 16);
     if s.edit.flag("view.clip.rating") && clip.rating > 0 && name_h > 0.0 {
-        painter.text(pos2(r.max.x - 18.0, r.min.y + 7.0), Align2::RIGHT_CENTER, "★".repeat(usize::from(clip.rating.min(5))), regular(9.0), ov);
+        painter.text(pos2(r.max.x - 4.0, r.max.y - name_h * 0.5), Align2::RIGHT_CENTER, "★".repeat(usize::from(clip.rating.min(5))), regular(9.0), ov);
     }
     if s.edit.flag("view.clip.sync_point") && clip.sync_point > 0 {
         let x = x_of(s, tl, clip.start + clip.sync_point);
@@ -2250,7 +2253,7 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
             Color32::WHITE,
             Stroke::NONE,
         ));
-        painter.line_segment([pos2(x, r.min.y + name_h), pos2(x, r.max.y)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 90)));
+        painter.line_segment([pos2(x, r.min.y), pos2(x, r.max.y - name_h)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 90)));
     }
     let time_text = if s.edit.flag("view.clip.time.current") {
         Some(s.format_position(clip.start, s.edit.main_counter))
@@ -2272,10 +2275,10 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
     if let Some(tt) = time_text
         && r.height() > 30.0
     {
-        painter.with_clip_rect(r.intersect(lane)).text(pos2(r.min.x.max(lane.min.x) + 4.0, r.max.y - 7.0), Align2::LEFT_CENTER, tt, regular(9.0), ov);
+        painter.with_clip_rect(r.intersect(lane)).text(pos2(r.min.x.max(lane.min.x) + 4.0, r.max.y - name_h - 7.0), Align2::LEFT_CENTER, tt, regular(9.0), ov);
     }
     if s.edit.flag("view.clip.effects_status") && s.edit.values.keys().any(|k| k.starts_with(&format!("clip_fx.{}.", clip.id.0))) {
-        painter.text(pos2(r.max.x - 6.0, r.max.y - 7.0), Align2::RIGHT_CENTER, "FX", bold(9.0), Color32::from_rgb(250, 230, 120));
+        painter.text(pos2(r.max.x - 6.0, r.max.y - name_h - 7.0), Align2::RIGHT_CENTER, "FX", bold(9.0), Color32::from_rgb(250, 230, 120));
     }
     if s.edit.flag("view.clip.overlap_shadows") {
         for o in track.clips() {
@@ -2399,7 +2402,7 @@ fn auto_value(lane: Rect, (lo, hi): (f32, f32), y: f32) -> f32 {
 }
 
 fn gain_span(s: &Session, lane: Rect) -> (f32, f32) {
-    (lane.min.y + 1.0 + clip_name_height(s, lane), lane.max.y - 1.0)
+    (lane.min.y + 1.0, lane.max.y - 1.0 - clip_name_height(s, lane))
 }
 
 fn gain_y((top, bot): (f32, f32), db: f32) -> f32 {
@@ -2550,7 +2553,7 @@ fn fade_handle_at(s: &Session, tl: Rect, lane: Rect, clip: &Clip, p: Pos2) -> Op
     if clip.length <= 0 || clip.end() <= clip.start {
         return None;
     }
-    let y = lane.min.y + 1.0 + clip_name_height(s, lane);
+    let y = lane.min.y + 1.0;
     [(true, clip.fade_in), (false, clip.fade_out)]
         .into_iter()
         .filter(|(_, fade)| fade.len > 0)
@@ -2581,7 +2584,7 @@ fn fade_midpoint(s: &Session, tl: Rect, lane: Rect, clip: &Clip, fade_in: bool) 
     if b - a < 32.0 {
         return None;
     }
-    let body = Rect::from_min_max(pos2(a, lane.min.y + 1.0 + clip_name_height(s, lane)), pos2(b, lane.max.y - 1.0));
+    let body = Rect::from_min_max(pos2(a, lane.min.y + 1.0), pos2(b, lane.max.y - 1.0 - clip_name_height(s, lane)));
     let p = fade_control_position(fade, a, b, body);
     lane.contains(p).then_some(p)
 }

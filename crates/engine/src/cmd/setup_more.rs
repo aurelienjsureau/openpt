@@ -117,9 +117,20 @@ pub fn specs() -> Vec<CommandSpec> {
             "Session Data...",
             ["File", "Import"],
             Some("Alt+Shift+I"),
-            "{path, tracks?: [names]} — imports tracks (clips, playlists, mixer, automation, audio) from another session",
+            "{path, tracks?: [names], dest?: {name: existing track}, data?: {clips, alternate_playlists, inserts, sends, io, volume, pan, mute_solo, automation, comments: bool}, markers?, tempo?, link?} — imports tracks from another session",
             always,
             import_session_data
+        ),
+        cmd!(query "file.session_data_tracks", "Session Data Tracks", [], None, "{path} — another session's tracks, for Import Session Data", always, session_data_tracks),
+        cmd!(query "file.linked_sessions", "Linked Sessions", [], None, "{} — linked sessions saved since their last import", always, linked_sessions),
+        cmd!(
+            "file.update_linked_session",
+            "Update Linked Session",
+            [],
+            None,
+            "{path, dismiss?} — re-imports a linked session's tracks into the tracks of the same name",
+            always,
+            update_linked_session
         ),
     ]
 }
@@ -460,15 +471,47 @@ fn midi_inputs(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"enabled": enabled}))
 }
 
+pub const TRACK_DATA: [&str; 10] = ["clips", "alternate_playlists", "inserts", "sends", "io", "volume", "pan", "mute_solo", "automation", "comments"];
+
+fn donor_session(path: &str) -> Result<Session> {
+    if crate::io::is_ptx_path(path) {
+        crate::io::ptx_session(path)
+    } else {
+        let text_v = crate::io::read_text(path)?;
+        Session::from_json(&text_v).map_err(|err| EngineError::Io(format!("{path}: {err}")))
+    }
+}
+
+fn modified_secs(path: &str) -> u64 {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs())
+}
+
+fn session_data_tracks(_e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "file.session_data_tracks";
+    let path = str_param(p, "path").filter(|x| !x.trim().is_empty()).ok_or_else(|| bad(id, "`path` required"))?;
+    let other = donor_session(path)?;
+    let folder = |t: &openpt_model::Track| t.folder.and_then(|f| other.track(f)).map(|f| f.name.clone());
+    let tracks: Vec<Value> = other
+        .tracks
+        .iter()
+        .filter(|t| !matches!(t.kind, TrackKind::Master | TrackKind::Video))
+        .map(|t| {
+            json!({
+                "name": t.name,
+                "kind": t.kind.id(),
+                "clips": t.playlists.get(t.active_playlist).map_or(0, |pl| pl.clips.len()),
+                "playlists": t.playlists.len(),
+                "folder": folder(t),
+            })
+        })
+        .collect();
+    Ok(json!({"tracks": tracks, "markers": other.markers.len(), "tempo_changes": other.tempo.tempos().len(), "name": other.name}))
+}
+
 fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "file.import_session_data";
     let path = str_param(p, "path").filter(|x| !x.trim().is_empty()).ok_or_else(|| bad(id, "`path` required"))?.to_string();
-    let other = if crate::io::is_ptx_path(&path) {
-        crate::io::ptx_session(&path)?
-    } else {
-        let text_v = crate::io::read_text(&path)?;
-        Session::from_json(&text_v).map_err(|err| EngineError::Io(format!("{path}: {err}")))?
-    };
+    let other = donor_session(&path)?;
     let dir = Path::new(&path).parent().map(Path::to_path_buf).unwrap_or_default();
     let names: Option<Vec<String>> =
         p.get("tracks").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect());
@@ -482,12 +525,20 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         None => other.tracks.iter().filter(|t| t.kind != TrackKind::Master).cloned().collect(),
     };
-    if picked.is_empty() {
+    let wants = |k: &str| p.get("data").and_then(|d| d.get(k)).and_then(Value::as_bool).unwrap_or(true);
+    let (markers, tempo) = (bool_or(p, "markers", false), bool_or(p, "tempo", false));
+    if picked.is_empty() && !markers && !tempo {
         return Err(bad(id, "nothing to import"));
     }
-    let mut needed: Vec<SourceId> =
-        picked.iter().flat_map(|t| t.playlists.iter().flat_map(|pl| pl.clips.iter().filter_map(|c| c.source()))).collect();
-    needed.extend(picked.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sample)));
+    let dest_of = |n: &str| p.get("dest").and_then(|d| d.get(n)).and_then(Value::as_str).map(str::to_string);
+    let mut needed: Vec<SourceId> = if wants("clips") {
+        picked.iter().flat_map(|t| t.playlists.iter().flat_map(|pl| pl.clips.iter().filter_map(|c| c.source()))).collect()
+    } else {
+        Vec::new()
+    };
+    if wants("inserts") {
+        needed.extend(picked.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sample)));
+    }
     needed.sort_by_key(|x| x.0);
     needed.dedup();
     let sr = e.session().sample_rate.hz();
@@ -516,11 +567,13 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
         s.sources.push(ns);
     }
     let mut out = Vec::new();
-    for mut tr in picked {
-        tr.id = TrackId(s.alloc());
-        tr.name = s.unique_track_name(&tr.name);
-        tr.folder = None;
-        tr.mixer.vca = None;
+    let targets: Vec<Option<TrackId>> = picked.iter().map(|t| dest_of(&t.name).and_then(|n| s.track_by_name(&n).map(|x| x.id))).collect();
+    let new_ids: std::collections::BTreeMap<u64, TrackId> =
+        picked.iter().zip(&targets).map(|(t, to)| (t.id.0, to.unwrap_or_else(|| TrackId(s.alloc())))).collect();
+    for (mut tr, into) in picked.into_iter().zip(targets) {
+        tr.id = new_ids[&tr.id.0];
+        tr.folder = tr.folder.and_then(|f| new_ids.get(&f.0).copied());
+        tr.mixer.vca = tr.mixer.vca.and_then(|v| new_ids.get(&v).map(|n| n.0));
         for pl in &mut tr.playlists {
             for c in &mut pl.clips {
                 c.id = s.new_clip_id();
@@ -545,12 +598,140 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
         for slot in tr.mixer.sends.iter_mut().flatten() {
             slot.target = remap(s, &slot.target);
         }
-        let pos = s.tracks.iter().position(|t| t.kind == TrackKind::Master).unwrap_or(s.tracks.len());
-        out.push(tr.id);
-        s.tracks.insert(pos, tr);
+        if !wants("alternate_playlists") && tr.playlists.len() > 1 {
+            let main = tr.playlists.swap_remove(tr.active_playlist.min(tr.playlists.len() - 1));
+            tr.playlists = vec![main];
+            tr.active_playlist = 0;
+        }
+        let mut t = match into.and_then(|t| s.track(t)) {
+            Some(t) => t.clone(),
+            None => {
+                let mut b = openpt_model::Track::new(tr.id, s.unique_track_name(&tr.name), tr.kind, tr.format, tr.color);
+                b.folder = tr.folder;
+                b.mixer.vca = tr.mixer.vca;
+                b.height = tr.height;
+                b.view.clone_from(&tr.view);
+                b.elastic.clone_from(&tr.elastic);
+                b.ticks_timebase = tr.ticks_timebase;
+                b.midi_channel = tr.midi_channel;
+                if tr.is_folder() {
+                    b.mixer.input = tr.mixer.input.clone();
+                }
+                b
+            }
+        };
+        if tr.folder.is_some() {
+            t.folder = tr.folder;
+        }
+        if tr.mixer.vca.is_some() {
+            t.mixer.vca = tr.mixer.vca;
+        }
+        if wants("clips") {
+            let imported = std::mem::take(&mut tr.playlists);
+            let old = std::mem::replace(&mut t.playlists, imported);
+            t.active_playlist = tr.active_playlist.min(t.playlists.len().saturating_sub(1));
+            if into.is_some() {
+                for mut pl in old.into_iter().filter(|pl| !pl.clips.is_empty()) {
+                    pl.name = format!("{}.old", pl.name);
+                    t.playlists.push(pl);
+                }
+            }
+        }
+        if wants("inserts") {
+            t.mixer.inserts = tr.mixer.inserts;
+            t.instrument = tr.instrument;
+        }
+        if wants("sends") {
+            t.mixer.sends = tr.mixer.sends;
+        }
+        if wants("io") {
+            t.mixer.input = tr.mixer.input;
+            t.mixer.output = tr.mixer.output;
+        }
+        if wants("volume") {
+            t.mixer.volume_db = tr.mixer.volume_db;
+            t.mixer.trim_db = tr.mixer.trim_db;
+        }
+        if wants("pan") && t.mixer.pan.len() == tr.mixer.pan.len() {
+            t.mixer.pan = tr.mixer.pan;
+            t.mixer.surround = tr.mixer.surround;
+        }
+        if wants("mute_solo") {
+            t.mixer.mute = tr.mixer.mute;
+            t.mixer.solo = tr.mixer.solo;
+        }
+        if wants("automation") {
+            t.automation = tr.automation;
+            t.mixer.automation_mode = tr.mixer.automation_mode;
+        }
+        if wants("comments") {
+            t.comments = tr.comments;
+        }
+        out.push(t.id);
+        match into.and_then(|x| s.track_index(x)) {
+            Some(i) => s.tracks[i] = t,
+            None => {
+                let pos = s.tracks.iter().position(|x| x.kind == TrackKind::Master).unwrap_or(s.tracks.len());
+                s.tracks.insert(pos, t);
+            }
+        }
     }
-    s.edit.selected_tracks = out.clone();
+    for f in out.iter().copied().filter(|f| s.track(*f).is_some_and(openpt_model::Track::is_folder)).collect::<Vec<_>>() {
+        let members: Vec<TrackId> = out.iter().copied().filter(|m| s.track(*m).is_some_and(|t| t.folder == Some(f))).collect();
+        super::track::place_under(s, f, &members);
+    }
+    if markers {
+        for m in &other.markers {
+            if !s.markers.iter().any(|x| x.name == m.name && x.start == m.start) {
+                let id = s.add_marker(&m.name, m.kind, m.start, m.end);
+                if let Some(x) = s.markers.iter_mut().find(|x| x.id == id) {
+                    x.comments.clone_from(&m.comments);
+                    x.color = m.color;
+                }
+            }
+        }
+    }
+    if tempo {
+        s.tempo = other.tempo.clone();
+    }
+    if bool_or(p, "link", false) {
+        let tracks: Vec<String> =
+            names.unwrap_or_else(|| other.tracks.iter().filter(|t| t.kind != TrackKind::Master).map(|t| t.name.clone()).collect());
+        let data: serde_json::Map<String, Value> = TRACK_DATA.iter().map(|k| ((*k).to_string(), json!(wants(k)))).collect();
+        s.linked_sessions.retain(|l| l.path != path);
+        s.linked_sessions.push(openpt_model::SessionLink { path: path.clone(), tracks, data: Value::Object(data), modified: modified_secs(&path) });
+    }
+    if !out.is_empty() {
+        s.edit.selected_tracks = out.clone();
+    }
     Ok(json!({"tracks": out, "sources": map.len(), "missing": missing}))
+}
+
+fn linked_sessions(e: &mut Engine, _p: &Value) -> Result<Value> {
+    let changed: Vec<Value> = e
+        .session()
+        .linked_sessions
+        .iter()
+        .filter(|l| modified_secs(&l.path) > l.modified)
+        .map(|l| json!({"path": l.path, "tracks": l.tracks}))
+        .collect();
+    Ok(json!({"changed": changed}))
+}
+
+fn update_linked_session(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "file.update_linked_session";
+    let path = str_param(p, "path").ok_or_else(|| bad(id, "`path` required"))?.to_string();
+    let link = e.session().linked_sessions.iter().find(|l| l.path == path).cloned().ok_or_else(|| bad(id, format!("`{path}` is not linked")))?;
+    let mut r = json!({"tracks": []});
+    if !bool_or(p, "dismiss", false) {
+        let dest: serde_json::Map<String, Value> =
+            link.tracks.iter().filter(|n| e.session().track_by_name(n).is_some()).map(|n| (n.clone(), json!(n))).collect();
+        r = import_session_data(e, &json!({"path": path, "tracks": link.tracks, "data": link.data, "dest": dest}))?;
+    }
+    if let Some(l) = e.session_mut().linked_sessions.iter_mut().find(|l| l.path == path) {
+        l.modified = modified_secs(&path);
+    }
+    Ok(r)
 }
 
 #[cfg(test)]
@@ -684,6 +865,43 @@ mod tests {
         assert!(e.session().pool.get(src).is_some());
         assert_eq!(e.session().track_by_name("Keys").unwrap().clips().len(), 1);
         assert!(e.execute("file.import_session_data", &json!({"path": path, "tracks": ["Nope"]})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_session_data_picks_its_data_keeps_folders_and_follows_a_link() {
+        let dir = std::env::temp_dir().join(format!("sc-import-pick-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("donor.openpt").to_string_lossy().into_owned();
+        let mut donor = crate::demo::demo_engine();
+        donor.execute("track.move_to_new_folder", &json!({"tracks": ["Kick", "Snare"], "name": "Drums"})).unwrap();
+        donor.execute("mix.volume", &json!({"track": "Kick", "db": -6.0})).unwrap();
+        crate::io::save_session(&mut donor, &path).unwrap();
+        let listed = Engine::default().execute("file.session_data_tracks", &json!({"path": path})).unwrap();
+        assert!(listed["tracks"].as_array().unwrap().iter().any(|t| t["name"] == "Kick" && t["folder"] == "Drums"));
+
+        let mut e = crate::demo::demo_engine();
+        let clips_before = e.session().track_by_name("Kick").unwrap().clips().len();
+        let r = e
+            .execute(
+                "file.import_session_data",
+                &json!({"path": path, "tracks": ["Drums", "Kick", "Snare"], "dest": {"Kick": "Kick"}, "data": {"clips": false}, "link": true}),
+            )
+            .unwrap();
+        assert_eq!(r["tracks"].as_array().unwrap().len(), 3);
+        let s = e.session();
+        let kick = s.track_by_name("Kick").unwrap();
+        assert_eq!(kick.clips().len(), clips_before, "clips stay when not imported");
+        assert!((kick.mixer.volume_db + 6.0).abs() < 1e-4);
+        let folder = s.tracks.iter().find(|t| t.is_folder()).unwrap();
+        assert_eq!(kick.folder, Some(folder.id));
+        assert_eq!(s.linked_sessions.len(), 1);
+        assert_eq!(e.execute("file.linked_sessions", &json!({})).unwrap()["changed"], json!([]));
+        e.session_mut().linked_sessions[0].modified = 0;
+        assert_eq!(e.execute("file.linked_sessions", &json!({})).unwrap()["changed"].as_array().unwrap().len(), 1);
+        e.execute("file.update_linked_session", &json!({"path": path})).unwrap();
+        assert_eq!(e.execute("file.linked_sessions", &json!({})).unwrap()["changed"], json!([]));
+        assert_eq!(e.session().tracks.iter().filter(|t| t.name.starts_with("Kick")).count(), 1, "re-imported into the same track");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

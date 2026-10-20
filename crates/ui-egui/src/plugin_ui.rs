@@ -338,7 +338,7 @@ fn draw_graph(p: &egui::Painter, g: Rect, kind: Graph, info: &PluginInfo, ins: &
 }
 
 pub fn takes_key(plugin: &str) -> bool {
-    openpt_mix::is_third_party(plugin) || matches!(plugin, "compressor" | "expander_gate" | "de_esser" | "open_eq" | "open_mb" | "open_comp")
+    openpt_mix::is_third_party(plugin) || matches!(plugin, "compressor" | "expander_gate" | "de_esser" | "open_eq" | "open_mb" | "open_comp" | "open_g")
 }
 
 pub fn key_input(app: &mut SoundApp, ui: &mut Ui, tid: TrackId, slot: usize, ins: &Insert) {

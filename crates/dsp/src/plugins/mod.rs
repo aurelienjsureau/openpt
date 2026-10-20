@@ -6,6 +6,7 @@ pub mod linmb_table;
 pub mod open_comp;
 pub mod open_drt;
 pub mod open_eq;
+pub mod open_g;
 pub mod open_mb;
 pub mod open_sat;
 pub mod modulation;
@@ -21,6 +22,7 @@ use crate::{Plugin, PluginInfo};
 pub(crate) static REGISTRY: &[&PluginInfo] = &[
     &open_eq::OPEN_EQ_INFO,
     &open_comp::OPEN_COMP_INFO,
+    &open_g::OPEN_G_INFO,
     &open_mb::OPEN_MB_INFO,
     &open_sat::OPEN_SAT_INFO,
     &open_drt::OPEN_DRT_INFO,
@@ -108,6 +110,7 @@ pub(crate) fn instantiate(id: &str) -> Option<Box<dyn Plugin>> {
         "open_sat" => Box::new(open_sat::OpenSat::new()),
         "open_comp" => Box::new(open_comp::OpenComp::new()),
         "open_drt" => Box::new(open_drt::OpenDrt::new()),
+        "open_g" => Box::new(open_g::OpenG::new()),
         _ => return None,
     })
 }

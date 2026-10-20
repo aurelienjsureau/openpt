@@ -61,7 +61,7 @@ fn real_drag_float_close_reopen_reload_retains_transport_and_mixer_commands() {
     reloaded.run_steps(4);
     reloaded.get_by_role_and_label(egui::accesskit::Role::Tab, "Tracks and Groups").click();
     reloaded.run_steps(3);
-    reloaded.get_by_label("Trim (F6)").click();
+    reloaded.get_by_label_contains("Trim (F6)").click();
     reloaded.run_steps(3);
     assert_eq!(reloaded.state().engine.session().edit.tool, openpt_model::Tool::Trim);
     assert!(!reloaded.state().engine.transport.playing);

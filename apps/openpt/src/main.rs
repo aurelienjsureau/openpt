@@ -290,7 +290,7 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenPT")
             .with_inner_size(sane_window_size(prefs.window_size))
-            .with_maximized(prefs.window_maximized)
+            .with_maximized(true)
             .with_min_inner_size([960.0, 600.0])
             .with_drag_and_drop(true)
             .with_app_id("fr.bourrinaudio.openpt"),

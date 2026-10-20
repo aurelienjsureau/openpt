@@ -74,6 +74,7 @@ pub struct UiState {
     pub show_midi_editor: bool,
     pub show_universe: bool,
     pub narrow_mix: bool,
+    pub mix_fader_h: f32,
     pub mix_views: Vec<String>,
     pub edit_views: Vec<String>,
     pub track_tint: f32,
@@ -158,6 +159,7 @@ impl Default for UiState {
             show_midi_editor: false,
             show_universe: false,
             narrow_mix: false,
+            mix_fader_h: crate::mix_window::DEFAULT_FADER_H,
             mix_views: vec!["inserts_ae".into(), "sends_ae".into(), "io".into(), "color".into()],
             edit_views: vec!["inserts_ae".into(), "sends_ae".into(), "io".into(), "color".into()],
             track_tint: 0.0,
@@ -195,7 +197,7 @@ impl Default for UiState {
             configurations: Vec::new(),
             theme: theme::ThemeMode::Dark,
             window_size: [1600.0, 1000.0],
-            window_maximized: false,
+            window_maximized: true,
             ui_scale: 1.0,
             show_dashboard: false,
             dashboard_at_startup: true,
@@ -1586,7 +1588,9 @@ impl SoundApp {
         self.autosave();
         if self.recorder.is_none()
             && !self.recorder_failed
-            && self.engine.session().tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm)
+            && self.engine.session().tracks.iter().any(|t| {
+                t.mixer.input_monitor || t.mixer.record_arm || (t.kind == openpt_model::TrackKind::Aux && !t.inactive && matches!(t.mixer.input, openpt_model::Route::Hardware(_)))
+            })
         {
             self.ensure_input();
         }
@@ -1975,7 +1979,7 @@ mod tests {
     #[test]
     fn preferences_saved_before_the_window_was_remembered_keep_full_scale() {
         let ui: super::UiState = serde_json::from_value(json!({"show_transport": true})).unwrap();
-        assert_eq!((ui.window_size, ui.window_maximized, ui.ui_scale), ([1600.0, 1000.0], false, 1.0));
+        assert_eq!((ui.window_size, ui.window_maximized, ui.ui_scale), ([1600.0, 1000.0], true, 1.0));
     }
 
     #[test]

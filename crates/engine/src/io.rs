@@ -1,7 +1,7 @@
 use crate::{Engine, EngineError, Result};
 use openpt_audio_io::{AudioBuffer, EncodeOptions, FileFormat};
 use openpt_midi::MidiTake;
-use openpt_model::{BusId, ChannelFormat, Clip, ClipContent, Session, Source, SourceAudio, SourceId, TrackId, TrackKind};
+use openpt_model::{AutoParam, BusId, ChannelFormat, Clip, ClipContent, Session, Source, SourceAudio, SourceId, TrackId, TrackKind};
 use openpt_time::{Range, Samples};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -801,7 +801,7 @@ pub fn commit_captured(e: &mut Engine, captured: Vec<(TrackId, Vec<Vec<f32>>)>) 
 
 fn place_commit(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) -> Option<TrackId> {
     let s = e.session();
-    let (name, mixer) = s.track(t).map(|tr| (format!("{}.cm", tr.name), tr.mixer.clone()))?;
+    let (name, mixer, lanes) = s.track(t).map(|tr| (format!("{}.cm", tr.name), tr.mixer.clone(), tr.automation.clone()))?;
     let fmt = ChannelFormat::for_channels(audio.len().clamp(1, 2));
     let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
     let s = e.session_mut();
@@ -816,6 +816,14 @@ fn place_commit(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) 
         ntr.mixer.volume_db = mixer.volume_db;
         ntr.mixer.output = mixer.output.clone();
         ntr.mixer.sends = mixer.sends.clone();
+        let same_pan = ntr.mixer.pan.len() == mixer.pan.len();
+        if same_pan {
+            ntr.mixer.pan = mixer.pan.clone();
+            ntr.mixer.surround = mixer.surround.clone();
+        }
+        ntr.mixer.mute = mixer.mute;
+        ntr.mixer.automation_mode = mixer.automation_mode;
+        ntr.automation = lanes.into_iter().filter(|l| !matches!(l.param, AutoParam::Plugin { .. }) && (same_pan || !matches!(l.param, AutoParam::Pan(_)))).collect();
         if let Some(pl) = ntr.playlist_mut() {
             pl.clips.push(Clip::audio(cid, name, src, 0, 0, range.len()));
         }
@@ -2251,6 +2259,7 @@ pub fn ptx_session_media(path: &str) -> Result<(Session, Vec<String>)> {
     {
         add_inserts(&mut s, m, list, true, &mut missing);
     }
+    let mut folder_ids: std::collections::HashMap<&str, TrackId> = std::collections::HashMap::new();
     for t in &p.tracks {
         use openpt_model::TrackKind as K;
         let kind = match t.kind {
@@ -2263,6 +2272,9 @@ pub fn ptx_session_media(path: &str) -> Result<(Session, Vec<String>)> {
         };
         let format = if t.stereo || kind == K::Folder { openpt_model::ChannelFormat::Stereo } else { openpt_model::ChannelFormat::Mono };
         let id = s.add_track(kind, format, Some(&t.name));
+        if kind == K::Folder {
+            folder_ids.insert(t.name.as_str(), id);
+        }
         if let Some(bus) = t.input.as_ref().filter(|_| kind == K::Aux)
             && let Some(list) = carried.get(bus)
         {
@@ -2276,11 +2288,12 @@ pub fn ptx_session_media(path: &str) -> Result<(Session, Vec<String>)> {
             if t.pan.len() == tr.mixer.pan.len() {
                 tr.mixer.pan.clone_from(&t.pan);
             }
-            if kind == K::Aux
+            if matches!(kind, K::Aux | K::Folder)
                 && let Some(r) = input
             {
                 tr.mixer.input = r;
             }
+            tr.folder = t.folder.as_deref().and_then(|f| folder_ids.get(f).copied());
             if let Some(r) = output {
                 tr.mixer.output = r;
             }

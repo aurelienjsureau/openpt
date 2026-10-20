@@ -428,9 +428,10 @@ pub fn detect_transients(ch: &[Vec<f32>], sample_rate: f32, sensitivity: f32) ->
     for (m, &cur) in flux.iter().enumerate() {
         let span = |a: usize, b: usize| flux.get(m.saturating_sub(a)..(m + b + 1).min(frames)).unwrap_or(&[]);
         let peak = span(near, near).iter().copied().fold(0.0, f32::max);
-        let around = span(before, after);
-        let mean = around.iter().sum::<f32>() / around.len().max(1) as f32;
-        if cur <= 0.0 || cur < peak || cur < mean + delta || last.is_some_and(|l| m - l < gap) {
+        let mut around = span(before, after).to_vec();
+        around.sort_unstable_by(f32::total_cmp);
+        let floor = around.get(around.len() / 2).copied().unwrap_or(0.0);
+        if cur <= 0.0 || cur < peak || cur < floor + delta || last.is_some_and(|l| m - l < gap) {
             continue;
         }
         let (at, contrast) = attack_start(&ch, m * hop, n, sr);

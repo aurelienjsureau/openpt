@@ -185,6 +185,8 @@ pub struct EditState {
     pub quickpunch: bool,
     pub scrolling: String,
     pub solo_mode: String,
+    #[serde(default)]
+    pub afl_pfl_path: String,
     pub pre_fader_metering: bool,
     pub delay_compensation: bool,
     pub keyboard_focus: String,
@@ -196,6 +198,12 @@ pub struct EditState {
 }
 
 impl EditState {
+    pub fn solo_listen(&self) -> &str {
+        self.solo_mode.split('+').next().filter(|m| matches!(*m, "afl" | "pfl")).unwrap_or("sip")
+    }
+    pub fn solo_latch(&self) -> &str {
+        self.solo_mode.split('+').nth(1).filter(|m| matches!(*m, "xor" | "momentary")).unwrap_or("latch")
+    }
     pub fn flag(&self, id: &str) -> bool {
         self.flags.contains(id)
     }
@@ -254,6 +262,7 @@ impl Default for EditState {
             quickpunch: false,
             scrolling: "page".into(),
             solo_mode: "sip".into(),
+            afl_pfl_path: String::new(),
             pre_fader_metering: false,
             delay_compensation: true,
             keyboard_focus: "commands".into(),
@@ -276,6 +285,15 @@ impl Default for EditState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct SessionLink {
+    pub path: String,
+    pub tracks: Vec<String>,
+    #[serde(default)]
+    pub data: serde_json::Value,
+    pub modified: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Session {
     pub format_version: u32,
@@ -289,6 +307,8 @@ pub struct Session {
     pub key_signatures: Vec<(Samples, String)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ara_archives: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_sessions: Vec<SessionLink>,
     pub tracks: Vec<Track>,
     pub sources: Vec<Source>,
     #[serde(default)]
@@ -340,6 +360,7 @@ impl Session {
             tempo: TempoMap::default(),
             key_signatures: Vec::new(),
             ara_archives: Vec::new(),
+            linked_sessions: Vec::new(),
             tracks: Vec::new(),
             sources: Vec::new(),
             videos: Vec::new(),
