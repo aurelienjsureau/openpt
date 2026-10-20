@@ -36,6 +36,14 @@ pub fn read_text(path: impl AsRef<Path>) -> Result<String> {
     String::from_utf8(read_file(path)?).map_err(|err| EngineError::Io(format!("{}: {err}", path.display())))
 }
 
+pub fn modified_secs(path: impl AsRef<Path>) -> u64 {
+    let path = path.as_ref();
+    if crate::file_access::check_read(path).is_err() {
+        return 0;
+    }
+    std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs())
+}
+
 pub fn file_found(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
     crate::file_access::check_read(path).is_ok() && path.is_file()

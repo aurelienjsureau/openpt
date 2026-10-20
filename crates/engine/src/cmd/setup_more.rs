@@ -483,7 +483,7 @@ fn donor_session(path: &str) -> Result<Session> {
 }
 
 fn modified_secs(path: &str) -> u64 {
-    std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs())
+    crate::io::modified_secs(path)
 }
 
 fn session_data_tracks(_e: &mut Engine, p: &Value) -> Result<Value> {
