@@ -69,6 +69,7 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         openpt_ui_egui::fit_window_to_screen(ctx);
+        openpt_ui_egui::maximize_at_launch(ctx);
         let (inner, maximized) = ctx.input(|i| (i.viewport().inner_rect, i.viewport().maximized.unwrap_or(false)));
         self.0.ui.window_maximized = maximized;
         if let Some(r) = inner.filter(|_| !maximized) {
