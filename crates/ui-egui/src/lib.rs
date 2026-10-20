@@ -244,8 +244,7 @@ pub fn fit_window_to_screen(ctx: &egui::Context) {
 }
 
 pub fn maximize_at_launch(ctx: &egui::Context) {
-    let maximized = ctx.input(|i| i.viewport().maximized);
-    if ctx.cumulative_pass_nr() < 10 && maximized != Some(true) {
+    if (1..=3).contains(&ctx.cumulative_pass_nr()) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
     }
 }
