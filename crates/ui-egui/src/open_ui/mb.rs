@@ -80,10 +80,27 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         let cols = (g.width() / 2.0) as usize;
         st.smooth.update(&scope, &fa, cols, st.analyzer != 2, st.analyzer != 1);
         spectrum(&p, &fa, &sa, &st.smooth.pre, Color32::TRANSPARENT, Color32::from_rgba_unmultiplied(150, 150, 170, 90));
-        spectrum(&p, &fa, &sa, &st.smooth.post, Color32::from_rgba_unmultiplied(74, 47, 143, 100), Color32::from_rgba_unmultiplied(184, 164, 255, 110));
+        spectrum(
+            &p,
+            &fa,
+            &sa,
+            &st.smooth.post,
+            Color32::from_rgba_unmultiplied(74, 47, 143, 100),
+            Color32::from_rgba_unmultiplied(184, 164, 255, 110),
+        );
     }
     fa.grid(&p);
-    da.grid(&p, if range <= 6.0 { 1.0 } else if range <= 12.0 { 3.0 } else { 6.0 }, true);
+    da.grid(
+        &p,
+        if range <= 6.0 {
+            1.0
+        } else if range <= 12.0 {
+            3.0
+        } else {
+            6.0
+        },
+        true,
+    );
     let live: Vec<f32> = cx.scope.as_ref().map(|s| s.read(|d| d.bands[..BANDS].to_vec())).unwrap_or_else(|| vec![0.0; BANDS]);
     let cols = (g.width() / 3.0) as usize;
     let xs: Vec<f32> = (0..=cols).map(|i| g.min.x + g.width() * i as f32 / cols as f32).collect();
@@ -96,7 +113,11 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         let col = band_color(b);
         let sel = st.selected == Some(b);
         let (xl, xh) = (fa.x(s.lo).max(g.min.x), fa.x(s.hi).min(g.max.x));
-        p.rect_filled(Rect::from_x_y_ranges(xl..=xh, g.y_range()), 0.0, Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), if sel { 22 } else { 10 }));
+        p.rect_filled(
+            Rect::from_x_y_ranges(xl..=xh, g.y_range()),
+            0.0,
+            Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), if sel { 22 } else { 10 }),
+        );
         let gdb = if s.active { s.level + live[b] } else { 0.0 };
         let gl = 10f64.powf(gdb as f64 / 20.0);
         let ys: Vec<f32> = xs
@@ -160,7 +181,10 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
                 return Some((b, Hit::EdgeHi));
             }
         }
-        (0..BANDS).filter(|&b| used(cx, b)).find(|&b| at.x >= fa.x(cx.get(k(b, dsp::K_LO))) && at.x <= fa.x(cx.get(k(b, dsp::K_HI)))).map(|b| (b, Hit::Body))
+        (0..BANDS)
+            .filter(|&b| used(cx, b))
+            .find(|&b| at.x >= fa.x(cx.get(k(b, dsp::K_LO))) && at.x <= fa.x(cx.get(k(b, dsp::K_HI))))
+            .map(|b| (b, Hit::Body))
     };
     let hover = resp.hover_pos().and_then(|at| hit_test(cx, at, st.selected));
     match hover.map(|h| h.1) {
@@ -321,7 +345,8 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, st: &mut State, strip: Rect) {
                 cx.set(k(b, key), v as f32);
             }
         }
-        let flags: [(usize, &str, Color32); 3] = [(dsp::K_SOLO, "SOLO", Color32::from_rgb(222, 196, 52)), (dsp::K_BYP, "BYPASS", GR), (dsp::K_SC, "EXT KEY", ACCENT)];
+        let flags: [(usize, &str, Color32); 3] =
+            [(dsp::K_SOLO, "SOLO", Color32::from_rgb(222, 196, 52)), (dsp::K_BYP, "BYPASS", GR), (dsp::K_SC, "EXT KEY", ACCENT)];
         for (i, (key, label, lit)) in flags.into_iter().enumerate() {
             let on = cx.on(k(b, key));
             if button(ui, Rect::from_min_size(pos2(x, row2 + 4.0 + i as f32 * 24.0), vec2(100.0, 20.0)), label, on, lit).clicked() {
@@ -347,7 +372,13 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, st: &mut State, strip: Rect) {
         }
     } else {
         p.text(pos2(x, row + 30.0), Align2::LEFT_CENTER, "Double-click the display to add a band.", regular(12.0), DIM);
-        p.text(pos2(x, row + 50.0), Align2::LEFT_CENTER, "Drag the dot (Alt: freely), the edges and the dashed range line; wheel to widen.", regular(11.0), DIM);
+        p.text(
+            pos2(x, row + 50.0),
+            Align2::LEFT_CENTER,
+            "Drag the dot (Alt: freely), the edges and the dashed range line; wheel to widen.",
+            regular(11.0),
+            DIM,
+        );
     }
     let gx = strip.max.x - 8.0 - 2.0 * cell.x - 128.0;
     knob(ui, cx, Rect::from_min_size(pos2(gx + 128.0, row), cell), "mix", "Mix", ACCENT);

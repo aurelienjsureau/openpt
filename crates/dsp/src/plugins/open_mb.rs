@@ -1290,11 +1290,7 @@ impl MbEngine {
                 let gcv = r.gc[t.wrapping_sub(delay) & mask];
                 self.gc_now[b] = gcv;
                 let g = 10f64.powf(act * (s.level as f64 + gcv as f64) / 20.0);
-                let k = if any_solo {
-                    if s.solo { g } else { 0.0 }
-                } else {
-                    g - 1.0
-                };
+                let k = if any_solo { if s.solo { g } else { 0.0 } } else { g - 1.0 };
                 if k == 0.0 {
                     continue;
                 }

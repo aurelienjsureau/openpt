@@ -19,8 +19,8 @@ pub mod palette;
 pub mod panels;
 pub mod peripherals;
 pub mod plugin_ui;
-pub mod prof;
 pub mod preferences;
+pub mod prof;
 mod recent;
 pub mod recovery;
 pub mod sampler_window;
@@ -74,7 +74,7 @@ pub struct UiState {
     pub show_midi_editor: bool,
     pub show_universe: bool,
     pub narrow_mix: bool,
-    pub mix_fader_h: f32,
+    pub mix_fader_frac: f32,
     pub mix_views: Vec<String>,
     pub edit_views: Vec<String>,
     pub track_tint: f32,
@@ -159,7 +159,7 @@ impl Default for UiState {
             show_midi_editor: false,
             show_universe: false,
             narrow_mix: false,
-            mix_fader_h: crate::mix_window::DEFAULT_FADER_H,
+            mix_fader_frac: crate::mix_window::DEFAULT_FADER_FRAC,
             mix_views: vec!["inserts_ae".into(), "sends_ae".into(), "io".into(), "color".into()],
             edit_views: vec!["inserts_ae".into(), "sends_ae".into(), "io".into(), "color".into()],
             track_tint: 0.0,
@@ -554,8 +554,9 @@ impl SoundApp {
         if (freezing || matches!(id, "track.commit" | "track.bounce")) && self.player.is_some() {
             let tracks = openpt_engine::cmd::tracks_param(&self.engine, id, &params).map_err(|e| e.to_string())?;
             let s = self.engine.session();
-            let (live, offline): (Vec<TrackId>, Vec<TrackId>) =
-                tracks.into_iter().partition(|t| bounce::commits_live(s, *t) && !(freezing && s.track(*t).is_some_and(openpt_model::Track::is_frozen)));
+            let (live, offline): (Vec<TrackId>, Vec<TrackId>) = tracks
+                .into_iter()
+                .partition(|t| bounce::commits_live(s, *t) && !(freezing && s.track(*t).is_some_and(openpt_model::Track::is_frozen)));
             if !live.is_empty() {
                 let out = json!({"live": live.iter().map(|t| t.0).collect::<Vec<_>>(), "then": offline.iter().map(|t| t.0).collect::<Vec<_>>()});
                 bounce::start_live_commit(self, live, id, offline);
@@ -1595,7 +1596,9 @@ impl SoundApp {
         if self.recorder.is_none()
             && !self.recorder_failed
             && self.engine.session().tracks.iter().any(|t| {
-                t.mixer.input_monitor || t.mixer.record_arm || (t.kind == openpt_model::TrackKind::Aux && !t.inactive && matches!(t.mixer.input, openpt_model::Route::Hardware(_)))
+                t.mixer.input_monitor
+                    || t.mixer.record_arm
+                    || (t.kind == openpt_model::TrackKind::Aux && !t.inactive && matches!(t.mixer.input, openpt_model::Route::Hardware(_)))
             })
         {
             self.ensure_input();

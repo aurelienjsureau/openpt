@@ -1,5 +1,5 @@
-pub use openpt_vst3_host::keyhook::{Held, PadKey};
 use openpt_vst3_host::keyhook::{self, KeyEvent, vk};
+pub use openpt_vst3_host::keyhook::{Held, PadKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEvent {

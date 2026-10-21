@@ -189,7 +189,15 @@ impl Bq {
         let alpha = s / (2.0 * std::f64::consts::FRAC_1_SQRT_2);
         let a0 = 1.0 + alpha;
         let (b0, b1) = if high { ((1.0 + c) * 0.5, -(1.0 + c)) } else { ((1.0 - c) * 0.5, 1.0 - c) };
-        Bq { b0: (b0 / a0) as f32, b1: (b1 / a0) as f32, b2: (b0 / a0) as f32, a1: (-2.0 * c / a0) as f32, a2: ((1.0 - alpha) / a0) as f32, z1: 0.0, z2: 0.0 }
+        Bq {
+            b0: (b0 / a0) as f32,
+            b1: (b1 / a0) as f32,
+            b2: (b0 / a0) as f32,
+            a1: (-2.0 * c / a0) as f32,
+            a2: ((1.0 - alpha) / a0) as f32,
+            z1: 0.0,
+            z2: 0.0,
+        }
     }
     #[inline]
     fn run(&mut self, x: f32) -> f32 {

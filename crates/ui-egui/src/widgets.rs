@@ -102,7 +102,8 @@ pub fn icon_button(ui: &mut Ui, size: egui::Vec2, icon: &str, on: bool, tip: &st
 }
 
 pub fn pressed(ui: &Ui, resp: &Response) -> bool {
-    (resp.hovered() && ui.is_enabled() && ui.input(|i| i.pointer.primary_pressed())) || (resp.clicked() && !resp.clicked_by(egui::PointerButton::Primary))
+    (resp.hovered() && ui.is_enabled() && ui.input(|i| i.pointer.primary_pressed()))
+        || (resp.clicked() && !resp.clicked_by(egui::PointerButton::Primary))
 }
 
 pub fn text_toggle(ui: &mut Ui, size: egui::Vec2, text: &str, on: bool, on_color: Color32, tip: &str) -> Response {

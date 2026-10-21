@@ -170,10 +170,8 @@ pub struct LiveCommit {
 }
 
 pub fn commits_live(s: &openpt_model::Session, t: openpt_model::TrackId) -> bool {
-    openpt_mix::feeding_tracks(s, t)
-        .iter()
-        .filter_map(|x| s.track(*x))
-        .any(|x| x.instrument.as_ref().is_some_and(|i| i.multi_out && openpt_mix::is_third_party(&i.plugin)))
+    let multi_out = |x: &openpt_model::Track| x.instrument.as_ref().is_some_and(|i| i.multi_out && openpt_mix::is_third_party(&i.plugin));
+    s.track(t).is_some_and(multi_out) || openpt_mix::feeding_tracks(s, t).iter().filter_map(|x| s.track(*x)).any(multi_out)
 }
 
 pub fn start_live_commit(app: &mut SoundApp, tracks: Vec<openpt_model::TrackId>, cmd: &str, then: Vec<openpt_model::TrackId>) {
@@ -239,7 +237,11 @@ pub fn step_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
         .into_iter()
         .map(|(t, chans, lag)| (t, chans.into_iter().map(|c| c.get(lag..).map_or_else(Vec::new, |c| c[..len.min(c.len())].to_vec())).collect()))
         .collect();
-    let mut n = if freeze { openpt_engine::io::freeze_captured(&mut app.engine, captured) } else { openpt_engine::io::commit_captured(&mut app.engine, captured).len() };
+    let mut n = if freeze {
+        openpt_engine::io::freeze_captured(&mut app.engine, captured)
+    } else {
+        openpt_engine::io::commit_captured(&mut app.engine, captured).len()
+    };
     if !then.is_empty() {
         let ids: Vec<u64> = then.iter().map(|t| t.0).collect();
         match app.engine.execute(&cmd, &serde_json::json!({"tracks": ids, "value": true})) {
@@ -277,5 +279,29 @@ pub fn show_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
             p.return_engine(eng);
         }
         app.ui.status = "Commit cancelled".into();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use openpt_model::{ChannelFormat, Insert, Route, Session, TrackKind};
+
+    #[test]
+    fn a_multi_output_instrument_commits_live_with_the_auxes_it_feeds() {
+        let mut s = Session::default();
+        let snare = s.add_bus("Snare", ChannelFormat::Stereo);
+        let kick = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Kick"));
+        let aux = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Snare"));
+        let other = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Gtr"));
+        let mut inst = Insert::new("vst3:0123456789ABCDEF0123456789ABCDEF");
+        inst.multi_out = true;
+        inst.outputs = vec![snare];
+        s.track_mut(kick).unwrap().instrument = Some(inst);
+        s.track_mut(aux).unwrap().mixer.input = Route::Bus(snare);
+        assert!(super::commits_live(&s, kick), "the instrument's own track (its main output)");
+        assert!(super::commits_live(&s, aux));
+        assert!(!super::commits_live(&s, other));
+        s.track_mut(kick).unwrap().instrument.as_mut().unwrap().multi_out = false;
+        assert!(!super::commits_live(&s, kick), "a stereo instrument commits offline as before");
     }
 }

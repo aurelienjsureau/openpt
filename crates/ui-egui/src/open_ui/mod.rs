@@ -1,9 +1,11 @@
 pub mod comp;
 pub mod drt;
+pub mod echo;
 pub mod eq;
 pub mod gate;
 pub mod mb;
 pub mod sat;
+pub mod verb;
 
 use crate::theme::{bold, regular};
 use egui::{Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -46,7 +48,7 @@ pub fn band_color(b: usize) -> Color32 {
 }
 
 pub fn handles(id: &str) -> bool {
-    matches!(id, "open_eq" | "open_mb" | "open_comp" | "open_g" | "open_sat" | "open_drt")
+    matches!(id, "open_eq" | "open_mb" | "open_comp" | "open_g" | "open_sat" | "open_drt" | "open_r" | "open_echo")
 }
 
 pub fn width(id: &str) -> f32 {
@@ -57,6 +59,8 @@ pub fn width(id: &str) -> f32 {
         "open_g" => gate::W,
         "open_sat" => sat::W,
         "open_drt" => drt::W,
+        "open_r" => verb::W,
+        "open_echo" => echo::W,
         _ => 400.0,
     }
 }
@@ -90,7 +94,14 @@ impl Ctx<'_> {
     }
 }
 
-pub fn panel(ui: &mut Ui, info: &'static PluginInfo, params: &BTreeMap<String, f32>, scope: Option<Arc<Scope>>, salt: Id, set: &mut dyn FnMut(&str, f32)) -> bool {
+pub fn panel(
+    ui: &mut Ui,
+    info: &'static PluginInfo,
+    params: &BTreeMap<String, f32>,
+    scope: Option<Arc<Scope>>,
+    salt: Id,
+    set: &mut dyn FnMut(&str, f32),
+) -> bool {
     if !handles(info.id) {
         return false;
     }
@@ -102,6 +113,8 @@ pub fn panel(ui: &mut Ui, info: &'static PluginInfo, params: &BTreeMap<String, f
         "open_g" => gate::show(ui, &mut cx),
         "open_sat" => sat::show(ui, &mut cx),
         "open_drt" => drt::show(ui, &mut cx),
+        "open_r" => verb::show(ui, &mut cx),
+        "open_echo" => echo::show(ui, &mut cx),
         _ => {}
     }
     if cx.scope.is_some() {
@@ -166,7 +179,13 @@ pub fn caption(p: &Painter, at: Pos2, text: &str) {
 pub fn button(ui: &mut Ui, r: Rect, text: &str, on: bool, lit: Color32) -> Response {
     let resp = ui.interact(r, ui.id().with(("open-btn", r.min.x as i32, r.min.y as i32)), Sense::click());
     let p = &ui.painter().clone();
-    let fill = if on { lit } else if resp.hovered() { PLATE_HI } else { OFF };
+    let fill = if on {
+        lit
+    } else if resp.hovered() {
+        PLATE_HI
+    } else {
+        OFF
+    };
     p.rect(r, 3.0, fill, Stroke::new(1.0, EDGE), StrokeKind::Inside);
     let tc = if on { Color32::from_rgb(16, 14, 22) } else { TEXT };
     p.text(r.center(), Align2::CENTER_CENTER, text, bold(10.0), tc);
@@ -281,7 +300,18 @@ impl FreqAxis {
                 p.vline(x, self.r.y_range(), Stroke::new(1.0, if k == 1 { GRID_STRONG } else { GRID }));
             }
         }
-        for (f, t) in [(20.0, "20"), (50.0, "50"), (100.0, "100"), (200.0, "200"), (500.0, "500"), (1000.0, "1k"), (2000.0, "2k"), (5000.0, "5k"), (10_000.0, "10k"), (20_000.0, "20k")] {
+        for (f, t) in [
+            (20.0, "20"),
+            (50.0, "50"),
+            (100.0, "100"),
+            (200.0, "200"),
+            (500.0, "500"),
+            (1000.0, "1k"),
+            (2000.0, "2k"),
+            (5000.0, "5k"),
+            (10_000.0, "10k"),
+            (20_000.0, "20k"),
+        ] {
             if f >= self.lo && f <= self.hi {
                 p.text(pos2(self.x(f) + 3.0, self.r.max.y - 3.0), Align2::LEFT_BOTTOM, t, regular(9.0), DIM);
             }

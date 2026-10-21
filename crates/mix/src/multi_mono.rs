@@ -166,7 +166,13 @@ impl PluginEditor for MultiEditor {
     }
 
     fn idle(&mut self) -> Vec<(String, f32)> {
-        self.first.idle()
+        let edits = self.first.idle();
+        if let Some(state) = self.first.take_reload() {
+            self.others.iter_mut().for_each(|e| {
+                e.load_state(&state);
+            });
+        }
+        edits
     }
 
     fn set_param(&mut self, id: &str, value: f32) {
@@ -221,6 +227,41 @@ mod tests {
 
     fn peak(c: &[f32]) -> f32 {
         c.iter().skip(2_400).fold(0.0, |m, x| m.max(x.abs()))
+    }
+
+    struct FakeEditor {
+        reload: Option<Vec<u8>>,
+        loaded: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    }
+
+    impl PluginEditor for FakeEditor {
+        fn open(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn close(&mut self) {}
+        fn is_open(&self) -> bool {
+            true
+        }
+        fn idle(&mut self) -> Vec<(String, f32)> {
+            Vec::new()
+        }
+        fn load_state(&mut self, data: &[u8]) -> bool {
+            self.loaded.lock().unwrap().push(data.to_vec());
+            true
+        }
+        fn take_reload(&mut self) -> Option<Vec<u8>> {
+            self.reload.take()
+        }
+    }
+
+    #[test]
+    fn a_preset_from_the_editor_reaches_the_other_instances() {
+        let loaded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let editor = |reload: Option<&[u8]>| -> Box<dyn PluginEditor> { Box::new(FakeEditor { reload: reload.map(<[u8]>::to_vec), loaded: loaded.clone() }) };
+        let mut multi = MultiEditor { first: editor(Some(b"preset")), others: vec![editor(None)] };
+        multi.idle();
+        multi.idle();
+        assert_eq!(*loaded.lock().unwrap(), vec![b"preset".to_vec()], "the right instance takes it, once");
     }
 
     #[test]

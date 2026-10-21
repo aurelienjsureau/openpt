@@ -3,13 +3,15 @@ pub mod dynamics;
 pub mod eq;
 pub mod harmonic;
 pub mod linmb_table;
+pub mod modulation;
 pub mod open_comp;
 pub mod open_drt;
+pub mod open_echo;
 pub mod open_eq;
 pub mod open_g;
 pub mod open_mb;
+pub mod open_r;
 pub mod open_sat;
-pub mod modulation;
 pub mod pitch;
 pub mod reverb;
 pub mod sampler;
@@ -26,6 +28,8 @@ pub(crate) static REGISTRY: &[&PluginInfo] = &[
     &open_mb::OPEN_MB_INFO,
     &open_sat::OPEN_SAT_INFO,
     &open_drt::OPEN_DRT_INFO,
+    &open_r::OPEN_R_INFO,
+    &open_echo::OPEN_ECHO_INFO,
     &eq::EQ1_INFO,
     &eq::EQ7_INFO,
     &dynamics::COMP_INFO,
@@ -111,6 +115,8 @@ pub(crate) fn instantiate(id: &str) -> Option<Box<dyn Plugin>> {
         "open_comp" => Box::new(open_comp::OpenComp::new()),
         "open_drt" => Box::new(open_drt::OpenDrt::new()),
         "open_g" => Box::new(open_g::OpenG::new()),
+        "open_r" => Box::new(open_r::OpenR::new()),
+        "open_echo" => Box::new(open_echo::OpenEcho::new()),
         _ => return None,
     })
 }

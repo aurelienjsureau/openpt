@@ -88,7 +88,8 @@ fn dispatch(app: &mut SoundApp, key: Key, mods: Modifiers, mac: bool) {
             return;
         }
         let _ = app.run(id, json!({}));
-    } else if let Some(c) = crate::menus::UI_COMMANDS.iter().find(|c| c.3.and_then(parse).is_some_and(|(m, k)| k == key && mods_match(m, mods, mac))) {
+    } else if let Some(c) = crate::menus::UI_COMMANDS.iter().find(|c| c.3.and_then(parse).is_some_and(|(m, k)| k == key && mods_match(m, mods, mac)))
+    {
         let _ = app.run(c.0, json!({}));
     }
 }
@@ -110,15 +111,35 @@ pub struct Pad {
 
 fn shuttle_speed(held: &[u8]) -> Option<f32> {
     let has = |d| held.contains(&d);
-    let way = |f: f32| if has(6) { Some(f) } else if has(4) { Some(-f) } else { None };
+    let way = |f: f32| {
+        if has(6) {
+            Some(f)
+        } else if has(4) {
+            Some(-f)
+        } else {
+            None
+        }
+    };
     if has(5) {
         return way(0.5);
     }
     if has(8) {
-        return if has(9) { Some(2.0) } else if has(7) { Some(-2.0) } else { None };
+        return if has(9) {
+            Some(2.0)
+        } else if has(7) {
+            Some(-2.0)
+        } else {
+            None
+        };
     }
     if has(2) {
-        return if has(3) { Some(1.0 / 16.0) } else if has(1) { Some(-1.0 / 16.0) } else { None };
+        return if has(3) {
+            Some(1.0 / 16.0)
+        } else if has(1) {
+            Some(-1.0 / 16.0)
+        } else {
+            None
+        };
     }
     held.last().and_then(|d| match d {
         6 => Some(1.0),
@@ -383,7 +404,9 @@ fn fixed(app: &mut SoundApp, key: Key, m: Modifiers, mac: bool) -> bool {
             let _ = app.run("view.waveform_zoom", json!({"factor": factor}));
             true
         }
-        Key::Num0 | Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5 if mods_match(Modifiers::COMMAND | Modifiers::ALT | Modifiers::CTRL, m, mac) => {
+        Key::Num0 | Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5
+            if mods_match(Modifiers::COMMAND | Modifiers::ALT | Modifiers::CTRL, m, mac) =>
+        {
             let _ = app.run("clip.rating", json!({"rating": digit(key)}));
             true
         }

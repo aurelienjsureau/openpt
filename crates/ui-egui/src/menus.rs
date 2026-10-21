@@ -123,6 +123,8 @@ pub const AUDIOSUITE: &[(&str, &str)] = &[
     ("AudioSuite > Pitch Shift > Pitch Shift Legacy", "pitch_shift"),
     ("AudioSuite > Pitch Shift > Time Shift", "time_stretch"),
     ("AudioSuite > Pitch Shift > Vari-Fi", "varispeed"),
+    ("AudioSuite > Reverb > OpenR", "open_r"),
+    ("AudioSuite > Delay > OpenEcho", "open_echo"),
     ("AudioSuite > Harmonic > OpenSat", "open_sat"),
     ("AudioSuite > Other > DC Offset Removal", "dc_offset_removal"),
     ("AudioSuite > Other > Duplicate", "duplicate"),

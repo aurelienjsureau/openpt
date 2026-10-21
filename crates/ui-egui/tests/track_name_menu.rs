@@ -30,7 +30,7 @@ fn right_click_on_a_track_name_opens_the_track_menu() {
 
     h.key_press(egui::Key::Escape);
     h.state_mut().ui.window = MainWindow::Mix;
-    h.state_mut().ui.mix_fader_h = 2000.0;
+    h.state_mut().ui.mix_fader_frac = 1.0;
     h.run_steps(4);
     assert!(h.query_by_label("Make Inactive").is_none());
     let strip = h.get_by_label("Record enable · Ctrl-click: Record Safe").rect();

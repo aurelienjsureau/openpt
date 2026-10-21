@@ -57,10 +57,27 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         let cols = (g.width() / 2.0) as usize;
         st.smooth.update(&scope, &fa, cols, st.analyzer != 2, st.analyzer != 1);
         spectrum(&p, &fa, &sa, &st.smooth.pre, Color32::TRANSPARENT, Color32::from_rgba_unmultiplied(150, 150, 170, 90));
-        spectrum(&p, &fa, &sa, &st.smooth.post, Color32::from_rgba_unmultiplied(74, 47, 143, 110), Color32::from_rgba_unmultiplied(184, 164, 255, 120));
+        spectrum(
+            &p,
+            &fa,
+            &sa,
+            &st.smooth.post,
+            Color32::from_rgba_unmultiplied(74, 47, 143, 110),
+            Color32::from_rgba_unmultiplied(184, 164, 255, 120),
+        );
     }
     fa.grid(&p);
-    da.grid(&p, if range <= 6.0 { 1.0 } else if range <= 12.0 { 3.0 } else { 6.0 }, true);
+    da.grid(
+        &p,
+        if range <= 6.0 {
+            1.0
+        } else if range <= 12.0 {
+            3.0
+        } else {
+            6.0
+        },
+        true,
+    );
     let bs = bands(cx);
     let live: Vec<f32> = cx.scope.as_ref().map(|s| s.read(|d| d.bands[..BANDS].to_vec())).unwrap_or_else(|| vec![0.0; BANDS]);
     let cols = (g.width() / 3.0) as usize;
@@ -114,11 +131,22 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
     p.add(egui::Shape::line(pts, Stroke::new(2.0, Color32::from_rgb(236, 232, 255))));
     let node = |b: usize| -> Pos2 {
         let s = &bs[b];
-        let y = if dsp::has_gain(s.shape) { da.y(if s.shape == dsp::TILT_SHELF || s.shape == dsp::FLAT_TILT { s.gain * 0.5 } else { s.gain }) } else { da.y(0.0) };
+        let y = if dsp::has_gain(s.shape) {
+            da.y(if s.shape == dsp::TILT_SHELF || s.shape == dsp::FLAT_TILT { s.gain * 0.5 } else { s.gain })
+        } else {
+            da.y(0.0)
+        };
         pos2(fa.x(s.freq), y.clamp(g.min.y + 6.0, g.max.y - 6.0))
     };
     let hover = resp.hover_pos();
-    let hit = |cx: &Ctx, at: Pos2| (0..BANDS).filter(|&b| used(cx, b)).map(|b| (b, node(b).distance(at))).filter(|(_, d)| *d < 16.0).min_by(|a, c| a.1.total_cmp(&c.1)).map(|(b, _)| b);
+    let hit = |cx: &Ctx, at: Pos2| {
+        (0..BANDS)
+            .filter(|&b| used(cx, b))
+            .map(|b| (b, node(b).distance(at)))
+            .filter(|(_, d)| *d < 16.0)
+            .min_by(|a, c| a.1.total_cmp(&c.1))
+            .map(|(b, _)| b)
+    };
     let hovered = hover.and_then(|at| hit(cx, at));
     for b in (0..BANDS).filter(|&b| used(cx, b)) {
         let c = node(b);
@@ -280,7 +308,10 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, st: &mut State, strip: Rect) {
             if button(ui, Rect::from_min_size(pos2(x, row + 14.0), vec2(64.0, 20.0)), "DYNAMIC", dynamic, READOUT).clicked() {
                 cx.set(k(b, dsp::K_DYN), if dynamic { 0.0 } else { 1.0 });
             }
-            if button(ui, Rect::from_min_size(pos2(x, row + 40.0), vec2(64.0, 20.0)), "EXT KEY", s.sc, ACCENT).on_hover_text("The band's detector listens to the key input").clicked() {
+            if button(ui, Rect::from_min_size(pos2(x, row + 40.0), vec2(64.0, 20.0)), "EXT KEY", s.sc, ACCENT)
+                .on_hover_text("The band's detector listens to the key input")
+                .clicked()
+            {
                 cx.set(k(b, dsp::K_SC), if s.sc { 0.0 } else { 1.0 });
             }
             x += 72.0;

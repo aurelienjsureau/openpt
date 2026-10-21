@@ -1048,7 +1048,12 @@ const TRACK_DATA_LABELS: [&str; openpt_engine::cmd::TRACK_DATA.len()] =
 fn import_session_data_ui(ui: &mut egui::Ui, d: &mut ImportSessionData, s: &openpt_model::Session, enter: bool) -> Option<(String, Value)> {
     ui.set_min_width(640.0);
     ui.label(egui::RichText::new(format!("Source: {}", if d.name.is_empty() { &d.path } else { &d.name })).strong());
-    let here: Vec<String> = s.tracks.iter().filter(|t| !matches!(t.kind, openpt_model::TrackKind::Master | openpt_model::TrackKind::Video)).map(|t| t.name.clone()).collect();
+    let here: Vec<String> = s
+        .tracks
+        .iter()
+        .filter(|t| !matches!(t.kind, openpt_model::TrackKind::Master | openpt_model::TrackKind::Video))
+        .map(|t| t.name.clone())
+        .collect();
     ui.horizontal(|ui| {
         if ui.button("All").clicked() {
             d.rows.iter_mut().for_each(|r| r.on = true);
@@ -1079,15 +1084,15 @@ fn import_session_data_ui(ui: &mut egui::Ui, d: &mut ImportSessionData, s: &open
                 crate::widgets::checkbox(ui, &mut r.on, label);
                 ui.label(if r.kind == "folder" { "folder".to_string() } else { r.clips.to_string() });
                 ui.add_enabled_ui(r.on, |ui| {
-                    egui::ComboBox::from_id_salt(("isd_dest", i)).width(200.0).selected_text(if r.dest.is_empty() { "New Track" } else { r.dest.as_str() }).show_ui(
-                        ui,
-                        |ui| {
+                    egui::ComboBox::from_id_salt(("isd_dest", i))
+                        .width(200.0)
+                        .selected_text(if r.dest.is_empty() { "New Track" } else { r.dest.as_str() })
+                        .show_ui(ui, |ui| {
                             ui.selectable_value(&mut r.dest, String::new(), "New Track");
                             for n in &here {
                                 ui.selectable_value(&mut r.dest, n.clone(), n.as_str());
                             }
-                        },
-                    );
+                        });
                 });
                 ui.end_row();
             }
@@ -1118,7 +1123,8 @@ fn import_session_data_ui(ui: &mut egui::Ui, d: &mut ImportSessionData, s: &open
     }
     let tracks: Vec<&str> = picked.iter().map(|r| r.name.as_str()).collect();
     let dest: serde_json::Map<String, Value> = picked.iter().filter(|r| !r.dest.is_empty()).map(|r| (r.name.clone(), json!(r.dest))).collect();
-    let data: serde_json::Map<String, Value> = openpt_engine::cmd::TRACK_DATA.iter().zip(d.data).map(|(k, on)| ((*k).to_string(), json!(on))).collect();
+    let data: serde_json::Map<String, Value> =
+        openpt_engine::cmd::TRACK_DATA.iter().zip(d.data).map(|(k, on)| ((*k).to_string(), json!(on))).collect();
     Some((
         "file.import_session_data".into(),
         json!({"path": d.path, "tracks": tracks, "dest": dest, "data": data, "markers": d.markers, "tempo": d.tempo, "link": d.link}),

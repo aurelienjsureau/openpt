@@ -558,6 +558,13 @@ impl PluginEditor for Vst3Editor {
         self.link.load_state(data)
     }
 
+    fn take_reload(&mut self) -> Option<Vec<u8>> {
+        if !self.host.values_changed.swap(false, Ordering::Relaxed) {
+            return None;
+        }
+        self.link.save_state()
+    }
+
     fn output_buses(&mut self) -> Vec<(String, u32)> {
         self.link.output_buses()
     }

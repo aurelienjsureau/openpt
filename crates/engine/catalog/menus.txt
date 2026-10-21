@@ -380,6 +380,8 @@ AudioSuite > Pitch Shift > Pitch II
 AudioSuite > Pitch Shift > Pitch Shift Legacy
 AudioSuite > Pitch Shift > Time Shift
 AudioSuite > Pitch Shift > Vari-Fi
+AudioSuite > Reverb > OpenR
+AudioSuite > Delay > OpenEcho
 AudioSuite > Harmonic > OpenSat
 AudioSuite > Other > DC Offset Removal
 AudioSuite > Other > Duplicate

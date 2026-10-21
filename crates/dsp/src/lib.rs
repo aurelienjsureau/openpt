@@ -246,6 +246,9 @@ pub trait PluginEditor: Send {
     fn load_state(&mut self, _data: &[u8]) -> bool {
         false
     }
+    fn take_reload(&mut self) -> Option<Vec<u8>> {
+        None
+    }
     fn output_buses(&mut self) -> Vec<(String, u32)> {
         Vec::new()
     }

@@ -43,7 +43,8 @@ fn panel_header(ui: &mut Ui, title: &str) -> Rect {
 }
 
 fn header_tools(ui: &mut Ui, head: Rect, add: impl FnOnce(&mut Ui)) {
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(head.shrink2(vec2(4.0, 3.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
+    let mut child =
+        ui.new_child(egui::UiBuilder::new().max_rect(head.shrink2(vec2(4.0, 3.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
     add(&mut child);
 }
 
@@ -81,7 +82,17 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
             .iter()
             .filter_map(|x| {
                 let (depth, open) = chain(x);
-                open.then(|| (x.id.0, x.name.clone(), !x.hidden, x.color, s.edit.selected_tracks.contains(&x.id), depth, x.is_folder().then_some(x.folder_open)))
+                open.then(|| {
+                    (
+                        x.id.0,
+                        x.name.clone(),
+                        !x.hidden,
+                        x.color,
+                        s.edit.selected_tracks.contains(&x.id),
+                        depth,
+                        x.is_folder().then_some(x.folder_open),
+                    )
+                })
             })
             .collect()
     };
@@ -104,7 +115,11 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
             if let Some(open) = folder {
                 let tri = Rect::from_center_size(pos2(r.min.x + 22.0 + ind, r.center().y), vec2(10.0, 10.0));
                 let c = tri.center();
-                let pts = if open { vec![c + vec2(-4.0, -2.5), c + vec2(4.0, -2.5), c + vec2(0.0, 3.0)] } else { vec![c + vec2(-2.5, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.5, 4.0)] };
+                let pts = if open {
+                    vec![c + vec2(-4.0, -2.5), c + vec2(4.0, -2.5), c + vec2(0.0, 3.0)]
+                } else {
+                    vec![c + vec2(-2.5, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.5, 4.0)]
+                };
                 ui.painter().add(egui::Shape::convex_polygon(pts, t.text_dim, Stroke::NONE));
                 if ui.interact(tri.expand(2.0), ui.id().with(("folder-open", id)), Sense::click()).clicked() {
                     let _ = app.run("track.folder_toggle", json!({"track": id}));
@@ -112,7 +127,13 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
             }
             let ind = ind + if folder.is_some() { 12.0 } else { 0.0 };
             ui.painter().rect_filled(Rect::from_min_size(pos2(r.min.x + 20.0 + ind, r.min.y + 3.0), vec2(4.0, 11.0)), 0.0, rgb(color));
-            ui.painter().text(pos2(r.min.x + 30.0 + ind, r.center().y), Align2::LEFT_CENTER, &name, regular(11.5), if shown { t.text } else { t.text_dim });
+            ui.painter().text(
+                pos2(r.min.x + 30.0 + ind, r.center().y),
+                Align2::LEFT_CENTER,
+                &name,
+                regular(11.5),
+                if shown { t.text } else { t.text_dim },
+            );
             if resp.clicked() {
                 crate::edit_window::click_track(app, openpt_model::TrackId(id), ui.input(|i| i.modifiers), |_, _| true);
                 app.edit_layout.reveal(openpt_model::TrackId(id));

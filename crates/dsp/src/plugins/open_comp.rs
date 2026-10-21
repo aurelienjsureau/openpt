@@ -101,7 +101,15 @@ struct StyleTraits {
 }
 
 fn traits(style: usize) -> StyleTraits {
-    let base = StyleTraits { rms_ms: 0.0, feedback: false, min_knee: 0.0, program_release: false, linear_release: false, soft_attack: false, ratio_boost: 1.0 };
+    let base = StyleTraits {
+        rms_ms: 0.0,
+        feedback: false,
+        min_knee: 0.0,
+        program_release: false,
+        linear_release: false,
+        soft_attack: false,
+        ratio_boost: 1.0,
+    };
     match style {
         CLASSIC => StyleTraits { feedback: true, rms_ms: 1.0, ..base },
         OPTO => StyleTraits { feedback: true, rms_ms: 5.0, min_knee: 12.0, program_release: true, ..base },

@@ -204,7 +204,15 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect) {
     let bx = x + 6.0;
     for (i, (id, label)) in [("auto_release", "AUTO REL"), ("auto_gain", "AUTO GAIN"), ("audition", "AUDITION")].into_iter().enumerate() {
         let on = cx.on(id);
-        if button(ui, Rect::from_min_size(pos2(bx, row + 4.0 + i as f32 * 26.0), vec2(74.0, 22.0)), label, on, if id == "audition" { Color32::from_rgb(222, 196, 52) } else { READOUT }).clicked() {
+        if button(
+            ui,
+            Rect::from_min_size(pos2(bx, row + 4.0 + i as f32 * 26.0), vec2(74.0, 22.0)),
+            label,
+            on,
+            if id == "audition" { Color32::from_rgb(222, 196, 52) } else { READOUT },
+        )
+        .clicked()
+        {
             cx.set(id, if on { 0.0 } else { 1.0 });
         }
     }

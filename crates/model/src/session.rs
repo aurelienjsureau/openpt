@@ -415,6 +415,18 @@ impl Session {
     pub fn bus_by_name(&self, name: &str) -> Option<&Bus> {
         self.busses.iter().find(|b| b.name.eq_ignore_ascii_case(name))
     }
+    pub fn busses_in_track_order(&self) -> Vec<&Bus> {
+        let on = |r: &crate::Route, id: BusId| matches!(r, crate::Route::Bus(b) if *b == id);
+        let rank = |bus: &Bus| {
+            let listener = self.tracks.iter().position(|t| on(&t.mixer.input, bus.id));
+            let source =
+                || self.tracks.iter().position(|t| on(&t.mixer.output, bus.id) || t.mixer.sends.iter().flatten().any(|s| on(&s.target, bus.id)));
+            listener.or_else(source).unwrap_or(usize::MAX)
+        };
+        let mut v: Vec<&Bus> = self.busses.iter().collect();
+        v.sort_by_cached_key(|b| rank(b));
+        v
+    }
     pub fn group(&self, id: GroupId) -> Option<&Group> {
         self.groups.iter().find(|g| g.id == id)
     }

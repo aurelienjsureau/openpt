@@ -1904,7 +1904,9 @@ pub(crate) fn track_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     }
     if kind.has_playlist() {
         ui.menu_button("Playlists", |ui| {
-            for (label, cmd) in [("New...", "track.playlist_new"), ("Duplicate...", "track.playlist_duplicate"), ("Delete Unused...", "track.playlist_delete_unused")] {
+            for (label, cmd) in
+                [("New...", "track.playlist_new"), ("Duplicate...", "track.playlist_duplicate"), ("Delete Unused...", "track.playlist_delete_unused")]
+            {
                 if ui.button(label).clicked() {
                     let _ = app.run(cmd, json!({"track": tid}));
                     ui.close();
@@ -2124,7 +2126,13 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
         painter.rect_filled(nb, CornerRadius { nw: 0, ne: 0, sw: 2, se: 2 }, strip);
         painter.hline(nb.x_range(), nb.min.y + 0.5, Stroke::new(1.0, Color32::from_black_alpha(90)));
         let ink = if crate::widgets::luma(strip) > 0.5 { Color32::from_rgb(14, 14, 14) } else { Color32::from_rgb(214, 214, 214) };
-        painter.with_clip_rect(nb.intersect(lane)).text(pos2(nb.min.x.max(lane.min.x) + 3.0, nb.center().y), Align2::LEFT_CENTER, &clip.name, regular(10.0), ink);
+        painter.with_clip_rect(nb.intersect(lane)).text(
+            pos2(nb.min.x.max(lane.min.x) + 3.0, nb.center().y),
+            Align2::LEFT_CENTER,
+            &clip.name,
+            regular(10.0),
+            ink,
+        );
     }
     let body_r = Rect::from_min_max(r.min, pos2(r.max.x, r.max.y - name_h));
     let vis = body_r.intersect(lane);
@@ -2244,7 +2252,13 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
     }
     let ov = Color32::from_rgb(16, 16, 16);
     if s.edit.flag("view.clip.rating") && clip.rating > 0 && name_h > 0.0 {
-        painter.text(pos2(r.max.x - 4.0, r.max.y - name_h * 0.5), Align2::RIGHT_CENTER, "★".repeat(usize::from(clip.rating.min(5))), regular(9.0), ov);
+        painter.text(
+            pos2(r.max.x - 4.0, r.max.y - name_h * 0.5),
+            Align2::RIGHT_CENTER,
+            "★".repeat(usize::from(clip.rating.min(5))),
+            regular(9.0),
+            ov,
+        );
     }
     if s.edit.flag("view.clip.sync_point") && clip.sync_point > 0 {
         let x = x_of(s, tl, clip.start + clip.sync_point);
@@ -2275,7 +2289,13 @@ fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track
     if let Some(tt) = time_text
         && r.height() > 30.0
     {
-        painter.with_clip_rect(r.intersect(lane)).text(pos2(r.min.x.max(lane.min.x) + 4.0, r.max.y - name_h - 7.0), Align2::LEFT_CENTER, tt, regular(9.0), ov);
+        painter.with_clip_rect(r.intersect(lane)).text(
+            pos2(r.min.x.max(lane.min.x) + 4.0, r.max.y - name_h - 7.0),
+            Align2::LEFT_CENTER,
+            tt,
+            regular(9.0),
+            ov,
+        );
     }
     if s.edit.flag("view.clip.effects_status") && s.edit.values.keys().any(|k| k.starts_with(&format!("clip_fx.{}.", clip.id.0))) {
         painter.text(pos2(r.max.x - 6.0, r.max.y - name_h - 7.0), Align2::RIGHT_CENTER, "FX", bold(9.0), Color32::from_rgb(250, 230, 120));
@@ -2314,7 +2334,7 @@ fn draw_automation(painter: &egui::Painter, s: &Session, track: &Track, p: &Auto
         (lo, hi)
     };
     let def = auto_default(track, p);
-    let yv =|v: f32| -> f32 {
+    let yv = |v: f32| -> f32 {
         let k = ((v.clamp(lo, hi) - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0);
         lane.max.y - 4.0 - k * (lane.height() - 8.0)
     };
@@ -2816,7 +2836,8 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
             Tool::Grabber if openpt_engine::cmd::tool_variant(&s.edit, Tool::Grabber) == "separation" && !s.edit.selection.is_empty() => {
                 let sel = s.edit.selection;
                 let tracks: Vec<TrackId> = if s.edit.selected_tracks.contains(&track.id) { s.edit.selected_tracks.clone() } else { vec![track.id] };
-                let _ = app.run("edit.separate", json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "start": sel.start, "end": sel.end}));
+                let _ =
+                    app.run("edit.separate", json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "start": sel.start, "end": sel.end}));
                 let now = app.engine.session();
                 let clips: Vec<ClipId> = tracks
                     .iter()
@@ -3332,7 +3353,13 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
     let grid = match s.edit.grid {
         openpt_time::GridValue::Note { value, dotted, triplet } => {
             let t = value.ticks();
-            if triplet { t * 2 / 3 } else if dotted { t * 3 / 2 } else { t }
+            if triplet {
+                t * 2 / 3
+            } else if dotted {
+                t * 3 / 2
+            } else {
+                t
+            }
         }
         _ => openpt_time::NoteValue::Sixteenth.ticks(),
     };
@@ -3355,12 +3382,18 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
     }
     ui.separator();
     ui.menu_button("Fades", |ui| {
-        for (label, id) in [("Create...", "edit.fades_create"), ("Delete", "edit.fades_delete"), ("Fade to Start", "edit.fade_to_start"), ("Fade to End", "edit.fade_to_end")] {
+        for (label, id) in [
+            ("Create...", "edit.fades_create"),
+            ("Delete", "edit.fades_delete"),
+            ("Fade to Start", "edit.fade_to_start"),
+            ("Fade to End", "edit.fade_to_end"),
+        ] {
             item(app, ui, label, id);
         }
     });
     ui.menu_button("Separate Clip", |ui| {
-        for (label, id) in [("At Selection", "edit.separate"), ("On Grid", "edit.separate_on_grid"), ("At Transients", "edit.separate_at_transients")] {
+        for (label, id) in [("At Selection", "edit.separate"), ("On Grid", "edit.separate_on_grid"), ("At Transients", "edit.separate_at_transients")]
+        {
             item(app, ui, label, id);
         }
     });
@@ -3368,7 +3401,8 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
     item(app, ui, "Consolidate Clip", "edit.consolidate");
     let multichannel = {
         let s = app.engine.session();
-        s.find_clip(c).is_some_and(|(_, x)| matches!(x.content, ClipContent::Audio { source, .. } if s.source(source).is_some_and(|f| f.channels > 1)))
+        s.find_clip(c)
+            .is_some_and(|(_, x)| matches!(x.content, ClipContent::Audio { source, .. } if s.source(source).is_some_and(|f| f.channels > 1)))
     };
     if multichannel {
         item(app, ui, "Expand Channels to New Tracks", "clip.expand_channels");

@@ -29,7 +29,12 @@ const FLAGS: [(&str, &str, &str, Page); 8] = [
     ("options.low_latency_monitoring", "options.low_latency_monitoring", "Low Latency Monitoring", Page::Operation),
     ("options.auto_spot_clips", "options.auto_spot_clips", "Auto-Spot Clips", Page::Editing),
     ("options.keyboard_lock", "options.edit_tool_mode_keyboard_lock", "Edit/Tool Mode Keyboard Lock", Page::Editing),
-    ("options.marker_target_follows_selection", "options.marker_target_follows_first_selected_track", "Marker Target Follows First Selected Track", Page::Editing),
+    (
+        "options.marker_target_follows_selection",
+        "options.marker_target_follows_first_selected_track",
+        "Marker Target Follows First Selected Track",
+        Page::Editing,
+    ),
     ("options.midi_thru", "options.midi_thru", "MIDI Thru", Page::Midi),
     ("options.midi_live_mode", "options.midi_live_mode", "MIDI Live Mode", Page::Midi),
 ];
@@ -379,7 +384,13 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                             ui,
                             "pref_scrolling",
                             &mut o.scrolling,
-                            &[("none", "No Scrolling"), ("after_playback", "After Playback"), ("page", "Page"), ("continuous", "Continuous"), ("center", "Centered Playhead")],
+                            &[
+                                ("none", "No Scrolling"),
+                                ("after_playback", "After Playback"),
+                                ("page", "Page"),
+                                ("continuous", "Continuous"),
+                                ("center", "Centered Playhead"),
+                            ],
                         )
                     });
                 });

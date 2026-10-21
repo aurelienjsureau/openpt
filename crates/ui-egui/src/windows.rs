@@ -143,7 +143,12 @@ fn color_palette(app: &mut SoundApp, ctx: &egui::Context) {
     });
     win(ctx, &mut open, "Color Palette", vec2(560.0, 230.0), |ui| {
         ui.horizontal(|ui| {
-            for (t, label) in [(PaletteTarget::Tracks, "Tracks"), (PaletteTarget::Clips, "Clips"), (PaletteTarget::Groups, "Groups"), (PaletteTarget::Markers, "Markers")] {
+            for (t, label) in [
+                (PaletteTarget::Tracks, "Tracks"),
+                (PaletteTarget::Clips, "Clips"),
+                (PaletteTarget::Groups, "Groups"),
+                (PaletteTarget::Markers, "Markers"),
+            ] {
                 ui.selectable_value(&mut target, t, label);
             }
             ui.separator();

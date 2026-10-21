@@ -13,7 +13,7 @@ pub fn strip_width(narrow: bool) -> f32 {
     if narrow { 56.0 } else { 88.0 }
 }
 
-pub const DEFAULT_FADER_H: f32 = 230.0;
+pub const DEFAULT_FADER_FRAC: f32 = 0.5;
 
 pub fn show(app: &mut SoundApp, ui: &mut Ui) {
     let _prof = crate::prof::scope("mix");
@@ -371,7 +371,13 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         for (k, (label, v)) in [("dly", dly), ("cmp", cmp)].into_iter().enumerate() {
             let ry = sec.min.y + 9.0 + k as f32 * 16.0;
             ui.painter().text(pos2(x0 + 4.0, ry), Align2::LEFT_CENTER, label, regular(9.0), t.text_dim);
-            let col = if k == 1 && !pdc { t.text_dim } else if v > 0 { Color32::from_rgb(232, 168, 60) } else { t.counter_text };
+            let col = if k == 1 && !pdc {
+                t.text_dim
+            } else if v > 0 {
+                Color32::from_rgb(232, 168, 60)
+            } else {
+                t.counter_text
+            };
             ui.painter().text(pos2(sec.max.x - 4.0, ry), Align2::RIGHT_CENTER, v.to_string(), mono(10.0), col);
         }
         y = sec.max.y + 4.0;
@@ -455,7 +461,8 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     if track.kind == TrackKind::Vca {
         let s = app.engine.session();
         let members: Vec<openpt_model::TrackId> = s.tracks.iter().filter(|x| x.mixer.vca == Some(id.0)).map(|x| x.id).collect();
-        let current = s.groups.iter().find(|g| !members.is_empty() && g.members.len() == members.len() && members.iter().all(|m| g.members.contains(m)));
+        let current =
+            s.groups.iter().find(|g| !members.is_empty() && g.members.len() == members.len() && members.iter().all(|m| g.members.contains(m)));
         let label = match current {
             Some(g) => g.name.clone(),
             None if members.is_empty() => no_group.to_string(),
@@ -559,18 +566,24 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     }
     y += 26.0;
     let bottom_h = 64.0;
-    let fh = app.ui.mix_fader_h.clamp(120.0, (r.max.y - bottom_h - y).max(120.0));
+    let fill_h = (r.max.y - bottom_h - y).max(120.0);
+    let fh = (app.ui.mix_fader_frac * fill_h).clamp(120.0, fill_h);
     let bot = y + fh + bottom_h;
-    let grip = ui.interact(
-        Rect::from_min_max(pos2(r.min.x, bot - 3.0), pos2(r.max.x, bot + 4.0)),
-        ui.id().with(("fader_length", id.0)),
-        Sense::drag(),
-    );
+    let grip = ui
+        .interact(
+            Rect::from_min_max(pos2(r.min.x, bot - 3.0), pos2(r.max.x, bot + 4.0)),
+            ui.id().with(("fader_length", id.0)),
+            Sense::click_and_drag(),
+        )
+        .on_hover_text("Drag: fader length · Double-click: fill the window / back to default");
     if grip.hovered() || grip.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     if grip.dragged() {
-        app.ui.mix_fader_h = (fh + grip.drag_delta().y).clamp(120.0, 1200.0);
+        app.ui.mix_fader_frac = ((fh + grip.drag_delta().y) / fill_h).clamp(0.0, 1.0);
+    }
+    if grip.double_clicked() {
+        app.ui.mix_fader_frac = if app.ui.mix_fader_frac >= 1.0 { DEFAULT_FADER_FRAC } else { 1.0 };
     }
     ui.painter().hline(r.x_range(), bot + 0.5, Stroke::new(1.0, t.border));
     let wide_meter = (if track.kind == TrackKind::Master { app.engine.session().main_format() } else { track.format }).channels() > 2;
@@ -607,7 +620,8 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     }
     if md.gr > 0.1 {
         ui.painter().text(pos2(mr.center().x, mr.min.y - 3.0), Align2::CENTER_BOTTOM, format!("-{:.0}", md.gr), regular(8.0), t.meter_yellow);
-        let gr_bar = Rect::from_min_max(pos2(mr.max.x - 3.0, mr.min.y + 5.0), pos2(mr.max.x, mr.min.y + 5.0 + (mr.height() - 6.0) * (md.gr / 24.0).min(1.0)));
+        let gr_bar =
+            Rect::from_min_max(pos2(mr.max.x - 3.0, mr.min.y + 5.0), pos2(mr.max.x, mr.min.y + 5.0 + (mr.height() - 6.0) * (md.gr / 24.0).min(1.0)));
         ui.painter().rect_filled(gr_bar, 0.0, Color32::from_rgb(232, 160, 40));
     }
     let vr = Rect::from_min_size(pos2(x0 + 4.0, bot - bottom_h + 4.0), vec2(inner_w - 8.0, 15.0));
@@ -817,7 +831,11 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
     let dot = Rect::from_min_max(r.min, pos2(r.min.x + 13.0, r.max.y));
     if ins.is_some() && r.width() >= COMPACT_SLOT {
         let dot_resp = ui.interact(dot, ui.id().with(("ins_dot", id.0, slot)), Sense::click()).on_hover_text("Insert menu");
-        egui::Popup::menu(&dot_resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| plugin_menu(app, ui, id, slot));
+        egui::Popup::menu(&dot_resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            insert_context_menu(app, ui, id, slot);
+            ui.separator();
+            ui.menu_button("plug-in", |ui| plugin_menu(app, ui, id, slot));
+        });
     }
     if resp.clicked() && ins.is_some() {
         let m = click_mods(ui);
@@ -828,7 +846,9 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
         }
     }
     let cmd = if ui.ctx().os().is_mac() { "⌘" } else { "Ctrl+" };
-    let tip = format!("{name}: click to open · {cmd}click to bypass · dot: change plug-in · right-click: bypass, key input, remove · drag to move, Alt-drag to copy");
+    let tip = format!(
+        "{name}: click to open · {cmd}click to bypass · dot: bypass, key input, remove, change plug-in · right-click: bypass, key input, remove · drag to move, Alt-drag to copy"
+    );
     if ins.is_none() {
         egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| plugin_menu(app, ui, id, slot));
     } else {
@@ -857,30 +877,30 @@ fn insert_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize
 pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize) {
     let instrument_track = app.engine.session().track(id).is_some_and(|t| t.kind == TrackKind::Instrument);
     let search = MenuSearch::show(ui, egui::Id::new(("plugin-search", id.0, slot)), "Search plugins…");
+    let channels = app.engine.session().track(id).map_or(1, |t| t.format.channels());
     if search.typing() {
-        if let Some(plugin) = plugin_search(ui, &search, if instrument_track { None } else { Some(false) }) {
+        if let Some(plugin) = plugin_search(ui, &search, if instrument_track { None } else { Some(false) }, Fit::for_channels(channels)) {
             pick_insert(app, ui, id, slot, &plugin, false);
         }
         return;
     }
-    let channels = app.engine.session().track(id).map_or(1, |t| t.format.channels());
     let org = app.ui.plugin_menu_org.clone();
     let mut picked = None;
     if channels > 1 {
         ui.menu_button("multichannel plug-in", |ui| {
-            picked = effect_menus(ui, &org).map(|p| (p, false));
+            picked = effect_menus(ui, &org, Fit::for_channels(channels)).map(|p| (p, false));
         });
         ui.menu_button("multi-mono plug-in", |ui| {
-            if let Some(p) = effect_menus(ui, &org) {
+            if let Some(p) = effect_menus(ui, &org, Fit::MultiMono) {
                 picked = Some((p, true));
             }
         });
     } else {
-        picked = effect_menus(ui, &org).map(|p| (p, false));
+        picked = effect_menus(ui, &org, Fit::Mono).map(|p| (p, false));
     }
     if instrument_track {
         ui.menu_button("instrument", |ui| {
-            if let Some(p) = plugin_menus(ui, true, &org) {
+            if let Some(p) = plugin_menus(ui, true, &org, Fit::Any) {
                 picked = Some((p, false));
             }
         });
@@ -891,7 +911,9 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize) {
 }
 
 fn pick_insert(app: &mut SoundApp, ui: &Ui, id: TrackId, slot: usize, plugin: &str, multi_mono: bool) {
-    if plugin_info(plugin).is_some_and(|p| p.is_instrument) || openpt_vst3_host::cached().is_some_and(|l| l.iter().any(|d| d.id == plugin && d.is_instrument)) {
+    if plugin_info(plugin).is_some_and(|p| p.is_instrument)
+        || openpt_vst3_host::cached().is_some_and(|l| l.iter().any(|d| d.id == plugin && d.is_instrument))
+    {
         run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
         if !app.ui.mix_views.iter().any(|v| v == "instruments") {
             app.ui.mix_views.push("instruments".into());
@@ -903,15 +925,15 @@ fn pick_insert(app: &mut SoundApp, ui: &Ui, id: TrackId, slot: usize, plugin: &s
     open_new_insert(app, id, slot);
 }
 
-fn effect_menus(ui: &mut Ui, org: &str) -> Option<String> {
-    plugin_menus(ui, false, org)
+fn effect_menus(ui: &mut Ui, org: &str, fit: Fit) -> Option<String> {
+    plugin_menus(ui, false, org, fit)
 }
 
 pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     let slot = openpt_mix::INSTRUMENT_SLOT;
     let search = MenuSearch::show(ui, egui::Id::new(("instrument-search", id.0)), "Search instruments…");
     if search.typing() {
-        if let Some(plugin) = plugin_search(ui, &search, Some(true)) {
+        if let Some(plugin) = plugin_search(ui, &search, Some(true), Fit::Any) {
             run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
             open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
         }
@@ -964,12 +986,12 @@ pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     }
     let mut picked = None;
     let org = app.ui.plugin_menu_org.clone();
-    if let Some(p) = plugin_menus(ui, true, &org) {
+    if let Some(p) = plugin_menus(ui, true, &org, Fit::Any) {
         picked = Some(p);
     }
     if let Some(plugin) = picked {
         run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
-            open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
+        open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
     }
 }
 
@@ -1165,7 +1187,7 @@ pub(crate) fn run_scoped(app: &mut SoundApp, ui: &Ui, cmd: &str, params: serde_j
     }
 }
 
-fn plugin_search(ui: &mut Ui, search: &MenuSearch, instruments: Option<bool>) -> Option<String> {
+fn plugin_search(ui: &mut Ui, search: &MenuSearch, instruments: Option<bool>, fit: Fit) -> Option<String> {
     let kind = |is: bool| instruments.is_none_or(|want| want == is);
     let mut built_in: Vec<&openpt_dsp::PluginInfo> =
         openpt_dsp::plugins().iter().copied().filter(|p| kind(p.is_instrument) && search.matches(p.name)).collect();
@@ -1181,6 +1203,7 @@ fn plugin_search(ui: &mut Ui, search: &MenuSearch, instruments: Option<bool>) ->
     for d in openpt_au_host::scan().into_iter().filter(|d| kind(d.is_instrument)) {
         hosted.push((MenuPlugin { category: category_label(d.category).into(), id: d.id, name: d.name, vendor: d.vendor }, "AU"));
     }
+    fit.keep(&mut hosted, |(p, _)| (&p.name, &p.vendor));
     hosted.retain(|(p, _)| search.matches(&p.name) || search.matches(&p.vendor));
     hosted.sort_by_cached_key(|(p, format)| (p.name.to_lowercase(), *format));
     let n = built_in.len() + hosted.len();
@@ -1280,6 +1303,79 @@ struct MenuPlugin {
     category: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fit {
+    Any,
+    Mono,
+    Stereo,
+    MultiMono,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Variant {
+    Mono,
+    Stereo,
+    MonoStereo,
+}
+
+fn variant(name: &str) -> Option<(&str, Variant)> {
+    let lower = name.to_ascii_lowercase();
+    [(" mono/stereo", Variant::MonoStereo), (" mono", Variant::Mono), (" stereo", Variant::Stereo)]
+        .into_iter()
+        .find(|(suffix, _)| lower.ends_with(suffix))
+        .and_then(|(suffix, v)| name.get(..name.len() - suffix.len()).map(|base| (base, v)))
+}
+
+impl Fit {
+    pub(crate) fn for_channels(channels: usize) -> Fit {
+        match channels {
+            1 => Fit::Mono,
+            2 => Fit::Stereo,
+            _ => Fit::Any,
+        }
+    }
+
+    fn takes(self, v: Variant) -> bool {
+        match self {
+            Fit::Any => true,
+            Fit::Mono | Fit::MultiMono => v == Variant::Mono,
+            Fit::Stereo => v == Variant::Stereo,
+        }
+    }
+
+    fn keep<T>(self, items: &mut Vec<T>, key: impl Fn(&T) -> (&str, &str)) {
+        if self == Fit::Any {
+            return;
+        }
+        use std::collections::HashSet;
+        let id = |vendor: &str, base: &str| (vendor.to_string(), base.to_ascii_lowercase());
+        let monos: HashSet<(String, String)> = items
+            .iter()
+            .filter_map(|i| {
+                let (name, vendor) = key(i);
+                variant(name).filter(|(_, v)| *v == Variant::Mono).map(|(base, _)| id(vendor, base))
+            })
+            .collect();
+        let of = |name: &str, vendor: &str| -> Option<(String, Variant)> {
+            match variant(name) {
+                Some((base, v)) => Some((base.to_string(), v)),
+                None => monos.contains(&id(vendor, name)).then(|| (name.to_string(), Variant::Stereo)),
+            }
+        };
+        let fitting: HashSet<(String, String)> = items
+            .iter()
+            .filter_map(|i| {
+                let (name, vendor) = key(i);
+                of(name, vendor).filter(|(_, v)| self.takes(*v)).map(|(base, _)| id(vendor, &base))
+            })
+            .collect();
+        items.retain(|i| {
+            let (name, vendor) = key(i);
+            of(name, vendor).is_none_or(|(base, v)| self.takes(v) || !fitting.contains(&id(vendor, &base)))
+        });
+    }
+}
+
 fn category_label(c: openpt_dsp::Category) -> &'static str {
     use openpt_dsp::Category as C;
     match c {
@@ -1296,7 +1392,7 @@ fn category_label(c: openpt_dsp::Category) -> &'static str {
     }
 }
 
-fn plugin_menus(ui: &mut Ui, instruments: bool, org: &str) -> Option<String> {
+fn plugin_menus(ui: &mut Ui, instruments: bool, org: &str, fit: Fit) -> Option<String> {
     let mut list: Vec<MenuPlugin> = openpt_dsp::plugins()
         .iter()
         .filter(|p| p.is_instrument == instruments)
@@ -1318,6 +1414,7 @@ fn plugin_menus(ui: &mut Ui, instruments: bool, org: &str) -> Option<String> {
             vendor: d.vendor,
         }));
     }
+    fit.keep(&mut list, |p| (&p.name, &p.vendor));
     list.sort_by_cached_key(|p| p.name.to_lowercase());
     let items: Vec<&MenuPlugin> = list.iter().collect();
     let vendor = |p: &MenuPlugin| if p.vendor.is_empty() { "Unknown".to_string() } else { p.vendor.clone() };
@@ -1709,7 +1806,7 @@ fn send_level_scale(ui: &mut Ui, db: f32) {
 }
 
 fn send_route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, current: Option<&Route>) {
-    let busses = app.engine.session().busses.clone();
+    let busses: Vec<_> = app.engine.session().busses_in_track_order().into_iter().cloned().collect();
     let search = MenuSearch::show(ui, egui::Id::new(("send-bus-search", id.0, slot)), "Search buses…");
     let visible: Vec<_> = busses.iter().filter(|bus| search.matches(&bus.name)).collect();
     let picked = search.rows(ui, visible.len(), 260.0, |ui, i, highlighted| {
@@ -1838,7 +1935,7 @@ pub(crate) fn route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, input: bo
         }
     }
     ui.separator();
-    let busses: Vec<String> = app.engine.session().busses.iter().map(|b| b.name.clone()).collect();
+    let busses: Vec<String> = app.engine.session().busses_in_track_order().into_iter().map(|b| b.name.clone()).collect();
     ui.strong("Bus");
     let search = MenuSearch::show(ui, egui::Id::new(("route-bus-search", id.0, input)), "Search buses…");
     let visible: Vec<&String> = busses.iter().filter(|b| search.matches(b)).collect();
@@ -1868,6 +1965,30 @@ pub(crate) fn route_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, input: bo
 #[cfg(test)]
 mod tests {
     use super::{dragged_send_db, editable_readout, parse_db, parse_pan};
+
+    #[test]
+    fn insert_menus_list_the_channel_variant_that_fits() {
+        use super::Fit;
+        let all = [
+            ("C1 comp Mono", "Waves"),
+            ("C1 comp Stereo", "Waves"),
+            ("C1 comp Mono/Stereo", "Waves"),
+            ("bx_dynEQ V2 Mono", "Plugin Alliance"),
+            ("bx_dynEQ V2", "Plugin Alliance"),
+            ("Magma StressBox Mono", "Waves"),
+            ("Lonely Stereo", "Someone"),
+            ("Pro-Q 3", "FabFilter"),
+        ];
+        let shown = |fit: Fit| {
+            let mut v = all.to_vec();
+            fit.keep(&mut v, |(n, ven)| (n, ven));
+            v.into_iter().map(|(n, _)| n).collect::<Vec<_>>()
+        };
+        assert_eq!(shown(Fit::MultiMono), ["C1 comp Mono", "bx_dynEQ V2 Mono", "Magma StressBox Mono", "Lonely Stereo", "Pro-Q 3"]);
+        assert_eq!(shown(Fit::Stereo), ["C1 comp Stereo", "bx_dynEQ V2", "Magma StressBox Mono", "Lonely Stereo", "Pro-Q 3"]);
+        assert_eq!(shown(Fit::Mono), ["C1 comp Mono", "bx_dynEQ V2 Mono", "Magma StressBox Mono", "Lonely Stereo", "Pro-Q 3"]);
+        assert_eq!(shown(Fit::Any).len(), all.len());
+    }
     use egui::{Event, Modifiers, PointerButton, Rect, pos2, vec2};
 
     #[test]

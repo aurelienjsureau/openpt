@@ -361,7 +361,19 @@ pub struct BandSettings {
 
 impl Default for BandSettings {
     fn default() -> Self {
-        BandSettings { active: false, shape: BELL, slope: 1, place: STEREO, freq: 1000.0, gain: 0.0, q: 1.0, dynamic: false, range: -6.0, thr: -20.0, sc: false }
+        BandSettings {
+            active: false,
+            shape: BELL,
+            slope: 1,
+            place: STEREO,
+            freq: 1000.0,
+            gain: 0.0,
+            q: 1.0,
+            dynamic: false,
+            range: -6.0,
+            thr: -20.0,
+            sc: false,
+        }
     }
 }
 
@@ -664,7 +676,8 @@ impl Linear {
             self.last_sig = sig;
             self.last_len = len;
         }
-        self.job_total = 2 + if self.job_kernel { MAG_STEPS + if self.job_ms { 4 } else { 2 } } else { 0 } + 2 + if self.job_fade { 2 } else { 0 } + 1;
+        self.job_total =
+            2 + if self.job_kernel { MAG_STEPS + if self.job_ms { 4 } else { 2 } } else { 0 } + 2 + if self.job_fade { 2 } else { 0 } + 1;
         self.job_step = 0;
         self.job_active = true;
     }
@@ -797,7 +810,15 @@ pub struct EqEngine {
 
 impl EqEngine {
     pub fn new(fs: f64) -> EqEngine {
-        EqEngine { fs, linear: None, res: 1, det: [Det::default(); BANDS], band: [BandRt::default(); BANDS], solo: SoloRt::default(), delta: [0.0; BANDS] }
+        EqEngine {
+            fs,
+            linear: None,
+            res: 1,
+            det: [Det::default(); BANDS],
+            band: [BandRt::default(); BANDS],
+            solo: SoloRt::default(),
+            delta: [0.0; BANDS],
+        }
     }
 
     pub fn set_mode(&mut self, linear: bool, res: usize) {
@@ -938,7 +959,16 @@ impl EqEngine {
             if !k.live || k.shape != p.shape || k.slope != p.slope || k.place != p.place {
                 let fade_in = !k.live && has_gain(p.shape);
                 let g0 = if k.live && has_gain(k.shape) && has_gain(p.shape) { k.g } else { tg };
-                *k = BandRt { live: true, shape: p.shape, slope: p.slope, place: p.place, lf: tf, lq: tq, g: if fade_in { 0.0 } else { g0 }, ..BandRt::default() };
+                *k = BandRt {
+                    live: true,
+                    shape: p.shape,
+                    slope: p.slope,
+                    place: p.place,
+                    lf: tf,
+                    lq: tq,
+                    g: if fade_in { 0.0 } else { g0 },
+                    ..BandRt::default()
+                };
             } else {
                 let glide = |v: &mut f64, t: f64, eps: f64| {
                     *v += a * (t - *v);
@@ -1321,7 +1351,13 @@ mod tests {
                         assert!((d.mag_db_at(f, fs) + 3.0).abs() < 0.05, "{} at {f} Hz, {fs}: {}", SHAPES[shape], d.mag_db_at(f, fs));
                         let mut x = 20.0;
                         while x < 0.5 * fs {
-                            assert!(d.mag_db_at(x, fs) < 0.05, "{} {} dB/oct at {f} Hz, {fs}: {:.1} dB at {x:.0} Hz", SHAPES[shape], SLOPE_DB[slope], d.mag_db_at(x, fs));
+                            assert!(
+                                d.mag_db_at(x, fs) < 0.05,
+                                "{} {} dB/oct at {f} Hz, {fs}: {:.1} dB at {x:.0} Hz",
+                                SHAPES[shape],
+                                SLOPE_DB[slope],
+                                d.mag_db_at(x, fs)
+                            );
                             x *= 1.05;
                         }
                     }

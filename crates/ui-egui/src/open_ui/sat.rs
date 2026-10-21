@@ -68,10 +68,17 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         let top = y_of(drive.max(3.0));
         let base = g.max.y - 8.0;
         let mut mesh = egui::Mesh::default();
-        let a = if byp { 14 } else if sel { 80 } else { 46 };
+        let a = if byp {
+            14
+        } else if sel {
+            80
+        } else {
+            46
+        };
         let fill = Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), a);
         let mut line = Vec::with_capacity(cols + 1);
-        let mags: Vec<f32> = (0..=cols).map(|i| dsp::band_magnitude(fa.f(g.min.x + g.width() * i as f32 / cols as f32), f0, q, rate, shape)).collect();
+        let mags: Vec<f32> =
+            (0..=cols).map(|i| dsp::band_magnitude(fa.f(g.min.x + g.width() * i as f32 / cols as f32), f0, q, rate, shape)).collect();
         let peak = mags.iter().copied().fold(1.0e-6, f32::max);
         for (i, mag) in mags.iter().enumerate() {
             let x = g.min.x + g.width() * i as f32 / cols as f32;
@@ -94,7 +101,14 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         let pos = dsp::POSITIONS[cx.idx(k(b, dsp::K_POS)).min(2)];
         p.text(pos2(c.x, c.y - 16.0), Align2::CENTER_CENTER, format!("{} · {pos}", dsp::TYPES[cx.idx(k(b, dsp::K_TYPE)).min(3)]), regular(9.5), col);
     }
-    let hit = |cx: &Ctx, at: Pos2| (0..BANDS).filter(|&b| used(cx, b)).map(|b| (b, node(cx, b).distance(at))).filter(|(_, d)| *d < 16.0).min_by(|a, c| a.1.total_cmp(&c.1)).map(|(b, _)| b);
+    let hit = |cx: &Ctx, at: Pos2| {
+        (0..BANDS)
+            .filter(|&b| used(cx, b))
+            .map(|b| (b, node(cx, b).distance(at)))
+            .filter(|(_, d)| *d < 16.0)
+            .min_by(|a, c| a.1.total_cmp(&c.1))
+            .map(|(b, _)| b)
+    };
     let hovered = resp.hover_pos().and_then(|at| hit(cx, at));
     if hovered.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -143,7 +157,14 @@ fn graph(ui: &mut Ui, cx: &mut Ctx, st: &mut State, g: Rect) {
         } else {
             dsp::BELL
         };
-        for (key, v) in [(dsp::K_FREQ, fa.f(at.x)), (dsp::K_DRIVE, drive_of(at.y)), (dsp::K_Q, 1.2), (dsp::K_SHAPE, shape as f32), (dsp::K_BYP, 0.0), (dsp::K_ON, 1.0)] {
+        for (key, v) in [
+            (dsp::K_FREQ, fa.f(at.x)),
+            (dsp::K_DRIVE, drive_of(at.y)),
+            (dsp::K_Q, 1.2),
+            (dsp::K_SHAPE, shape as f32),
+            (dsp::K_BYP, 0.0),
+            (dsp::K_ON, 1.0),
+        ] {
             cx.set(k(b, key), v);
         }
         st.selected = Some(b);
