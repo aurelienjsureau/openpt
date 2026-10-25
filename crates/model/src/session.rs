@@ -430,6 +430,104 @@ impl Session {
     pub fn group(&self, id: GroupId) -> Option<&Group> {
         self.groups.iter().find(|g| g.id == id)
     }
+
+    pub fn vca_controllers<'a>(&'a self, t: &'a Track) -> impl Iterator<Item = &'a Track> + 'a {
+        self.tracks.iter().filter(move |v| {
+            v.kind == TrackKind::Vca
+                && v.id != t.id
+                && match v.mixer.vca_group.and_then(|g| self.group(g)) {
+                    Some(g) => g.members.contains(&t.id),
+                    None => t.mixer.vca == Some(v.id.0),
+                }
+        })
+    }
+
+    pub fn vca_masters<'a>(&'a self, t: &'a Track) -> Vec<&'a Track> {
+        let mut out: Vec<&Track> = Vec::new();
+        let mut next = 0;
+        out.extend(self.vca_controllers(t));
+        out.retain(|v| v.id != t.id);
+        while let Some(v) = out.get(next).copied() {
+            next += 1;
+            for up in self.vca_controllers(v) {
+                if up.id != t.id && !out.iter().any(|x| x.id == up.id) {
+                    out.push(up);
+                }
+            }
+        }
+        out
+    }
+
+    pub fn vca_members(&self, v: TrackId) -> Vec<TrackId> {
+        self.tracks.iter().filter(|t| self.vca_controllers(t).any(|x| x.id == v)).map(|t| t.id).collect()
+    }
+
+    pub fn sync_vcas(&mut self, adopt: bool) -> bool {
+        let mut changed = adopt && self.adopt_vcas_in_groups();
+        let plan = self.vca_plan(adopt);
+        changed |= !plan.is_empty();
+        for (i, vca, group) in plan {
+            if let Some(t) = self.tracks.get_mut(i) {
+                t.mixer.vca = vca;
+                t.mixer.vca_group = group;
+            }
+        }
+        changed
+    }
+
+    fn adopt_vcas_in_groups(&mut self) -> bool {
+        let taken: Vec<GroupId> = self.tracks.iter().filter_map(|t| t.mixer.vca_group).collect();
+        let mut binds: Vec<(TrackId, GroupId)> = Vec::new();
+        for v in self.tracks.iter().filter(|t| t.kind == TrackKind::Vca && t.mixer.vca_group.is_none()) {
+            let mut inside = self.groups.iter().filter(|g| g.mix && g.members.contains(&v.id) && !taken.contains(&g.id));
+            if let (Some(g), None) = (inside.next(), inside.next())
+                && !binds.iter().any(|(_, x)| *x == g.id)
+            {
+                binds.push((v.id, g.id));
+            }
+        }
+        for (v, g) in &binds {
+            if let Some(t) = self.track_mut(*v) {
+                t.mixer.vca_group = Some(*g);
+            }
+            if let Some(gr) = self.groups.iter_mut().find(|x| x.id == *g) {
+                gr.members.retain(|m| m != v);
+            }
+        }
+        !binds.is_empty()
+    }
+
+    pub fn vca_plan(&self, adopt: bool) -> Vec<(usize, Option<u64>, Option<GroupId>)> {
+        let vca = |id: u64| self.tracks.iter().find(|t| t.id.0 == id && t.kind == TrackKind::Vca);
+        let mut group: Vec<Option<GroupId>> =
+            self.tracks.iter().map(|t| t.mixer.vca_group.filter(|g| t.kind == TrackKind::Vca && self.group(*g).is_some())).collect();
+        if adopt {
+            for (i, v) in self.tracks.iter().enumerate() {
+                if v.kind != TrackKind::Vca || group[i].is_some() {
+                    continue;
+                }
+                let mut mine: Vec<u64> = self.tracks.iter().filter(|t| t.mixer.vca == Some(v.id.0)).map(|t| t.id.0).collect();
+                mine.sort_unstable();
+                group[i] = self
+                    .groups
+                    .iter()
+                    .find(|g| {
+                        let mut m: Vec<u64> = g.members.iter().map(|x| x.0).filter(|x| *x != v.id.0).collect();
+                        m.sort_unstable();
+                        g.mix && !mine.is_empty() && m == mine
+                    })
+                    .map(|g| g.id);
+            }
+        }
+        let grouped = |id: u64| self.tracks.iter().position(|t| t.id.0 == id).is_some_and(|i| group[i].is_some());
+        let link: Vec<Option<u64>> = self.tracks.iter().map(|t| t.mixer.vca.filter(|v| vca(*v).is_some() && !grouped(*v))).collect();
+        self.tracks
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| t.mixer.vca != link[*i] || t.mixer.vca_group != group[*i])
+            .map(|(i, _)| (i, link[i], group[i]))
+            .collect()
+    }
     pub fn marker(&self, id: MarkerId) -> Option<&MemoryLocation> {
         self.markers.iter().find(|m| m.id == id)
     }

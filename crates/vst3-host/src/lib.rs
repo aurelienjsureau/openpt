@@ -83,6 +83,10 @@ pub fn pro_audio_thread() {
     prio::pro_audio_thread();
 }
 
+pub fn no_denormals() {
+    prio::no_denormals();
+}
+
 #[allow(unsafe_code)]
 mod prio {
     #[cfg(windows)]
@@ -132,6 +136,27 @@ mod prio {
     }
     #[cfg(not(windows))]
     pub fn pro_audio_thread() {}
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn no_denormals() {
+        let mut csr = 0u32;
+        unsafe {
+            std::arch::asm!("stmxcsr [{}]", in(reg) &raw mut csr, options(nostack, preserves_flags));
+            csr |= 0x8040;
+            std::arch::asm!("ldmxcsr [{}]", in(reg) &raw const csr, options(nostack, preserves_flags, readonly));
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    pub fn no_denormals() {
+        unsafe {
+            let mut v: u64;
+            std::arch::asm!("mrs {}, fpcr", out(reg) v, options(nomem, nostack, preserves_flags));
+            v |= 1 << 24;
+            std::arch::asm!("msr fpcr, {}", in(reg) v, options(nomem, nostack, preserves_flags));
+        }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    pub fn no_denormals() {}
 }
 
 pub const ID_PREFIX: &str = "vst3:";

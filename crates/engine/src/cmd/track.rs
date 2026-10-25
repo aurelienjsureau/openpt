@@ -220,6 +220,11 @@ pub fn specs() -> Vec<CommandSpec> {
                 return Err(bad("track.vca", "`vca` must be a VCA Master track"));
             }
             if let Some(v) = vca
+                && e.session().track(v).is_some_and(|t| t.mixer.vca_group.is_some())
+            {
+                return Err(bad("track.vca", "this VCA controls a group: change the group's members instead"));
+            }
+            if let Some(v) = vca
                 && tracks.iter().any(|t| vca_loops(e.session(), *t, v))
             {
                 return Err(bad("track.vca", "a VCA cannot control itself, even through another VCA"));
@@ -238,24 +243,28 @@ pub fn specs() -> Vec<CommandSpec> {
             if e.session().track(v).is_none_or(|t| t.kind != TrackKind::Vca) {
                 return Err(bad(CMD, "`vca` must be a VCA Master track"));
             }
-            let members: Vec<TrackId> = match p.get("group") {
-                None | Some(Value::Null) => Vec::new(),
-                _ => {
-                    let g = find_group(e, p, CMD)?;
-                    let s = e.session();
-                    let all = s.groups.iter().find(|x| x.id == g).map(|x| x.members.clone()).unwrap_or_default();
-                    all.into_iter().filter(|t| !vca_loops(s, *t, v)).collect()
-                }
+            let group = match p.get("group") {
+                None | Some(Value::Null) => None,
+                _ => Some(find_group(e, p, CMD)?),
             };
+            if let Some(g) = group
+                && e.session().group(g).is_some_and(|g| g.members.iter().any(|t| *t != v && vca_loops(e.session(), *t, v)))
+            {
+                return Err(bad(CMD, "this group holds a VCA that controls this one: a VCA cannot control itself"));
+            }
             let s = e.session_mut();
+            if let Some(tr) = s.track_mut(v) {
+                tr.mixer.vca_group = group;
+            }
+            if let Some(gr) = group.and_then(|g| s.groups.iter_mut().find(|x| x.id == g)) {
+                gr.members.retain(|m| *m != v);
+            }
             for tr in &mut s.tracks {
-                if members.contains(&tr.id) {
-                    tr.mixer.vca = Some(v.0);
-                } else if tr.mixer.vca == Some(v.0) {
+                if tr.mixer.vca == Some(v.0) {
                     tr.mixer.vca = None;
                 }
             }
-            Ok(json!({"members": members.len()}))
+            Ok(json!({"members": s.vca_members(v).len()}))
         }),
         cmd!(
             "track.playlist_promote",
@@ -465,15 +474,7 @@ fn group(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 fn vca_loops(s: &openpt_model::Session, t: TrackId, v: TrackId) -> bool {
-    let mut cur = Some(v.0);
-    for _ in 0..=s.tracks.len() {
-        let Some(id) = cur else { return false };
-        if id == t.0 {
-            return true;
-        }
-        cur = s.tracks.iter().find(|x| x.id.0 == id).and_then(|x| x.mixer.vca);
-    }
-    true
+    t == v || s.track(v).is_some_and(|vt| s.vca_masters(vt).iter().any(|m| m.id == t))
 }
 
 fn find_group(e: &Engine, p: &Value, cmd: &str) -> Result<GroupId> {
@@ -786,6 +787,11 @@ fn change_width(e: &mut Engine, p: &Value) -> Result<Value> {
         if let Some(tr) = s.track_mut(*t) {
             tr.format = f;
             tr.mixer.pan = openpt_model::Mixer::new(f).pan;
+        }
+        if let Some(Route::Bus(b)) = s.track(*t).filter(|tr| tr.kind == TrackKind::Folder).and_then(|_| folder_bus(s, *t))
+            && let Some(bus) = s.busses.iter_mut().find(|x| x.id == b)
+        {
+            bus.format = f;
         }
     }
     Ok(json!({"format": f}))
@@ -1423,15 +1429,110 @@ mod tests {
             e.execute("track.new", &json!({"kind": kind, "name": name})).unwrap();
         }
         let id = |e: &Engine, n: &str| e.session().tracks.iter().find(|t| t.name == n).unwrap().id;
-        let vca = |e: &Engine, n: &str| e.session().tracks.iter().find(|t| t.name == n).unwrap().mixer.vca;
+        let masters = |e: &Engine, n: &str| -> Vec<String> {
+            let s = e.session();
+            s.vca_masters(s.tracks.iter().find(|t| t.name == n).unwrap()).iter().map(|v| v.name.clone()).collect()
+        };
         let (drums, all) = (id(&e, "Drums"), id(&e, "All"));
         e.execute("track.group", &json!({"tracks": ["Kick", "Snare"], "name": "Kit"})).unwrap();
         e.execute("track.vca_group", &json!({"vca": drums.0, "group": "Kit"})).unwrap();
-        assert_eq!((vca(&e, "Kick"), vca(&e, "Snare"), vca(&e, "Bass")), (Some(drums.0), Some(drums.0), None));
+        assert_eq!((masters(&e, "Kick"), masters(&e, "Snare"), masters(&e, "Bass")), (vec!["Drums".into()], vec!["Drums".into()], vec![]));
+        assert!(e.execute("track.vca", &json!({"tracks": [id(&e, "Bass").0], "vca": drums.0})).is_err());
         e.execute("track.vca", &json!({"tracks": [drums.0], "vca": all.0})).unwrap();
+        assert_eq!(masters(&e, "Kick"), vec!["Drums".to_string(), "All".into()]);
         assert!(e.execute("track.vca", &json!({"tracks": [all.0], "vca": drums.0})).is_err());
         assert!(e.execute("track.vca", &json!({"tracks": [all.0], "vca": all.0})).is_err());
         e.execute("track.vca_group", &json!({"vca": drums.0, "group": null})).unwrap();
-        assert_eq!((vca(&e, "Kick"), vca(&e, "Snare"), vca(&e, "Drums")), (None, None, Some(all.0)));
+        assert_eq!((masters(&e, "Kick"), masters(&e, "Drums")), (vec![], vec!["All".to_string()]));
+    }
+
+    #[test]
+    fn a_vca_follows_its_group_live() {
+        let mut e = Engine::default();
+        for (kind, name) in [("audio", "Back"), ("audio", "Lead"), ("audio", "Bass"), ("vca", "VB"), ("vca", "VL"), ("vca", "Vox")] {
+            e.execute("track.new", &json!({"kind": kind, "name": name})).unwrap();
+        }
+        let id = |e: &Engine, n: &str| e.session().tracks.iter().find(|t| t.name == n).unwrap().id;
+        let masters = |e: &Engine, n: &str| -> Vec<String> {
+            let s = e.session();
+            s.vca_masters(s.tracks.iter().find(|t| t.name == n).unwrap()).iter().map(|v| v.name.clone()).collect()
+        };
+        e.execute("track.group", &json!({"tracks": ["Back"], "name": "Back V"})).unwrap();
+        e.execute("track.group", &json!({"tracks": ["Lead"], "name": "Lead V"})).unwrap();
+        e.execute("track.group", &json!({"tracks": ["Back", "Lead"], "name": "Vocals"})).unwrap();
+        for (v, g) in [("VB", "Back V"), ("VL", "Lead V"), ("Vox", "Vocals")] {
+            e.execute("track.vca_group", &json!({"vca": id(&e, v).0, "group": g})).unwrap();
+        }
+        assert_eq!(masters(&e, "Back"), vec!["VB".to_string(), "Vox".into()]);
+        assert_eq!(masters(&e, "Lead"), vec!["VL".to_string(), "Vox".into()]);
+        let bass = id(&e, "Bass");
+        e.execute("track.group_modify", &json!({"group": "Vocals", "add": [bass.0]})).unwrap();
+        assert_eq!(masters(&e, "Bass"), vec!["Vox".to_string()]);
+        e.execute("track.group_modify", &json!({"group": "Vocals", "remove": [bass.0]})).unwrap();
+        assert!(masters(&e, "Bass").is_empty());
+        e.execute("track.ungroup", &json!({"group": "Vocals"})).unwrap();
+        assert_eq!(e.session().track(id(&e, "Vox")).unwrap().mixer.vca_group, None);
+        assert_eq!(masters(&e, "Back"), vec!["VB".to_string()]);
+        let vl = id(&e, "VL");
+        e.execute("track.vca", &json!({"tracks": [bass.0], "vca": id(&e, "Vox").0})).unwrap();
+        e.execute("track.delete", &json!({"tracks": [id(&e, "Vox").0, vl.0]})).unwrap();
+        assert!(e.session().tracks.iter().all(|t| t.mixer.vca.is_none()));
+        assert!(masters(&e, "Lead").is_empty());
+    }
+
+    #[test]
+    fn widening_a_folder_widens_its_bus() {
+        let mut e = Engine::default();
+        e.execute("track.new", &json!({"kind": "folder", "format": "mono", "name": "Drums"})).unwrap();
+        let f = e.session().tracks[0].id;
+        let bus_fmt = |e: &Engine| match &e.session().track(f).unwrap().mixer.input {
+            Route::Bus(b) => e.session().bus(*b).unwrap().format,
+            r => panic!("{r:?}"),
+        };
+        assert_eq!(bus_fmt(&e), ChannelFormat::Mono);
+        e.execute("track.change_width", &json!({"tracks": [f.0], "format": "stereo"})).unwrap();
+        assert_eq!((e.session().track(f).unwrap().format, bus_fmt(&e)), (ChannelFormat::Stereo, ChannelFormat::Stereo));
+    }
+
+    #[test]
+    fn opening_an_older_session_binds_each_vca_to_its_group() {
+        let mut e = Engine::default();
+        for (kind, name) in [("audio", "Kick"), ("audio", "Snare"), ("vca", "Drums")] {
+            e.execute("track.new", &json!({"kind": kind, "name": name})).unwrap();
+        }
+        e.execute("track.group", &json!({"tracks": ["Kick", "Snare"], "name": "Kit"})).unwrap();
+        let mut s = e.session().clone();
+        let v = s.tracks[2].id.0;
+        s.tracks[0].mixer.vca = Some(v);
+        s.tracks[1].mixer.vca = Some(v);
+        e.replace_session(s);
+        let s = e.session();
+        assert_eq!(s.tracks[2].mixer.vca_group, Some(s.groups[0].id));
+        assert!(s.tracks.iter().all(|t| t.mixer.vca.is_none()));
+        assert_eq!(s.vca_members(s.tracks[2].id), vec![s.tracks[0].id, s.tracks[1].id]);
+    }
+
+    #[test]
+    fn a_vca_grouped_with_its_tracks_takes_that_group() {
+        let mut e = Engine::default();
+        for (kind, name) in [("audio", "Back"), ("audio", "Lead"), ("vca", "VB"), ("vca", "Vox"), ("vca", "All")] {
+            e.execute("track.new", &json!({"kind": kind, "name": name})).unwrap();
+        }
+        e.execute("track.group", &json!({"tracks": ["Back", "VB"], "name": "Back V"})).unwrap();
+        e.execute("track.group", &json!({"tracks": ["Back", "Lead", "Vox"], "name": "Vocals"})).unwrap();
+        e.execute("track.group", &json!({"tracks": ["Vox"], "name": "Top"})).unwrap();
+        let mut s = e.session().clone();
+        let top = s.groups[2].id;
+        s.tracks[4].mixer.vca_group = Some(top);
+        e.replace_session(s);
+        let s = e.session();
+        let by = |n: &str| s.tracks.iter().find(|t| t.name == n).unwrap();
+        let g = |n: &str| s.groups.iter().find(|g| g.name == n).unwrap();
+        assert_eq!(by("VB").mixer.vca_group, Some(g("Back V").id));
+        assert_eq!(by("Vox").mixer.vca_group, Some(g("Vocals").id));
+        assert!(!g("Back V").members.contains(&by("VB").id) && !g("Vocals").members.contains(&by("Vox").id));
+        assert!(g("Top").members.contains(&by("Vox").id));
+        let names: Vec<&str> = s.vca_masters(by("Back")).iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, ["VB", "Vox", "All"]);
     }
 }

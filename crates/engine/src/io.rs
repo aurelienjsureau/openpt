@@ -2329,19 +2329,15 @@ pub fn ptx_session_media(path: &str) -> Result<(Session, Vec<String>)> {
             id,
             name: g.name.clone(),
             letter,
-            members: members.clone(),
+            members,
             edit: true,
             mix: true,
             active: true,
             color,
             attributes: vec!["volume".into(), "mute".into(), "solo".into(), "record".into()],
         });
-        if let Some(v) = vca {
-            for m in members.into_iter().filter(|m| *m != v) {
-                if let Some(tr) = s.track_mut(m) {
-                    tr.mixer.vca = Some(v.0);
-                }
-            }
+        if let Some(tr) = vca.and_then(|v| s.track_mut(v)) {
+            tr.mixer.vca_group = Some(id);
         }
     }
     let mut meters = p.meters.clone();

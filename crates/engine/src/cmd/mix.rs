@@ -131,6 +131,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("mix.insert_param", "Set Plugin Parameter", [], None, "{track?, slot, param, value}", has_selection, insert_param),
         cmd!(
+            "mix.insert_automation",
+            "Plug-in Automation",
+            [],
+            None,
+            "{track?, slot, params: [id], enable?: true} — which parameters (master_bypass included) can be automated",
+            has_selection,
+            insert_automation
+        ),
+        cmd!(
             "mix.insert_params",
             "Set Plugin Parameters",
             [],
@@ -493,6 +502,28 @@ fn insert_param(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"value": v}))
 }
 
+fn insert_automation(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "mix.insert_automation";
+    let (t, slot) = track_slot(e, p, id, INSERT_SLOTS)?;
+    let ids: Vec<String> =
+        p.get("params").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let enable = bool_or(p, "enable", true);
+    let ins = e.session_mut().track_mut(t).and_then(|tr| tr.mixer.inserts.get_mut(slot)).and_then(Option::as_mut).ok_or_else(|| bad(id, "empty slot"))?;
+    let info = super::vst3::plugin_info(&ins.plugin).ok_or_else(|| bad(id, "unknown plugin"))?;
+    if let Some(x) = ids.iter().find(|x| x.as_str() != openpt_model::BYPASS_PARAM && info.param(x).is_none()) {
+        return Err(bad(id, format!("`{}` has no parameter `{x}`", info.id)));
+    }
+    for x in ids {
+        let has = ins.automated.contains(&x);
+        if enable && !has {
+            ins.automated.push(x);
+        } else if !enable && has {
+            ins.automated.retain(|a| *a != x);
+        }
+    }
+    Ok(json!({"automated": ins.automated}))
+}
+
 fn insert_params(e: &mut Engine, p: &Value) -> Result<Value> {
     let (t, slot) = track_slot(e, p, "mix.insert_params", INSERT_SLOTS)?;
     let obj = p.get("params").and_then(Value::as_object).cloned().ok_or_else(|| bad("mix.insert_params", "`params` must be an object"))?;
@@ -547,10 +578,8 @@ fn insert_transfer(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let mut ins = s.track(from_t).and_then(|t| t.mixer.inserts.get(from).cloned().flatten()).ok_or_else(|| bad(id, "no insert in that slot"))?;
     let dest = s.track(to_t).ok_or_else(|| bad(id, "no such track"))?;
-    if matches!(
-        dest.kind,
-        openpt_model::TrackKind::Midi | openpt_model::TrackKind::Vca | openpt_model::TrackKind::Folder | openpt_model::TrackKind::Video
-    ) {
+    let basic_folder = dest.kind == openpt_model::TrackKind::Folder && dest.mixer.input == openpt_model::Route::None;
+    if basic_folder || matches!(dest.kind, openpt_model::TrackKind::Midi | openpt_model::TrackKind::Vca | openpt_model::TrackKind::Video) {
         return Err(bad(id, "that track has no inserts"));
     }
     if dest.format.channels() < 2 {
@@ -754,7 +783,7 @@ pub(crate) fn current_value(tr: &openpt_model::Track, param: &AutoParam) -> f32 
         AutoParam::SendPan(i) => tr.mixer.sends.get(usize::from(*i)).and_then(Option::as_ref).map_or(0.0, |s| s.pan),
         AutoParam::SendMute(i) => tr.mixer.sends.get(usize::from(*i)).and_then(Option::as_ref).map_or(0.0, |s| f32::from(u8::from(s.mute))),
         AutoParam::Plugin { slot, param } => {
-            tr.mixer.inserts.get(usize::from(*slot)).and_then(Option::as_ref).and_then(|i| i.params.get(param).copied()).unwrap_or(0.0)
+            tr.mixer.inserts.get(usize::from(*slot)).and_then(Option::as_ref).and_then(|i| if param == openpt_model::BYPASS_PARAM { Some(f32::from(u8::from(i.bypass))) } else { i.params.get(param).copied() }).unwrap_or(0.0)
         }
     }
 }
@@ -960,6 +989,22 @@ mod tests {
     use openpt_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
     use openpt_time::Range;
     use std::sync::Arc;
+
+    #[test]
+    fn inserts_copy_within_a_routing_folder_but_not_into_a_basic_one() {
+        let mut e = Engine::default();
+        let s = e.session_mut();
+        let bus = s.add_bus("Gtrs", ChannelFormat::Stereo);
+        let routing = s.add_track(TrackKind::Folder, ChannelFormat::Stereo, Some("Gtrs"));
+        let basic = s.add_track(TrackKind::Folder, ChannelFormat::Stereo, Some("Box"));
+        let f = s.track_mut(routing).unwrap();
+        f.mixer.input = openpt_model::Route::Bus(bus);
+        f.mixer.inserts[0] = Some(openpt_model::Insert::new("open_eq"));
+        e.execute("mix.insert_transfer", &json!({"from_track": routing.0, "from": 0, "to_track": routing.0, "to": 1, "copy": true})).unwrap();
+        let ins = &e.session().track(routing).unwrap().mixer.inserts;
+        assert!(ins[0].is_some() && ins[1].is_some(), "copied next to itself");
+        assert!(e.execute("mix.insert_transfer", &json!({"from_track": routing.0, "from": 0, "to_track": basic.0, "to": 0})).is_err());
+    }
 
     #[test]
     fn a_selection_moves_by_the_same_amount_once_each_even_when_grouped() {

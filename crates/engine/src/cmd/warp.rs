@@ -6,7 +6,8 @@ use serde_json::json;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("clip.warp_add", "Add Warp Marker", [], None, "{clip: id, at: position}", always, add),
-        cmd!("clip.warp_move", "Move Warp Marker", [], None, "{clip: id, index: n, to: position}", always, move_marker),
+        cmd!("clip.warp_range", "Range Warp", [], None, "{clip: id, at: position} — a marker at `at` and on the nearest event either side", always, range),
+        cmd!("clip.warp_move","Move Warp Marker", [], None, "{clip: id, index: n, to: position}", always, move_marker),
         cmd!("clip.warp_remove", "Remove Warp Marker", [], None, "{clip: id, index: n}", always, remove),
         cmd!("clip.warp_at_events", "Add Warp Markers at Events", ["Clip"], None, "{clip: id, sensitivity?: 0..1}", always, warp_at_events),
         cmd!(
@@ -196,6 +197,35 @@ fn add(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"index": index}))
+}
+
+fn range(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "clip.warp_range";
+    let (t, c) = clip_param(e, id, p)?;
+    algorithm(e.session(), id, t)?;
+    let at = position_param(e, id, p, "at")?.ok_or_else(|| bad(id, "`at` required"))?;
+    if at <= c.start || at >= c.start + c.length {
+        return Err(bad(id, "a warp marker goes inside the clip"));
+    }
+    let found = events(e, &json!({"clip": c.id.0}))?;
+    let pos = |v: &Value| v.as_i64();
+    let ev: Vec<Samples> = found["events"].as_array().map(|a| a.iter().filter_map(pos).collect()).unwrap_or_default();
+    let mk: Vec<Samples> = found["markers"].as_array().map(|a| a.iter().filter_map(|m| pos(&m["at"])).collect()).unwrap_or_default();
+    let gap = 2;
+    let before = ev.iter().copied().filter(|x| *x < at - gap).max();
+    let after = ev.iter().copied().filter(|x| *x > at + gap).min();
+    let bounded = |lo: Samples, hi: Samples| mk.iter().any(|m| *m >= lo && *m <= hi);
+    if let Some(b) = before
+        && !bounded(b, at - gap)
+    {
+        add(e, &json!({"clip": c.id.0, "at": b}))?;
+    }
+    if let Some(a) = after
+        && !bounded(at + gap, a)
+    {
+        add(e, &json!({"clip": c.id.0, "at": a}))?;
+    }
+    add(e, &json!({"clip": c.id.0, "at": at}))
 }
 
 fn move_marker(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -646,6 +676,27 @@ mod tests {
         let c = e.session().find_clip(openpt_model::ClipId(clip)).unwrap().1.clone();
         assert!(c.warp.is_none());
         assert_eq!(e.session().sources.len(), renders - 1);
+    }
+
+    #[test]
+    fn range_warp_adds_the_click_and_the_events_either_side_in_one_undo() {
+        let (mut e, clip, t) = warped_clip();
+        e.execute("track.elastic", &json!({"track": t, "algorithm": "polyphonic"})).unwrap();
+        let ev = e.execute("clip.warp_events", &json!({"clip": clip})).unwrap();
+        let events: Vec<i64> = ev["events"].as_array().unwrap().iter().filter_map(|v| v.as_i64()).collect();
+        let markers = |e: &mut Engine, c: u64| -> Vec<i64> {
+            e.execute("clip.warp_events", &json!({"clip": c})).unwrap()["markers"].as_array().unwrap().iter().map(|m| m["at"].as_i64().unwrap()).collect()
+        };
+        let (a, b) = (events[1], events[2]);
+        let mid = (a + b) / 2;
+        let i = e.execute("clip.warp_range", &json!({"clip": clip, "at": mid})).unwrap()["index"].as_u64().unwrap();
+        assert_eq!(markers(&mut e, clip), vec![a, mid, b]);
+        assert_eq!(i, 1, "the middle one is the one to drag");
+        e.execute("clip.warp_range", &json!({"clip": clip, "at": mid + 100})).unwrap();
+        assert_eq!(markers(&mut e, clip), vec![a, mid, mid + 100, b], "existing markers already bound the range");
+        e.execute("edit.undo", &json!({})).unwrap();
+        e.execute("edit.undo", &json!({})).unwrap();
+        assert!(markers(&mut e, clip).is_empty());
     }
 
     #[test]

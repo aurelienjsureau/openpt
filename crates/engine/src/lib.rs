@@ -166,7 +166,8 @@ impl Engine {
         &mut Arc::make_mut(&mut self.doc).edit.zoom
     }
 
-    pub fn replace_session(&mut self, s: Session) {
+    pub fn replace_session(&mut self, mut s: Session) {
+        s.sync_vcas(true);
         self.transport = TransportStatus { position: s.edit.selection.start.max(0), ..TransportStatus::default() };
         self.transport_requests.clear();
         self.transport_requests.push(TransportRequest::ResetSession);
@@ -326,6 +327,9 @@ impl Engine {
         }
         match result {
             Ok(v) => {
+                if !Arc::ptr_eq(&before, &self.doc) && !self.doc.vca_plan(false).is_empty() {
+                    Arc::make_mut(&mut self.doc).sync_vcas(false);
+                }
                 cmd::remember_selection(self, &before);
                 if spec.undoable && !Arc::ptr_eq(&before, &self.doc) {
                     self.push_undo(spec.label, before);

@@ -84,6 +84,29 @@ struct Shared {
     playing: AtomicBool,
     speed: AtomicU32,
     meters: Mutex<MeterSnapshot>,
+    late: Mutex<LateBlocks>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LateBlocks {
+    pub blocks: u32,
+    pub late: u32,
+    pub close: u32,
+    pub worst_us: u32,
+    pub budget_us: u32,
+    pub session_us: u32,
+    pub slowest: Option<(TrackId, usize, u32, &'static str)>,
+}
+
+impl LateBlocks {
+    fn add(&mut self, o: &LateBlocks) {
+        self.blocks += o.blocks;
+        self.late += o.late;
+        self.close += o.close;
+        if o.worst_us > self.worst_us {
+            (self.worst_us, self.budget_us, self.session_us, self.slowest) = (o.worst_us, o.budget_us, o.session_us, o.slowest);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +185,7 @@ struct AudioState {
     recording: bool,
     stream_start_us: u64,
     rendered_samples: u64,
+    drain_us: u32,
     garbage: Sender<Vec<Box<dyn Plugin>>>,
     old_sessions: Option<SyncSender<Arc<Session>>>,
     latency_probe: bool,
@@ -205,6 +229,7 @@ impl AudioState {
             recording: false,
             stream_start_us: 0,
             rendered_samples: 0,
+            drain_us: 0,
         }
     }
 
@@ -407,7 +432,9 @@ impl AudioState {
     }
 
     fn fill(&mut self, out: &mut [f32], channels: usize) {
+        let t0 = std::time::Instant::now();
         self.drain();
+        self.drain_us = u32::try_from(t0.elapsed().as_micros()).unwrap_or(u32::MAX);
         if self.lent {
             out.iter_mut().for_each(|x| *x = 0.0);
             return;
@@ -609,6 +636,7 @@ impl Player {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let want = session.sample_rate.hz();
         let want_ch: u16 = 64;
@@ -792,8 +820,18 @@ impl Player {
         let _ = self.tx.send(Cmd::Session(s, instances));
     }
 
+    pub fn take_late_blocks(&self) -> Option<LateBlocks> {
+        let mut l = self.shared.late.lock().ok()?;
+        let got = std::mem::take(&mut *l);
+        (got.late + got.close > 0).then_some(got)
+    }
+
     pub fn capture_states(&self) -> PluginStates {
         self.side().capture_states()
+    }
+
+    pub fn capture_state(&self, track: TrackId, slot: usize) -> Option<Vec<u8>> {
+        self.side().capture_state((track, slot))
     }
 
     pub fn idle(&self) -> Vec<EditorEdit> {
@@ -981,6 +1019,13 @@ impl Side {
         self.states.iter_mut().filter(|(k, _)| !self.refused.contains(*k)).filter_map(|(&(t, slot), r)| Some((t, slot, r.save_state()?))).collect()
     }
 
+    fn capture_state(&mut self, key: (TrackId, usize)) -> Option<Vec<u8>> {
+        if self.refused.contains(&key) {
+            return None;
+        }
+        self.states.get_mut(&key)?.save_state()
+    }
+
     fn open_editor(&mut self, key: (TrackId, usize)) -> Result<(), String> {
         let e = self.editors.get_mut(&key).ok_or_else(|| "this plugin has no editor (or it is not loaded)".to_string())?;
         e.open()?;
@@ -1063,16 +1108,39 @@ where
     let mut scratch = vec![0.0f32; 8192 * frame];
     let chunk = scratch.len();
     let (failed, guard, gone) = (Arc::clone(fault), Arc::clone(shared), Arc::clone(fault));
+    let rate = f64::from(config.sample_rate.0.max(1));
+    let mut late = LateBlocks::default();
     device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
             mark_audio_thread();
+            let t0 = std::time::Instant::now();
             for out in data.chunks_mut(chunk) {
                 let Some(s) = scratch.get_mut(..out.len()) else { return };
                 guarded_block(&failed, &guard, s, |d| state.fill(d, channels));
                 for (o, x) in out.iter_mut().zip(s.iter()) {
                     *o = T::from_sample(*x);
                 }
+            }
+            let took = u32::try_from(t0.elapsed().as_micros()).unwrap_or(u32::MAX);
+            let budget = ((data.len() / frame) as f64 * 1_000_000.0 / rate) as u32;
+            let slowest = state.mix.take_slowest_insert();
+            let mut this = LateBlocks { blocks: 1, ..LateBlocks::default() };
+            if took > budget / 5 * 4 {
+                this = LateBlocks {
+                    blocks: 1,
+                    late: u32::from(took > budget),
+                    close: u32::from(took <= budget),
+                    worst_us: took,
+                    budget_us: budget,
+                    session_us: state.drain_us,
+                    slowest,
+                };
+            }
+            late.add(&this);
+            if let Ok(mut l) = guard.late.try_lock() {
+                l.add(&late);
+                late = LateBlocks::default();
             }
         },
         move |e: cpal::StreamError| {
@@ -1164,6 +1232,7 @@ mod tests {
             playing: AtomicBool::new(true),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         };
         let fault = Fault::default();
         let mut out = [0.5f32; 8];
@@ -1205,6 +1274,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), s, 48_000.0, channel().0);
@@ -1223,6 +1293,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), s, 48_000.0, channel().0);
@@ -1248,6 +1319,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::clone(&s), 48_000.0, channel().0);
@@ -1279,6 +1351,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let (gtx, grx) = channel();
@@ -1315,6 +1388,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let (gtx, _grx) = channel();
@@ -1394,6 +1468,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let (gtx, grx) = channel();
@@ -1423,6 +1498,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), s, 48_000.0, channel().0);
@@ -1458,6 +1534,7 @@ mod tests {
                 playing: AtomicBool::new(false),
                 speed: AtomicU32::new(1000),
                 meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
             });
             let (tx, rx) = channel();
             let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);
@@ -1488,6 +1565,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);
@@ -1521,6 +1599,7 @@ mod tests {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);
@@ -1553,6 +1632,7 @@ mod tests {
             playing: AtomicBool::new(true),
             speed: AtomicU32::new(1000),
             meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);

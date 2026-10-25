@@ -573,6 +573,7 @@ pub(crate) fn undo_history(app: &mut SoundApp, ui: &mut Ui) {
 }
 
 fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
+    crate::plugin_ui::automation_dialog(app, ctx);
     let wins = app.ui.plugin_windows.clone();
     let mut keep = Vec::new();
     for (tid, slot) in wins {
@@ -626,6 +627,9 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                         let _ = app.run("mix.insert_bypass", json!({"track": tid.0, "slot": slot}));
                     }
                     ui.menu_button("Presets ▾", |ui| preset_menu(app, ui, tid, slot, info, &ins));
+                    if ui.button("Auto").on_hover_text("Plug-in Automation: choose what can be automated").clicked() {
+                        crate::plugin_ui::open_automation_dialog(ui.ctx(), tid, slot);
+                    }
                 }
                 if openpt_mix::is_third_party(&ins.plugin) {
                     let open = app.player.as_ref().is_some_and(|p| p.editor_open(tid, slot));

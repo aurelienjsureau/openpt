@@ -198,3 +198,31 @@ fn the_top_of_a_selection_trims_it_without_aiming_at_the_line() {
     let sel = h.state().engine.session().edit.selection;
     assert_eq!((sel.start, sel.end), (at(x0), at(x1)), "the selection stays");
 }
+
+#[test]
+fn a_breakpoint_holds_still_until_dragged_and_the_nearest_one_is_taken() {
+    let (mut h, kick) = harness("volume", "grabber");
+    let [top, bottom, left, right] = lane(&h, kick);
+    let s = h.state().engine.session();
+    let (scroll, spp) = (s.edit.zoom.scroll, s.edit.zoom.samples_per_px);
+    let at = |x: f32| scroll + (f64::from(x - left) * spp) as i64;
+    let y_of = |v: f32| bottom - 4.0 - (v + 60.0) / 72.0 * (bottom - top - 8.0);
+    let x = (left + right) / 2.0;
+    let (a, b) = (at(x), at(x + 8.0));
+    h.state_mut().run("automation.set_point", json!({"track": kick.0, "param": "volume", "at": a, "value": -6.0})).unwrap();
+    h.state_mut().run("automation.set_point", json!({"track": kick.0, "param": "volume", "at": b, "value": -6.0})).unwrap();
+    h.run_steps(2);
+    let before = volume_points(&h, kick);
+    let p = pos2(x + 2.0, y_of(-6.0) + 4.0);
+    press(&mut h, p, true, Modifiers::NONE);
+    h.run_steps(2);
+    press(&mut h, p, false, Modifiers::NONE);
+    assert_eq!(volume_points(&h, kick), before, "a click moves nothing");
+    let from = pos2(x + 7.0, y_of(-6.0) + 3.0);
+    drag(&mut h, from, from - vec2(0.0, 20.0));
+    let pts = volume_points(&h, kick);
+    assert_eq!(pts.len(), 2, "{pts:?}");
+    assert_eq!(pts[0], before[0], "the other breakpoint stays: {pts:?}");
+    let want = -6.0 + 20.0 * 72.0 / (bottom - top - 8.0);
+    assert!((pts[1].1 - want).abs() < 0.3, "kept the grab offset: {pts:?}, want {want}");
+}

@@ -56,6 +56,8 @@ pub enum AutoParam {
     },
 }
 
+pub const BYPASS_PARAM: &str = "master_bypass";
+
 impl AutoParam {
     pub fn label(&self) -> String {
         match self {

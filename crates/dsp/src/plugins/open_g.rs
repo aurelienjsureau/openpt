@@ -309,8 +309,9 @@ impl OpenG {
                 d[self.dpos] = x;
                 let dry = d[(self.dpos + dlen - la) % dlen];
                 let act = self.chans[c].act;
-                act_max = act_max.max(act);
-                let wet = dry * crate::db_to_gain(if up { act } else { -act });
+                let g = crate::db_to_gain(if up { act } else { -act });
+                act_max = act_max.max(crate::gain_to_db(1.0 + self.mix * (g - 1.0)).abs());
+                let wet = dry * g;
                 let y = if audition { heard[c] } else { (dry + self.mix * (wet - dry)) * self.makeup };
                 peak_out = peak_out.max(y.abs());
                 io[c][i] = y;

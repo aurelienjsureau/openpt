@@ -327,11 +327,17 @@ pub enum Gesture {
         track: TrackId,
         param: String,
         at: Samples,
+        grab: egui::Vec2,
+        press: egui::Pos2,
+        moved: bool,
     },
     GainPoint {
         clip: openpt_model::ClipId,
         track: TrackId,
         at: Samples,
+        grab: egui::Vec2,
+        press: egui::Pos2,
+        moved: bool,
     },
     LineTrim {
         track: TrackId,
@@ -423,6 +429,9 @@ pub struct SoundApp {
     touched: std::collections::HashSet<TrackId>,
     param_touch: std::collections::HashMap<(TrackId, String), (f32, std::time::Instant)>,
     send_seen: std::collections::HashMap<(TrackId, usize), (f32, f32, bool)>,
+    bypass_seen: std::collections::HashMap<(TrackId, usize), bool>,
+    pub(crate) ruler_focus: Option<&'static str>,
+    late_log_at: Option<std::time::Instant>,
     last_write_at: Samples,
     pub frame_ms: f32,
     pub cpu_ms: f32,
@@ -515,6 +524,9 @@ impl SoundApp {
             touched: std::collections::HashSet::new(),
             param_touch: std::collections::HashMap::new(),
             send_seen: std::collections::HashMap::new(),
+            bypass_seen: std::collections::HashMap::new(),
+            ruler_focus: None,
+            late_log_at: None,
             last_write_at: i64::MIN,
             frame_ms: 0.0,
             cpu_ms: 0.0,
@@ -775,6 +787,14 @@ impl SoundApp {
         Ok(takes)
     }
 
+    pub fn capture_plugin_state(&mut self, t: TrackId, slot: usize) {
+        let Some(data) = self.player.as_ref().and_then(|p| p.capture_state(t, slot)) else { return };
+        let state = openpt_model::b64::encode(&data);
+        if let Err(e) = self.engine.execute("mix.insert_state", &json!({"track": t.0, "slot": slot, "state": state})) {
+            log::warn!("storing plugin state: {e}");
+        }
+    }
+
     pub fn capture_plugin_states(&mut self) {
         let Some(p) = &self.player else { return };
         for (t, slot, data) in p.capture_states() {
@@ -790,15 +810,45 @@ impl SoundApp {
         use openpt_model::AutomationMode as M;
         let writing =
             self.engine.session().track(t).is_some_and(|tr| matches!(tr.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch));
-        if writing && self.is_playing() && slot < 26 {
+        if writing && self.is_playing() && slot < 26 && self.automation_enabled(t, slot, param) {
             let lane = format!("plugin:{}:{param}", char::from(b'a' + slot as u8));
             self.param_touch.insert((t, lane), (value, std::time::Instant::now()));
         }
     }
 
+    fn log_late_blocks(&mut self) {
+        if self.late_log_at.is_some_and(|t| t.elapsed().as_secs() < 2) {
+            return;
+        }
+        self.late_log_at = Some(std::time::Instant::now());
+        let Some(l) = self.player.as_ref().and_then(Player::take_late_blocks) else { return };
+        let s = self.engine.session();
+        let slowest = l.slowest.map_or_else(String::new, |(t, slot, us, name)| {
+            let track = s.track(t).map_or_else(|| format!("track {}", t.0), |x| x.name.clone());
+            let place = if slot == openpt_mix::INSTRUMENT_SLOT { "instrument".to_string() } else { format!("insert {}", char::from(b'a'.saturating_add(slot as u8))) };
+            format!("; slowest plugin then: {name} on {track} ({place}) {:.1} ms", f64::from(us) / 1000.0)
+        });
+        log::warn!(
+            "audio: {} late callbacks (dropouts) and {} near late, of {}; worst {:.1} ms for a {:.1} ms buffer (session updates {:.1} ms){slowest}",
+            l.late,
+            l.close,
+            l.blocks,
+            f64::from(l.worst_us) / 1000.0,
+            f64::from(l.budget_us) / 1000.0,
+            f64::from(l.session_us) / 1000.0,
+        );
+    }
+
+    pub(crate) fn automation_enabled(&self, t: TrackId, slot: usize, param: &str) -> bool {
+        let Some(tr) = self.engine.session().track(t) else { return false };
+        tr.mixer.inserts.get(slot).and_then(Option::as_ref).is_some_and(|i| i.is_automated(param))
+            || tr.automation.iter().any(|l| matches!(&l.param, openpt_model::AutoParam::Plugin { slot: s, param: p } if usize::from(*s) == slot && p == param) && !l.points.is_empty())
+    }
+
     fn touch_moved_sends(&mut self, may_write: bool) {
         use openpt_model::AutomationMode as M;
         let now = std::time::Instant::now();
+        let mut bypass_seen = std::collections::HashMap::new();
         let mut seen = std::collections::HashMap::new();
         for t in &self.engine.session().tracks {
             let writing = matches!(t.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch);
@@ -821,8 +871,22 @@ impl SoundApp {
                     self.param_touch.insert((t.id, format!("send_{which}_mute")), (f32::from(u8::from(cur.2)), now));
                 }
             }
+            for (i, ins) in t.mixer.inserts.iter().enumerate() {
+                let Some(ins) = ins else { continue };
+                bypass_seen.insert((t.id, i), ins.bypass);
+                if may_write
+                    && writing
+                    && i < 26
+                    && ins.is_automated(openpt_model::BYPASS_PARAM)
+                    && self.bypass_seen.get(&(t.id, i)).is_some_and(|b| *b != ins.bypass)
+                {
+                    let lane = format!("plugin:{}:{}", char::from(b'a' + i as u8), openpt_model::BYPASS_PARAM);
+                    self.param_touch.insert((t.id, lane), (f32::from(u8::from(ins.bypass)), now));
+                }
+            }
         }
         self.send_seen = seen;
+        self.bypass_seen = bypass_seen;
     }
 
     fn apply_editor_edits(&mut self) {
@@ -1583,6 +1647,7 @@ impl SoundApp {
         }
         self.watch_output();
         self.watch_input();
+        self.log_late_blocks();
         self.handle_transport(dt);
         if self.engine.revision != self.last_rev {
             self.last_rev = self.engine.revision;
@@ -1954,6 +2019,9 @@ mod tests {
         app.run("transport.play", json!({})).unwrap();
         let ctx = egui::Context::default();
         app.handle_transport(0.1);
+        app.touch_param(kick, 0, "input_gain", 3.0);
+        assert!(app.param_touch.is_empty(), "not enabled for automation yet: nothing to write");
+        app.run("mix.insert_automation", json!({"track": "Kick", "slot": 0, "params": ["input_gain"]})).unwrap();
         app.touch_param(kick, 0, "input_gain", 3.0);
         for _ in 0..3 {
             app.handle_transport(0.1);

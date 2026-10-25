@@ -279,7 +279,9 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     for t in &tracks {
         if let Some(tr) = s.track_mut(*t) {
             let keep = (tr.mixer.input.clone(), tr.mixer.output.clone(), tr.mixer.vca, tr.mixer.record_arm, tr.mixer.pan.clone());
+            let vca_group = tr.mixer.vca_group;
             tr.mixer = mixer.clone();
+            tr.mixer.vca_group = vca_group;
             tr.mixer.input = keep.0;
             tr.mixer.output = keep.1;
             tr.mixer.vca = keep.2;
@@ -471,7 +473,7 @@ fn coalesce_vca(e: &mut Engine, p: &Value) -> Result<Value> {
         let Some(vca) = s.track(v).cloned() else { continue };
         let lane = vca.lane(&AutoParam::Volume).cloned().unwrap_or_else(|| AutomationLane::new(AutoParam::Volume));
         let level = vca.mixer.volume_db;
-        let members: Vec<TrackId> = s.tracks.iter().filter(|t| t.mixer.vca == Some(v.0)).map(|t| t.id).collect();
+        let members = s.vca_members(v);
         for m in &members {
             if let Some(tr) = s.track_mut(*m) {
                 add_to_volume(tr, &lane, level);

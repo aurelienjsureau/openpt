@@ -22,6 +22,21 @@ pub fn specs() -> Vec<CommandSpec> {
             let tick = s.tempo.samples_to_ticks(at, s.sample_rate);
             Ok(json!({"removed": s.tempo.remove_tempo(tick)}))
         }),
+        cmd!("event.meter_remove", "Remove Meter Change", [], None, "{at}", always, |e, p| {
+            let at = position_param(e, "event.meter_remove", p, "at")?.unwrap_or(0);
+            let s = e.session_mut();
+            let tick = s.tempo.samples_to_ticks(at, s.sample_rate);
+            Ok(json!({"removed": tick > 0 && s.tempo.remove_meter(tick)}))
+        }),
+        cmd!(
+            "event.tempo_clear",
+            "Clear Tempo or Meter Changes",
+            [],
+            None,
+            "{ruler?: tempo | meter, start?, end?} — the changes inside the range (default: the edit selection); the session's first stays",
+            always,
+            tempo_clear
+        ),
         cmd!("event.meter", "Change Meter...", ["Event", "Time Operations"], None, "{numerator, denominator, at?: position}", always, meter),
         cmd!("event.tempo_scale", "Scale...", ["Event", "Tempo Operations"], None, "{factor}", always, |e, p| {
             let f = f64_or(p, "factor", 1.0);
@@ -167,6 +182,29 @@ fn tempo_constant(e: &mut Engine, p: &Value) -> Result<Value> {
         s.tempo.set_tempo(t1, after).map_err(|err| bad(id, err.to_string()))?;
     }
     Ok(json!({"tick": t0, "end_tick": t1, "bpm": bpm}))
+}
+
+fn tempo_clear(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "event.tempo_clear";
+    let r = range_param(e, id, p)?;
+    let r = if r.is_empty() { e.session().edit.selection } else { r };
+    if r.is_empty() {
+        return Err(bad(id, "select a range on the ruler first"));
+    }
+    let meter = str_param(p, "ruler") == Some("meter");
+    let s = e.session_mut();
+    let sr = s.sample_rate;
+    let (a, b) = (s.tempo.samples_to_ticks(r.start, sr), s.tempo.samples_to_ticks(r.end, sr));
+    let ticks: Vec<i64> = if meter {
+        s.tempo.meters().iter().map(|m| m.tick).collect()
+    } else {
+        s.tempo.tempos().iter().map(|t| t.tick).collect()
+    };
+    let mut removed = 0;
+    for t in ticks.into_iter().filter(|t| *t > 0 && *t >= a && *t < b) {
+        removed += usize::from(if meter { s.tempo.remove_meter(t) } else { s.tempo.remove_tempo(t) });
+    }
+    Ok(json!({"removed": removed}))
 }
 
 fn meter(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -479,6 +517,23 @@ mod tests {
         let s = e.session();
         let tick = s.tempo.samples_to_ticks(at, s.sample_rate);
         assert!((s.tempo.tempo_at_tick(tick) - 133.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tempo_and_meter_changes_in_a_range_are_cleared() {
+        let mut e = crate::Engine::default();
+        let sr = e.session().sample_rate;
+        for (bpm, secs) in [(100.0, 2.0), (110.0, 4.0), (90.0, 8.0)] {
+            e.execute("event.tempo", &json!({"bpm": bpm, "at": sr.samples(secs)})).unwrap();
+        }
+        e.execute("event.meter", &json!({"numerator": 3, "denominator": 4, "at": sr.samples(3.0)})).unwrap();
+        let r = e.execute("event.tempo_clear", &json!({"start": 0, "end": sr.samples(5.0)})).unwrap();
+        assert_eq!(r["removed"], 2);
+        assert_eq!(e.session().tempo.tempos().len(), 2, "the first and the one at 8 s");
+        assert_eq!(e.session().tempo.meters().len(), 2, "meters untouched");
+        e.execute("edit.select", &json!({"start": sr.samples(1.0), "end": sr.samples(6.0)})).unwrap();
+        assert_eq!(e.execute("event.tempo_clear", &json!({"ruler": "meter"})).unwrap()["removed"], 1);
+        assert_eq!(e.session().tempo.meters().len(), 1);
     }
 
     #[test]

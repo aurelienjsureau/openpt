@@ -90,6 +90,24 @@ pub fn lane(app: &mut SoundApp, ui: &Ui, resp: &Response, track: &Track, tl: Rec
     if near.is_some() && track.view == "warp" {
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
+    let shift = ui.input(|i| i.modifiers.shift || i.events.iter().any(|e| matches!(e, egui::Event::PointerButton { modifiers, .. } if modifiers.shift)));
+    if shift
+        && (resp.clicked() || (resp.drag_started() && near.is_none()))
+        && track.view == "warp"
+        && let Some(c) = &clip
+    {
+        match app.run("clip.warp_range", json!({"clip": c.id.0, "at": gat})) {
+            Ok(v) => {
+                if resp.drag_started()
+                    && let Some(i) = v["index"].as_u64()
+                {
+                    ui.ctx().data_mut(|d| d.insert_temp(drag_id(), (c.id.0, i as usize)));
+                }
+            }
+            Err(e) => app.ui.status = e,
+        }
+        return true;
+    }
     if resp.drag_started()
         && near.is_none()
         && track.view == "warp"

@@ -49,7 +49,9 @@ pub fn header(
             if bypass.on_hover_text("Bypass").clicked() {
                 let _ = app.run("mix.insert_bypass", json!({"track": tid.0, "slot": slot}));
             }
-            ui.add_enabled(false, egui::Button::new("Auto").small());
+            if ui.add(egui::Button::new("Auto").small()).on_hover_text("Plug-in Automation: choose what can be automated").clicked() {
+                open_automation_dialog(ui.ctx(), tid, slot);
+            }
         });
     });
     if takes_key(&ins.plugin) {
@@ -523,5 +525,109 @@ pub fn panel_width(info: &PluginInfo) -> f32 {
             }
             None => (info.params.len().clamp(1, 6) as f32 * CELL.x + 24.0).max(360.0),
         },
+    }
+}
+
+fn automation_dialog_id() -> egui::Id {
+    egui::Id::new("plugin-automation-dialog")
+}
+
+pub fn open_automation_dialog(ctx: &egui::Context, tid: TrackId, slot: usize) {
+    ctx.data_mut(|d| d.insert_temp(automation_dialog_id(), (tid.0, slot)));
+}
+
+pub fn automation_dialog(app: &mut SoundApp, ctx: &egui::Context) {
+    let Some((t, slot)) = ctx.data(|d| d.get_temp::<(u64, usize)>(automation_dialog_id())) else { return };
+    let tid = TrackId(t);
+    let Some((tname, ins)) =
+        app.engine.session().track(tid).and_then(|tr| tr.mixer.inserts.get(slot).cloned().flatten().map(|i| (tr.name.clone(), i)))
+    else {
+        ctx.data_mut(|d| d.remove::<(u64, usize)>(automation_dialog_id()));
+        return;
+    };
+    let Some(info) = crate::mix_window::plugin_info(&ins.plugin) else { return };
+    let all: Vec<(&str, &str)> =
+        std::iter::once((openpt_model::BYPASS_PARAM, "Master Bypass")).chain(info.params.iter().map(|p| (p.id, p.name))).collect();
+    let (left, right): (Vec<_>, Vec<_>) = all.iter().partition(|(id, _)| !ins.is_automated(id));
+    let sel_id = egui::Id::new(("plugin-automation-sel", t, slot));
+    let mut sel: (Vec<String>, Vec<String>) = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_default();
+    let mut open = true;
+    let mut done = false;
+    let mut change: Option<(Vec<String>, bool)> = None;
+    egui::Window::new(format!("Plug-in Automation · {tname} · {}", info.name))
+        .id(automation_dialog_id())
+        .pivot(Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center())
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .show(ctx, |ui| {
+            let list = |ui: &mut Ui, items: &[&(&str, &str)], chosen: &mut Vec<String>, salt: &str| {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_min_size(vec2(200.0, 260.0));
+                    egui::ScrollArea::vertical().id_salt(salt).max_height(260.0).show(ui, |ui| {
+                        for (id, name) in items {
+                            let on = chosen.iter().any(|c| c == id);
+                            let r = ui.selectable_label(on, *name);
+                            if r.clicked() {
+                                if ui.input(|i| i.modifiers.command || i.modifiers.shift) {
+                                    if on {
+                                        chosen.retain(|c| c != id);
+                                    } else {
+                                        chosen.push((*id).to_string());
+                                    }
+                                } else {
+                                    *chosen = vec![(*id).to_string()];
+                                }
+                            }
+                            if r.double_clicked() {
+                                *chosen = vec![(*id).to_string()];
+                            }
+                        }
+                    });
+                });
+            };
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Controls");
+                    list(ui, &left, &mut sel.0, "auto-left");
+                });
+                ui.vertical(|ui| {
+                    ui.add_space(110.0);
+                    if ui.add_enabled(!sel.0.is_empty(), egui::Button::new("Add >>")).clicked() {
+                        change = Some((std::mem::take(&mut sel.0), true));
+                    }
+                    if ui.add_enabled(!sel.1.is_empty(), egui::Button::new("<< Remove")).clicked() {
+                        change = Some((std::mem::take(&mut sel.1), false));
+                    }
+                });
+                ui.vertical(|ui| {
+                    ui.label("Automation enabled");
+                    list(ui, &right, &mut sel.1, "auto-right");
+                });
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Add All").clicked() {
+                    change = Some((left.iter().map(|(id, _)| (*id).to_string()).collect(), true));
+                }
+                if ui.button("Remove All").clicked() {
+                    change = Some((right.iter().map(|(id, _)| (*id).to_string()).collect(), false));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done = ui.button("Done").clicked());
+            });
+        });
+    if let Some((ids, enable)) = change
+        && !ids.is_empty()
+        && let Err(e) = app.run("mix.insert_automation", json!({"track": t, "slot": slot, "params": ids, "enable": enable}))
+    {
+        app.ui.status = e;
+    }
+    if !open || done {
+        ctx.data_mut(|d| {
+            d.remove::<(u64, usize)>(automation_dialog_id());
+            d.remove::<(Vec<String>, Vec<String>)>(sel_id);
+        });
+    } else {
+        ctx.data_mut(|d| d.insert_temp(sel_id, sel));
     }
 }

@@ -2093,8 +2093,10 @@ mod window {
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumThreadWindows, GA_ROOT, GW_OWNER, GetAncestor, GetForegroundWindow, GetWindow,
         AdjustWindowRectEx, AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
         DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW,
         MF_CHECKED, MF_SEPARATOR, MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
@@ -2107,6 +2109,37 @@ mod window {
 
     pub fn on_main_thread() -> bool {
         std::thread::current().name() == Some("main")
+    }
+
+    fn app_window() -> HWND {
+        unsafe extern "system" fn pick(h: HWND, out: LPARAM) -> i32 {
+            unsafe {
+                if IsWindowVisible(h) != 0 && GetWindow(h, GW_OWNER).is_null() && with_state(h, |_| ()).is_none() {
+                    *(out as *mut HWND) = h;
+                    return 0;
+                }
+            }
+            1
+        }
+        let mut found: HWND = std::ptr::null_mut();
+        unsafe { EnumThreadWindows(GetCurrentThreadId(), Some(pick), &mut found as *mut HWND as LPARAM) };
+        found
+    }
+
+    fn give_back_focus(h: HWND) {
+        unsafe {
+            let mut w = GetAncestor(GetForegroundWindow(), GA_ROOT);
+            while !w.is_null() && w != h {
+                w = GetWindow(w, GW_OWNER);
+            }
+            if w.is_null() {
+                return;
+            }
+            let app = app_window();
+            if !app.is_null() {
+                SetForegroundWindow(app);
+            }
+        }
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -2469,6 +2502,7 @@ mod window {
             return 1;
         }
         if ours && msg == WM_CLOSE {
+            give_back_focus(hwnd);
             unsafe { ShowWindow(hwnd, SW_HIDE) };
             return 0;
         }
@@ -2579,7 +2613,12 @@ mod window {
             let class = class_name().ok_or_else(|| "cannot register the editor window class".to_string())?;
             let title = wide(title);
             let (ow, oh) = outer_size(STYLE, 0, w, h + HEADER);
-            let owner = unsafe { GetActiveWindow() };
+            let owner = match app_window() {
+                h if h.is_null() => {
+                    unsafe { GetActiveWindow() }
+                }
+                h => h,
+            };
             let hwnd = unsafe {
                 CreateWindowExW(
                     0,
@@ -2702,6 +2741,7 @@ mod window {
 
         pub fn close(self) {
             if let Some(h) = self.live() {
+                give_back_focus(h);
                 STATES.with(|s| s.borrow_mut().remove(&(h as usize)));
                 unsafe { DestroyWindow(h) };
             }

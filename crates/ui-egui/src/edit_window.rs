@@ -562,6 +562,8 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
     ui.painter().rect_filled(area, 0.0, t.ruler_bg);
     let view = Range::new(sample_at(&s, tl, tl.min.x), sample_at(&s, tl, tl.max.x));
     let sr = s.sample_rate;
+    let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.press_origin() } else { None });
+    let mut on_ruler = false;
     let mut y0 = area.min.y + 3.0;
     for (i, id) in rulers.iter().enumerate() {
         let h = ruler_height(id);
@@ -574,6 +576,7 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
         match id.as_str() {
             "tempo" => {
                 painter.rect_filled(row.shrink2(vec2(0.0, 1.0)), 0.0, t.tempo_ruler);
+                on_ruler |= pressed.is_some_and(|p| row.contains(p));
                 let tresp = ui.interact(row, ui.id().with("tempo_ruler"), Sense::click_and_drag());
                 let hit = |x: f32| s.tempo.tempos().iter().find(|e| (x_of(&s, tl, s.tempo.tick_to_samples(e.tick, sr)) - x).abs() < 7.0).copied();
                 let drag_key = egui::Id::new("tempo_drag");
@@ -597,6 +600,8 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                         && let Some(ev) = ui.input(|i| i.pointer.press_origin()).and_then(|o| hit(o.x)).filter(|e| e.tick > 0)
                     {
                         ui.ctx().data_mut(|d| d.insert_temp(drag_key, (ev.tick, ev.bpm)));
+                    } else if ui.ctx().data(|d| d.get_temp::<(i64, f64)>(drag_key)).is_none() {
+                        ruler_range(app, ui, &tresp, &s, tl, "tempo");
                     }
                     if let Some((_, _)) = ui.ctx().data(|d| d.get_temp::<(i64, f64)>(drag_key)) {
                         ui.painter().vline(p.x, row.min.y..=tl.max.y, Stroke::new(1.0, Color32::from_rgb(220, 60, 50)));
@@ -646,6 +651,17 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
             }
             "meter" => {
                 painter.rect_filled(row.shrink2(vec2(0.0, 1.0)), 0.0, t.meter_ruler);
+                on_ruler |= pressed.is_some_and(|p| row.contains(p));
+                let mresp = ui.interact(row, ui.id().with("meter_ruler"), Sense::click_and_drag());
+                if mresp.clicked()
+                    && crate::mix_window::click_mods(ui).alt
+                    && let Some(p) = mresp.interact_pointer_pos()
+                    && let Some(ev) = s.tempo.meters().iter().find(|e| e.tick > 0 && (x_of(&s, tl, s.tempo.tick_to_samples(e.tick, sr)) - p.x).abs() < 12.0)
+                {
+                    let _ = app.run("event.meter_remove", json!({"at": s.tempo.tick_to_samples(ev.tick, sr)}));
+                } else {
+                    ruler_range(app, ui, &mresp, &s, tl, "meter");
+                }
                 for ev in s.tempo.meters() {
                     let x = x_of(&s, tl, s.tempo.tick_to_samples(ev.tick, sr));
                     painter.text(
@@ -799,7 +815,22 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
             }
         }
     }
+    if pressed.is_some() && !on_ruler {
+        app.ruler_focus = None;
+    }
     ui.painter().line_segment([pos2(area.min.x, area.max.y - 1.0), pos2(area.max.x, area.max.y - 1.0)], Stroke::new(1.0, t.border));
+}
+
+fn ruler_range(app: &mut SoundApp, ui: &Ui, resp: &egui::Response, s: &Session, tl: Rect, ruler: &'static str) {
+    if resp.clicked() || resp.drag_started() {
+        app.ruler_focus = Some(ruler);
+    }
+    if !resp.dragged() {
+        return;
+    }
+    let (Some(o), Some(p)) = (ui.input(|i| i.pointer.press_origin()), resp.interact_pointer_pos()) else { return };
+    let (a, b) = (snap(s, sample_at(s, tl, o.x).max(0)), snap(s, sample_at(s, tl, p.x).max(0)));
+    let _ = app.run("edit.select", json!({"start": a.min(b), "end": a.max(b)}));
 }
 
 fn timebase_ruler(
@@ -1546,13 +1577,14 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
         ui.painter().rect_filled(vr.shrink(1.5), 1.5, Color32::BLACK);
         let m = &track.mixer;
         let now = app.position();
-        let pan = if m.pan.is_empty() {
+        let panner = crate::mix_window::has_panner(app, track);
+        let pan = if !panner {
             "-".into()
         } else {
             (0..m.pan.len().min(2)).map(|i| crate::widgets::pan_text(openpt_mix::pan_at(track, i, now))).collect::<Vec<_>>().join(" ")
         };
         let ink = Tokens::DARK.counter_text;
-        let stereo = m.pan.len() >= 2;
+        let stereo = panner && m.pan.len() >= 2;
         if stereo {
             let y = vr.min.y + 22.0;
             for (k, align, x) in [(0, Align2::LEFT_CENTER, vr.min.x + 7.0), (1, Align2::RIGHT_CENTER, vr.max.x - 6.5)] {
@@ -1573,7 +1605,8 @@ fn io_column(app: &mut SoundApp, ui: &mut Ui, track: &Track, r: Rect) {
         ui.painter().hline(vr.min.x + 7.0..=vr.max.x - 6.0, vr.min.y + 14.5, Stroke::new(1.0, Color32::from_gray(35)));
         let (vol, pan) = (m.volume_db, m.pan.clone());
         let mid = vr.min.y + 14.5;
-        for (i, hr) in [Rect::from_min_max(vr.min, pos2(vr.max.x, mid)), Rect::from_min_max(pos2(vr.min.x, mid), vr.max)].into_iter().enumerate() {
+        let lines = [Rect::from_min_max(vr.min, pos2(vr.max.x, mid)), Rect::from_min_max(pos2(vr.min.x, mid), vr.max)];
+        for (i, hr) in lines.into_iter().enumerate().take(if panner { 2 } else { 1 }) {
             let tip = if i == 0 { "Volume · Alt-click: 0 dB" } else { "Pan · Alt-click: centre" };
             let resp = ui.interact(hr, ui.id().with(("io_readout", id.0, i)), Sense::click_and_drag()).on_hover_text(tip);
             let alt_click = resp.clicked() && crate::mix_window::click_mods(&ui).alt;
@@ -1769,6 +1802,18 @@ fn track_view_label(track: &Track, v: &str) -> String {
     {
         return format!("{} {}", (b'a' + slot) as char, pi.name);
     }
+    if let Some(AutoParam::Plugin { slot, param }) = AutoParam::parse(v)
+        && param == openpt_model::BYPASS_PARAM
+    {
+        return format!("{} Master Bypass", (b'a' + slot) as char);
+    }
+    if track.mixer.pan.len() == 2 {
+        match v {
+            "pan" => return "pan left".into(),
+            "pan2" => return "pan right".into(),
+            _ => {}
+        }
+    }
     view_label(v)
 }
 
@@ -1783,9 +1828,13 @@ fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
             opts.extend(["warp", "analysis"]);
         }
     }
-    opts.extend(["volume", "pan", "mute"]);
+    opts.push("volume");
+    if crate::mix_window::has_panner(app, track) {
+        opts.extend(if track.mixer.pan.len() == 2 { &["pan", "pan2"][..] } else { &["pan"][..] });
+    }
+    opts.push("mute");
     for o in opts {
-        if ui.selectable_label(track.view == o, view_label(o)).clicked() {
+        if ui.selectable_label(track.view == o, track_view_label(track, o)).clicked() {
             let _ = app.run("track.view", json!({"track": id, "view": o}));
         }
     }
@@ -1806,12 +1855,19 @@ fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
     for (slot, ins) in track.mixer.inserts.iter().enumerate() {
         let Some(ins) = ins else { continue };
         let Some(info) = crate::mix_window::plugin_info(&ins.plugin) else { continue };
+        let shown: Vec<(&str, &str)> = std::iter::once((openpt_model::BYPASS_PARAM, "Master Bypass"))
+            .chain(info.params.iter().map(|p| (p.id, p.name)))
+            .filter(|(pid, _)| app.automation_enabled(track.id, slot, pid))
+            .collect();
+        if shown.is_empty() {
+            continue;
+        }
         ui.menu_button(info.name, |ui| {
             let max_h = (ui.ctx().content_rect().height() - 80.0).max(160.0);
             egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
-                for p in info.params {
-                    let v = format!("plugin:{}:{}", (b'a' + slot as u8) as char, p.id);
-                    if ui.selectable_label(track.view == v, p.name).clicked() {
+                for (pid, name) in shown {
+                    let v = format!("plugin:{}:{pid}", (b'a' + slot as u8) as char);
+                    if ui.selectable_label(track.view == v, name).clicked() {
                         let _ = app.run("track.view", json!({"track": id, "view": v}));
                         ui.close();
                     }
@@ -2434,8 +2490,12 @@ fn gain_db_of_y((top, bot): (f32, f32), y: f32) -> f32 {
 }
 
 enum LineHit {
-    Auto { param: AutoParam, point: Option<Samples>, at: Samples, value: f32, per_px: f32 },
-    Gain { clip: ClipId, point: Option<Samples>, at: Samples, db: f32, per_px: f32 },
+    Auto { param: AutoParam, point: Option<Samples>, at: Samples, value: f32, per_px: f32, grab: egui::Vec2 },
+    Gain { clip: ClipId, point: Option<Samples>, at: Samples, db: f32, per_px: f32, grab: egui::Vec2 },
+}
+
+fn nearest_point(q: Pos2, pts: impl Iterator<Item = (Samples, Pos2)>) -> Option<(Samples, Pos2)> {
+    pts.filter(|(_, c)| c.distance(q) < 7.0).min_by(|a, b| a.1.distance(q).total_cmp(&b.1.distance(q)))
 }
 
 impl LineHit {
@@ -2457,46 +2517,55 @@ fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Too
     let grabber = tool == Tool::Grabber;
     let at = sample_at(s, tl, q.x).max(0);
     let trim = in_trim_zone(s, track, lane, tl, q);
-    let near = |x: f32, y: f32| pos2(x, y).distance(q) < 7.0;
     if let Some(param) = AutoParam::parse(&track.view) {
         let range = auto_range(track, &param);
         let def = auto_default(track, &param);
         let lane_pts = track.lane(&param);
-        let point = lane_pts.and_then(|l| l.points.iter().find(|pt| near(x_of(s, tl, pt.at), auto_y(lane, range, pt.value)))).map(|pt| pt.at);
+        let per_px = (range.1 - range.0) / (lane.height() - 8.0).max(1.0);
+        let point = lane_pts.and_then(|l| nearest_point(q, l.points.iter().map(|pt| (pt.at, pos2(x_of(s, tl, pt.at), auto_y(lane, range, pt.value))))));
         let line = lane_pts.map_or(def, |l| l.value_at(at, def));
-        if trim {
-            return Some(LineHit::Auto { param, point: None, at, value: line, per_px: (range.1 - range.0) / (lane.height() - 8.0).max(1.0) });
+        if let Some((pt, c)) = point {
+            return Some(LineHit::Auto { param, point: Some(pt), at, value: line, per_px, grab: c - q });
         }
-        let on_line = (auto_y(lane, range, line) - q.y).abs() < 5.0;
-        if point.is_none() && !on_line && !grabber {
+        if trim {
+            return Some(LineHit::Auto { param, point: None, at, value: line, per_px, grab: egui::Vec2::ZERO });
+        }
+        let line_y = auto_y(lane, range, line);
+        let on_line = (line_y - q.y).abs() < 5.0;
+        if !on_line && !grabber {
             return None;
         }
-        let value = if on_line { line } else { auto_value(lane, range, q.y) };
-        return Some(LineHit::Auto { param, point, at, value, per_px: (range.1 - range.0) / (lane.height() - 8.0).max(1.0) });
+        let (value, grab) = if on_line { (line, vec2(0.0, line_y - q.y)) } else { (auto_value(lane, range, q.y), egui::Vec2::ZERO) };
+        return Some(LineHit::Auto { param, point: None, at, value, per_px, grab });
     }
     if track.view != "clip_gain" {
         return None;
     }
     let c = clip_at(track, at).filter(|c| c.is_audio())?;
     let span = gain_span(s, lane);
-    let point = c.gain_env.iter().find(|(o, db)| near(x_of(s, tl, c.start + o), gain_y(span, c.gain_db + db))).map(|p| p.0);
+    let per_px = 72.0 / (span.1 - span.0 - 6.0).max(1.0);
     let rel = at - c.start;
     let line = c.gain_db_at(rel);
-    let on_line = (gain_y(span, line) - q.y).abs() < 5.0;
-    if point.is_none() && !on_line && !trim {
+    if let Some((o, p)) = nearest_point(q, c.gain_env.iter().map(|(o, db)| (*o, pos2(x_of(s, tl, c.start + o), gain_y(span, c.gain_db + db))))) {
+        return Some(LineHit::Gain { clip: c.id, point: Some(o), at: rel, db: line, per_px, grab: p - q });
+    }
+    let line_y = gain_y(span, line);
+    let on_line = (line_y - q.y).abs() < 5.0;
+    if !on_line && !trim {
         return None;
     }
-    let db = if on_line || trim { line } else { gain_db_of_y(span, q.y) };
-    Some(LineHit::Gain { clip: c.id, point, at: rel, db, per_px: 72.0 / (span.1 - span.0 - 6.0).max(1.0) })
+    let (db, grab) = if on_line || trim { (line, vec2(0.0, line_y - q.y)) } else { (gain_db_of_y(span, q.y), egui::Vec2::ZERO) };
+    Some(LineHit::Gain { clip: c.id, point: None, at: rel, db, per_px, grab })
 }
 
-fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, y: f32) {
+fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, press: Pos2) {
     app.engine.end_merge();
     let s = app.engine.session_arc();
     let sel = s.edit.selection;
+    let y = press.y;
     let in_sel = |at: Samples| !alt && sel.end > sel.start && s.edit.selected_tracks.contains(&track) && at >= sel.start && at <= sel.end;
     match &hit {
-        LineHit::Auto { param, at, per_px, .. } if in_sel(*at) => {
+        LineHit::Auto { param, point: None, at, per_px, .. } if in_sel(*at) => {
             app.gesture = Some(Gesture::LineTrim {
                 track,
                 param: Some(automation_id(param)),
@@ -2509,7 +2578,7 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, y: f3
             });
             return;
         }
-        LineHit::Gain { clip, at, per_px, .. } if s.find_clip(*clip).is_some_and(|(_, c)| in_sel(c.start + at)) => {
+        LineHit::Gain { clip, point: None, at, per_px, .. } if s.find_clip(*clip).is_some_and(|(_, c)| in_sel(c.start + at)) => {
             let c0 = s.find_clip(*clip).map_or(0, |(_, c)| c.start);
             app.gesture = Some(Gesture::LineTrim {
                 track,
@@ -2533,7 +2602,7 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, y: f3
             let _ = app.run("clip.gain_point_remove", json!({"clip": clip.0, "at": at}));
         }
         LineHit::Auto { point: None, .. } | LineHit::Gain { point: None, .. } if alt => {}
-        LineHit::Auto { param, point, at, value, .. } => {
+        LineHit::Auto { param, point, at, value, grab, .. } => {
             let pid = automation_id(&param);
             let at = match point {
                 Some(p) => p,
@@ -2544,9 +2613,9 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, y: f3
                     at
                 }
             };
-            app.gesture = Some(Gesture::AutoPoint { track, param: pid, at });
+            app.gesture = Some(Gesture::AutoPoint { track, param: pid, at, grab, press, moved: false });
         }
-        LineHit::Gain { clip, point, at, db, .. } => {
+        LineHit::Gain { clip, point, at, db, grab, .. } => {
             let at = match point {
                 Some(p) => p,
                 None => {
@@ -2555,7 +2624,7 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, y: f3
                     r.ok().and_then(|v| v.get("at").and_then(serde_json::Value::as_i64)).unwrap_or(at)
                 }
             };
-            app.gesture = Some(Gesture::GainPoint { clip, track, at });
+            app.gesture = Some(Gesture::GainPoint { clip, track, at, grab, press, moved: false });
         }
     }
 }
@@ -2799,7 +2868,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         && gain_icon_at(p).is_none()
         && let Some(h) = line_hit(&s, track, lane, tl, p, tool)
     {
-        press_line(app, track.id, h, crate::mix_window::click_mods(ui).alt, p.y);
+        press_line(app, track.id, h, crate::mix_window::click_mods(ui).alt, p);
     }
     let gain_drag = if resp.drag_started() { gain_icon_at(origin) } else { None };
     if let Some(c) = gain_drag {
@@ -3051,15 +3120,18 @@ fn drive_drag(app: &mut SoundApp, ctx: &egui::Context) {
             *last = at;
             let _ = app.engine.execute("transport.locate", &json!({"at": at}));
         }
-        Some(Gesture::AutoPoint { track, param, at: cur }) => {
-            if let Some(t) = s.track(*track)
+        Some(Gesture::AutoPoint { track, param, at: cur, grab, press, moved }) => {
+            *moved |= p.distance(*press) > 3.0;
+            if *moved
+                && let Some(t) = s.track(*track)
                 && let Some(ap) = AutoParam::parse(param)
                 && let Some((_, row)) = rows.iter().find(|(i, _)| *i == t.id.0)
             {
                 let lane = lane_rect(t, rect(*row), tl);
-                let value = auto_value(lane, auto_range(t, &ap), p.y);
+                let q = p + *grab;
+                let value = auto_value(lane, auto_range(t, &ap), q.y);
                 let (shift, flip) = ctx.input(|i| (i.modifiers.shift, i.modifiers.command));
-                let to = if shift { *cur } else { drag_snap(&s, at, flip) };
+                let to = if shift { *cur } else { drag_snap(&s, sample_at(&s, tl, q.x).max(0), flip) };
                 let key = format!("auto_point:{}", track.0);
                 if let Ok(v) = app.engine.execute_merged(
                     "automation.move_point",
@@ -3095,15 +3167,18 @@ fn drive_drag(app: &mut SoundApp, ctx: &egui::Context) {
             }
             ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }
-        Some(Gesture::GainPoint { clip, track, at: cur }) => {
-            if let Some((_, c)) = s.find_clip(*clip)
+        Some(Gesture::GainPoint { clip, track, at: cur, grab, press, moved }) => {
+            *moved |= p.distance(*press) > 3.0;
+            if *moved
+                && let Some((_, c)) = s.find_clip(*clip)
                 && let Some(t) = s.track(*track)
                 && let Some((_, row)) = rows.iter().find(|(i, _)| *i == t.id.0)
             {
                 let lane = lane_rect(t, rect(*row), tl);
-                let db = gain_db_of_y(gain_span(&s, lane), p.y);
+                let q = p + *grab;
+                let db = gain_db_of_y(gain_span(&s, lane), q.y);
                 let (shift, flip) = ctx.input(|i| (i.modifiers.shift, i.modifiers.command));
-                let to = if shift { *cur } else { drag_snap(&s, at, flip) - c.start };
+                let to = if shift { *cur } else { drag_snap(&s, sample_at(&s, tl, q.x).max(0), flip) - c.start };
                 let key = format!("gain_point:{}", clip.0);
                 if let Ok(v) = app.engine.execute_merged("clip.gain_point", &json!({"clip": clip.0, "from": *cur, "at": to, "db": db}), &key)
                     && let Some(a) = v.get("at").and_then(serde_json::Value::as_i64)

@@ -570,10 +570,15 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
     let targets: Vec<Option<TrackId>> = picked.iter().map(|t| dest_of(&t.name).and_then(|n| s.track_by_name(&n).map(|x| x.id))).collect();
     let new_ids: std::collections::BTreeMap<u64, TrackId> =
         picked.iter().zip(&targets).map(|(t, to)| (t.id.0, to.unwrap_or_else(|| TrackId(s.alloc())))).collect();
+    let mut vca_links: Vec<(TrackId, TrackId)> = Vec::new();
     for (mut tr, into) in picked.into_iter().zip(targets) {
         tr.id = new_ids[&tr.id.0];
         tr.folder = tr.folder.and_then(|f| new_ids.get(&f.0).copied());
         tr.mixer.vca = tr.mixer.vca.and_then(|v| new_ids.get(&v).map(|n| n.0));
+        if let Some(g) = tr.mixer.vca_group.take() {
+            let donor = other.group(g).map(|g| g.members.clone()).unwrap_or_default();
+            vca_links.extend(donor.iter().filter_map(|m| new_ids.get(&m.0)).map(|m| (*m, tr.id)));
+        }
         for pl in &mut tr.playlists {
             for c in &mut pl.clips {
                 c.id = s.new_clip_id();
@@ -674,6 +679,11 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
                 let pos = s.tracks.iter().position(|x| x.kind == TrackKind::Master).unwrap_or(s.tracks.len());
                 s.tracks.insert(pos, t);
             }
+        }
+    }
+    for (m, v) in vca_links {
+        if let Some(t) = s.track_mut(m) {
+            t.mixer.vca = Some(v.0);
         }
     }
     for f in out.iter().copied().filter(|f| s.track(*f).is_some_and(openpt_model::Track::is_folder)).collect::<Vec<_>>() {

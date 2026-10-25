@@ -979,3 +979,39 @@ mod tests {
         assert!(io[0].iter().all(|v| v.is_finite()));
     }
 }
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn open_sat_cost() {
+        for ch in [1usize, 2] {
+            let mut p = OpenSat::new();
+            for (k, v) in [("b1on", 1.0), ("b1drive", 43.0), ("b1freq", 436.0), ("b1type", 1.0), ("gainmatch", 1.0)] {
+                p.set_param(k, v);
+            }
+            p.prepare(44_100.0, 1024, ch);
+            let x: Vec<f32> = (0..1024).map(|i| 0.3 * (i as f32 * 0.05).sin()).collect();
+            let mut io = vec![x.clone(); ch];
+            let t = std::time::Instant::now();
+            let n = 200;
+            for _ in 0..n {
+                p.process(&mut io, 1024);
+                for c in io.iter_mut() {
+                    c.copy_from_slice(&x);
+                }
+            }
+            eprintln!("{ch} ch: {:.3} ms per 1024-sample block", t.elapsed().as_secs_f64() * 1000.0 / f64::from(n));
+            let mut worst = 0.0f64;
+            for _ in 0..400 {
+                let mut z = vec![vec![0.0f32; 1024]; ch];
+                let t = std::time::Instant::now();
+                p.process(&mut z, 1024);
+                worst = worst.max(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            eprintln!("{ch} ch: worst {worst:.3} ms per block in the silence after it");
+        }
+    }
+}

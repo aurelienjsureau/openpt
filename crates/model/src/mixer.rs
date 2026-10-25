@@ -1,4 +1,4 @@
-use crate::{AutomationMode, BusId, SourceId};
+use crate::{AutomationMode, BusId, GroupId, SourceId};
 use std::collections::BTreeMap;
 
 pub const INSERT_SLOTS: usize = 10;
@@ -428,6 +428,8 @@ pub struct Insert {
     pub multi_out: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<BusId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automated: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -450,7 +452,12 @@ impl Insert {
             key_listen: false,
             multi_out: false,
             outputs: Vec::new(),
+            automated: Vec::new(),
         }
+    }
+
+    pub fn is_automated(&self, param: &str) -> bool {
+        self.automated.iter().any(|a| a == param)
     }
 
     pub fn keyed_bus(&self) -> Option<BusId> {
@@ -535,6 +542,8 @@ pub struct Mixer {
     #[serde(default)]
     pub vca: Option<u64>,
     #[serde(default)]
+    pub vca_group: Option<GroupId>,
+    #[serde(default)]
     pub surround: Option<SurroundPan>,
 }
 
@@ -564,6 +573,7 @@ impl Mixer {
             heat_bypass: false,
             heat_pre: false,
             vca: None,
+            vca_group: None,
             surround: None,
         }
     }

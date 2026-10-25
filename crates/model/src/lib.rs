@@ -10,7 +10,7 @@ mod session;
 mod source;
 mod track;
 
-pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
+pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint, BYPASS_PARAM};
 pub use clip::{Clip, ClipContent, Fade, FadeShape, Warp, WarpMarker};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use markers::{Group, MarkerKind, MemoryLocation};

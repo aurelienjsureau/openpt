@@ -332,7 +332,16 @@ fn fixed(app: &mut SoundApp, key: Key, m: Modifiers, mac: bool) -> bool {
             true
         }
         Key::Backspace | Key::Delete if plain => {
-            let _ = app.run("edit.clear", json!({}));
+            match app.ruler_focus {
+                Some(ruler) => {
+                    if let Err(e) = app.run("event.tempo_clear", json!({"ruler": ruler})) {
+                        app.ui.status = e;
+                    }
+                }
+                None => {
+                    let _ = app.run("edit.clear", json!({}));
+                }
+            }
             true
         }
         Key::R if m.command && m.shift && !m.alt => {

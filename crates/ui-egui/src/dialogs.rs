@@ -514,6 +514,12 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                     if ui.selectable_label(kind == k.id(), k.label()).clicked() {
                                         *kind = k.id().to_string();
                                         *name = k.default_name().to_string();
+                                        let mono = openpt_model::ChannelFormat::Mono.label();
+                                        if *format == mono
+                                            && matches!(k, openpt_model::TrackKind::Aux | openpt_model::TrackKind::Folder | openpt_model::TrackKind::Instrument)
+                                        {
+                                            *format = openpt_model::ChannelFormat::Stereo.label().to_string();
+                                        }
                                     }
                                 }
                             });

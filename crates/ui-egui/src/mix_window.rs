@@ -108,8 +108,13 @@ fn output_format(app: &SoundApp, track: &Track) -> ChannelFormat {
     match &track.mixer.output {
         Route::Main => s.main_format(),
         Route::Bus(b) => s.bus(*b).map_or(ChannelFormat::Stereo, |b| b.format),
+        Route::Hardware(h) => s.outputs.iter().find(|o| &o.name == h).map_or(ChannelFormat::Stereo, |o| o.format),
         _ => ChannelFormat::Stereo,
     }
+}
+
+pub(crate) fn has_panner(app: &SoundApp, track: &Track) -> bool {
+    !track.mixer.pan.is_empty() && output_format(app, track).channels() >= 2
 }
 
 fn panner_speakers(fmt: ChannelFormat) -> Vec<PannerSpeaker> {
@@ -195,6 +200,9 @@ pub(crate) fn input_name(app: &SoundApp, track: &Track) -> String {
     if track.kind.is_midi() {
         return midi_input_name(app, track);
     }
+    if track.kind == TrackKind::Vca {
+        return track.mixer.vca_group.and_then(|g| app.engine.session().group(g)).map_or_else(|| "no group".into(), |g| g.name.clone());
+    }
     if track.mixer.input == Route::None && !track.kind.has_playlist() {
         return "no input".into();
     }
@@ -243,7 +251,27 @@ fn midi_input_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
 }
 
 pub(crate) fn route_popup(app: &mut SoundApp, resp: &egui::Response, id: TrackId, input: bool) {
+    if input && app.engine.session().track(id).is_some_and(|t| t.kind == TrackKind::Vca) {
+        egui::Popup::menu(resp).show(|ui| vca_group_menu(app, ui, id));
+        return;
+    }
     egui::Popup::menu(resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| route_menu(app, ui, id, input));
+}
+
+fn vca_group_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
+    let s = app.engine.session();
+    let current = s.track(id).and_then(|t| t.mixer.vca_group).map(|g| g.0);
+    let groups: Vec<(u64, String)> = s.groups.iter().filter(|g| g.mix).map(|g| (g.id.0, g.name.clone())).collect();
+    if ui.selectable_label(current.is_none(), "none").clicked() {
+        let _ = app.run("track.vca_group", json!({"vca": id.0, "group": null}));
+        ui.close();
+    }
+    for (gid, name) in &groups {
+        if ui.selectable_label(current == Some(*gid), name).clicked() {
+            let _ = app.run("track.vca_group", json!({"vca": id.0, "group": gid}));
+            ui.close();
+        }
+    }
 }
 
 fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapshot>) {
@@ -458,34 +486,8 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     let no_group = if narrow { "nogrp" } else { "no group" };
     let gr = Rect::from_min_size(pos2(x0 + 2.0, y), vec2(inner_w - 4.0, 16.0));
     let mut c = ui.new_child(egui::UiBuilder::new().id_salt(("mix-group", id.0)).max_rect(gr));
-    if track.kind == TrackKind::Vca {
-        let s = app.engine.session();
-        let members: Vec<openpt_model::TrackId> = s.tracks.iter().filter(|x| x.mixer.vca == Some(id.0)).map(|x| x.id).collect();
-        let current =
-            s.groups.iter().find(|g| !members.is_empty() && g.members.len() == members.len() && members.iter().all(|m| g.members.contains(m)));
-        let label = match current {
-            Some(g) => g.name.clone(),
-            None if members.is_empty() => no_group.to_string(),
-            None => format!("{} trk", members.len()),
-        };
-        let groups: Vec<(u64, String)> = s.groups.iter().filter(|g| g.mix).map(|g| (g.id.0, g.name.clone())).collect();
-        let current = current.map(|g| g.id.0);
-        let resp = selector_box(&mut c, gr.width(), gr.height(), &label, t.counter_text);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "VCA group"));
-        egui::Popup::menu(&resp).show(|ui| {
-            if ui.selectable_label(current.is_none() && members.is_empty(), "none").clicked() {
-                let _ = app.run("track.vca_group", json!({"vca": id.0, "group": null}));
-            }
-            for (gid, name) in &groups {
-                if ui.selectable_label(current == Some(*gid), name).clicked() {
-                    let _ = app.run("track.vca_group", json!({"vca": id.0, "group": gid}));
-                }
-            }
-        });
-    } else {
-        let gname = app.engine.session().groups.iter().find(|g| g.members.contains(&id)).map_or(no_group.to_string(), |g| g.name.clone());
-        let _ = selector_box(&mut c, gr.width(), gr.height(), &gname, t.text_dim);
-    }
+    let gname = app.engine.session().groups.iter().find(|g| g.members.contains(&id)).map_or(no_group.to_string(), |g| g.name.clone());
+    let _ = selector_box(&mut c, gr.width(), gr.height(), &gname, t.text_dim);
     y += 22.0;
     let out_fmt = output_format(app, track);
     let surround_out =
@@ -510,6 +512,8 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
             let _ = app.engine.execute_merged("mix.surround_pan", &params, &format!("span:{}", id.0));
         }
         y += size + rows * 11.0 + 6.0;
+    } else if !track.mixer.pan.is_empty() && track.kind != TrackKind::Vca && !has_panner(app, track) {
+        y += 54.0;
     } else if !track.mixer.pan.is_empty() && track.kind != TrackKind::Vca {
         let n = track.mixer.pan.len().min(2);
         let ks = if n == 2 { (inner_w / 2.0 - 6.0).min(32.0) } else { 34.0 };
@@ -809,7 +813,7 @@ pub(crate) fn insert_slot(app: &mut SoundApp, ui: &mut Ui, track: &Track, slot: 
     }
     if let Some(src) = resp.dnd_release_payload::<InsertDrag>() {
         let copy = click_mods(ui).alt || ui.input(|i| i.modifiers.alt);
-        app.capture_plugin_states();
+        app.capture_plugin_state(src.track, src.slot);
         let r = app.run("mix.insert_transfer", json!({"from_track": src.track.0, "from": src.slot, "to_track": id.0, "to": slot, "copy": copy}));
         if let Err(e) = r {
             app.ui.status = e;

@@ -207,6 +207,9 @@ struct PluginSlot {
     plugin: Box<dyn Plugin>,
     applied: Vec<f32>,
     failed: bool,
+    took_us: u32,
+    dry: Vec<Vec<f32>>,
+    dry_line: DelayLine,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -476,7 +479,7 @@ impl SlotCtx<'_> {
             openpt_dsp::scope::publish(t.0, idx, &sc);
         }
         let applied = if state_loaded { ins.params.values().copied().collect() } else { Vec::new() };
-        Some(PluginSlot { id: ins.instance_id(), ch, plugin, applied, failed: false })
+        Some(PluginSlot { id: ins.instance_id(), ch, plugin, applied, failed: false, took_us: 0, dry: Vec::new(), dry_line: DelayLine::default() })
     }
 }
 
@@ -533,6 +536,20 @@ impl MixEngine {
 
     pub fn set_external_instances(&mut self, on: bool) {
         self.external = on;
+    }
+
+    pub fn take_slowest_insert(&mut self) -> Option<(TrackId, usize, u32, &'static str)> {
+        let mut best: Option<(TrackId, usize, u32, &'static str)> = None;
+        for (t, st) in &mut self.strips {
+            let slots = st.plugins.iter_mut().enumerate().filter_map(|(i, p)| p.as_mut().map(|p| (i, p)));
+            for (i, p) in slots.chain(st.instrument.as_mut().map(|p| (INSTRUMENT_SLOT, p))) {
+                if p.took_us > best.map_or(0, |b| b.2) {
+                    best = Some((*t, i, p.took_us, p.plugin.info().name));
+                }
+                p.took_us = 0;
+            }
+        }
+        best
     }
 
     pub fn adopt(&mut self, instances: Vec<PreparedInstance>) {
@@ -689,6 +706,7 @@ impl MixEngine {
     }
 
     pub fn render(&mut self, s: &Session, pos: Samples, frames: usize, out: &mut [Vec<f32>]) {
+        openpt_vst3_host::no_denormals();
         let frames = frames.min(self.max_block);
         if pos != self.last_end {
             for st in self.strips.values_mut() {
@@ -945,7 +963,16 @@ impl MixEngine {
                     {
                         apply_params(slot, ins, t, i, pos);
                         slot.plugin.set_transport(&transport);
+                        let t0 = std::time::Instant::now();
+                        let auto_off = auto_bypassed(t, i, pos);
+                        if auto_off {
+                            keep_dry(slot, &strip.buf, frames);
+                        }
                         slot.plugin.process(&mut strip.buf, frames);
+                        slot.took_us = elapsed_us(t0);
+                        if auto_off {
+                            restore_dry(slot, &mut strip.buf, frames);
+                        }
                         if contain_failure(slot, &mut strip.buf, frames) {
                             strip.failures.record(i);
                         }
@@ -1368,6 +1395,7 @@ fn process_strip(
                         }
                     }
                 }
+                let t0 = std::time::Instant::now();
                 if strip.buf.len() >= 2 {
                     inst.plugin.process(&mut strip.buf, frames);
                 } else if let Some(c0) = strip.buf.first_mut() {
@@ -1380,6 +1408,7 @@ fn process_strip(
                         *x = 0.5 * (*x + *y);
                     }
                 }
+                inst.took_us = elapsed_us(t0);
                 let n_extra = inst.plugin.extra_outputs();
                 strip.extras.resize_with(n_extra, Vec::new);
                 for (b, out) in strip.extras.iter_mut().enumerate() {
@@ -1453,13 +1482,24 @@ fn process_strip(
                 key = Some(buf.as_slice());
             }
         }
+        let t0 = std::time::Instant::now();
+        let auto_off = auto_bypassed(t, i, pos);
+        if auto_off {
+            keep_dry(slot, &strip.buf, frames);
+        }
         match key {
             Some(k) if slot.plugin.accepts_key() => slot.plugin.process_keyed(&mut strip.buf, k, frames),
             _ => slot.plugin.process(&mut strip.buf, frames),
         }
+        slot.took_us = elapsed_us(t0);
         slot.plugin.take_midi_out(&mut strip.midi_out);
         if contain_failure(slot, &mut strip.buf, frames) {
             strip.failures.record(i);
+            continue;
+        }
+        if auto_off {
+            restore_dry(slot, &mut strip.buf, frames);
+            latency = latency.saturating_add(slot.plugin.latency());
             continue;
         }
         if ins.key_listen
@@ -1483,7 +1523,7 @@ fn process_strip(
     strip.gr = gr;
     strip.latency = latency.min(MAX_LATENCY);
     let auto_mute = t.mixer.automation_mode.reads() && t.lane(&AutoParam::Mute).is_some_and(|l| l.value_at(pos, 0.0) >= 0.5);
-    let soloed_out = solo == Solo::InPlace && !soloed(s, t) && !t.mixer.solo_safe && !receives_solo(s, t);
+    let soloed_out = solo == Solo::InPlace && !soloed(s, t) && !t.mixer.solo_safe && !receives_solo(s, t) && !in_soloed_folder(s, t);
     strip.listen = solo.listens() && soloed(s, t);
     strip.muted = t.mixer.mute || auto_mute || soloed_out;
     if strip.tap || (strip.listen && solo == Solo::Pfl) || t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
@@ -1695,7 +1735,12 @@ fn run_strips<T: Send>(work: &mut [T], f: impl Fn(&mut T) + Sync + Send) {
     use rayon::prelude::*;
     if work.len() >= 4 {
         let audio = on_audio_thread();
-        let mut run = || work.par_iter_mut().for_each(|w| as_audio_thread(audio, || f(w)));
+        let mut run = || {
+            work.par_iter_mut().for_each(|w| {
+                openpt_vst3_host::no_denormals();
+                as_audio_thread(audio, || f(w));
+            })
+        };
         match strip_pool() {
             Some(pool) => pool.install(run),
             None => run(),
@@ -1919,22 +1964,26 @@ fn receives_solo(s: &Session, t: &Track) -> bool {
     let Route::Bus(b) = &t.mixer.input else { return false };
     s.tracks
         .iter()
-        .any(|o| soloed(s, o) && (o.mixer.output == Route::Bus(*b) || o.mixer.sends.iter().flatten().any(|sn| sn.target == Route::Bus(*b))))
+        .any(|o| (soloed(s, o) || in_soloed_folder(s, o)) && (o.mixer.output == Route::Bus(*b) || o.mixer.sends.iter().flatten().any(|sn| sn.target == Route::Bus(*b))))
 }
 
-pub fn vca_chain<'a>(s: &'a Session, t: &Track) -> impl Iterator<Item = &'a Track> {
-    let mut next = t.mixer.vca;
-    let mut left = s.tracks.len();
-    std::iter::from_fn(move || {
-        left = left.checked_sub(1)?;
-        let vca = s.tracks.iter().find(|x| Some(x.id.0) == next && x.kind == TrackKind::Vca)?;
-        next = vca.mixer.vca;
-        Some(vca)
-    })
+pub fn vca_chain<'a>(s: &'a Session, t: &'a Track) -> impl Iterator<Item = &'a Track> {
+    s.vca_masters(t).into_iter()
 }
 
 pub fn soloed(s: &Session, t: &Track) -> bool {
     t.mixer.solo || vca_chain(s, t).any(|v| v.mixer.solo)
+}
+
+fn in_soloed_folder(s: &Session, t: &Track) -> bool {
+    fn up(s: &Session, t: &Track, depth: usize) -> bool {
+        if depth > s.tracks.len() {
+            return false;
+        }
+        let into = |f: &Track| f.is_folder() && (t.folder == Some(f.id) || matches!(t.mixer.output, Route::Bus(b) if f.mixer.input == Route::Bus(b)));
+        s.tracks.iter().filter(|f| f.id != t.id && into(f)).any(|f| soloed(s, f) || up(s, f, depth + 1))
+    }
+    up(s, t, 0)
 }
 
 pub fn any_solo(s: &Session) -> bool {
@@ -2363,6 +2412,37 @@ fn apply_params(slot: &mut PluginSlot, ins: &openpt_model::Insert, t: &Track, i:
         if slot.plugin.param(param).is_none_or(|cur| cur.to_bits() != v.to_bits()) {
             slot.plugin.set_param(param, v);
         }
+    }
+}
+
+fn elapsed_us(t0: std::time::Instant) -> u32 {
+    u32::try_from(t0.elapsed().as_micros()).unwrap_or(u32::MAX)
+}
+
+fn auto_bypassed(t: &Track, i: usize, pos: Samples) -> bool {
+    let Ok(slot_u8) = u8::try_from(i) else { return false };
+    t.mixer.automation_mode.reads()
+        && t.automation.iter().any(|l| {
+            matches!(&l.param, AutoParam::Plugin { slot, param } if *slot == slot_u8 && param == openpt_model::BYPASS_PARAM)
+                && !l.points.is_empty()
+                && l.value_at(pos, 0.0) >= 0.5
+        })
+}
+
+fn keep_dry(slot: &mut PluginSlot, buf: &[Vec<f32>], frames: usize) {
+    slot.dry.resize_with(buf.len(), Vec::new);
+    for (d, src) in slot.dry.iter_mut().zip(buf) {
+        d.clear();
+        d.extend_from_slice(src.get(..frames).unwrap_or(src));
+    }
+}
+
+fn restore_dry(slot: &mut PluginSlot, buf: &mut [Vec<f32>], frames: usize) {
+    slot.dry_line.set(slot.plugin.latency().min(MAX_LATENCY), slot.dry.len());
+    slot.dry_line.process(&mut slot.dry, frames);
+    for (b, d) in buf.iter_mut().zip(&slot.dry) {
+        let n = frames.min(b.len()).min(d.len());
+        b[..n].copy_from_slice(&d[..n]);
     }
 }
 
@@ -3063,6 +3143,33 @@ mod tests {
         tr.mixer.automation_mode = openpt_model::AutomationMode::Read;
         tr.lane_mut(&AutoParam::Mute).set_point(0, 1.0);
         assert!(level(&s).abs() < 1e-6, "{}", level(&s));
+    }
+
+    #[test]
+    fn a_track_in_two_vca_groups_answers_to_both() {
+        let (mut s, a) = session_with_dc(0.5, 4800);
+        let own = s.add_track(TrackKind::Vca, ChannelFormat::Mono, Some("Lead V"));
+        let all = s.add_track(TrackKind::Vca, ChannelFormat::Mono, Some("Vocals"));
+        for (v, db) in [(own, -3.0), (all, -6.0)] {
+            let g = openpt_model::GroupId(s.alloc());
+            s.groups.push(openpt_model::Group {
+                id: g,
+                name: String::new(),
+                letter: 'a',
+                members: vec![a],
+                edit: true,
+                mix: true,
+                active: true,
+                color: [0; 3],
+                attributes: Vec::new(),
+            });
+            let tr = s.track_mut(v).unwrap();
+            tr.mixer.vca_group = Some(g);
+            tr.mixer.volume_db = db;
+        }
+        let level = render_range(&s, Range::new(0, 4800), 512)[0][100];
+        let expect = 0.5 * CENTER * db_to_gain(-9.0);
+        assert!((level - expect).abs() < 1e-4, "{level} vs {expect}");
     }
 
     #[test]
