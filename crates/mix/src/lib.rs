@@ -444,6 +444,7 @@ struct SlotCtx<'a> {
     sr: f32,
     mb: usize,
     external: bool,
+    session: &'a Session,
     adopt: &'a mut HashMap<(TrackId, usize), PreparedInstance>,
     retired: &'a mut Vec<Box<dyn Plugin>>,
 }
@@ -472,7 +473,9 @@ impl SlotCtx<'_> {
             }
         } else {
             let state = if third { ins.state_bytes() } else { None };
-            create_instance_with(&ins.instance_id(), state.as_deref(), self.sr, self.mb, ch, None, !self.external)
+            let id = ins.instance_id();
+            let ara = if third && id.starts_with("vst3:") { ara_track(self.session, t) } else { None };
+            create_instance_with(&id, state.as_deref(), self.sr, self.mb, ch, ara.as_ref(), !self.external)
                 .map(|n| (n.plugin, state.is_some() && !n.refused_state))
         }?;
         if let Some(sc) = plugin.scope() {
@@ -626,7 +629,7 @@ impl MixEngine {
                 self.hw.insert(o.name.clone(), BusBuf { fmt: o.format, buf: vec![vec![0.0; mb]; o.format.channels()] });
             }
         }
-        let mut cx = SlotCtx { sr: self.sample_rate, mb, external: self.external, adopt: &mut self.adopt, retired: &mut self.retired };
+        let mut cx = SlotCtx { sr: self.sample_rate, mb, external: self.external, session: s, adopt: &mut self.adopt, retired: &mut self.retired };
         let gone: Vec<TrackId> = self.strips.keys().filter(|id| s.track(**id).is_none()).copied().collect();
         for id in gone {
             if let Some(mut st) = self.strips.remove(&id) {

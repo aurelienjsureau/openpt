@@ -345,6 +345,7 @@ pub enum Gesture {
         clip: Option<openpt_model::ClipId>,
         start: Samples,
         end: Samples,
+        points_only: bool,
         anchor_y: f32,
         per_px: f32,
         applied: f32,

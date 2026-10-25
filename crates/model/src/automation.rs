@@ -195,6 +195,16 @@ impl AutomationLane {
         }
     }
 
+    pub fn offset_points(&mut self, start: Samples, end: Samples, delta: f32) {
+        if !delta.is_finite() {
+            return;
+        }
+        let (lo, hi, _) = self.param.range();
+        for p in self.points.iter_mut().filter(|p| p.at >= start && p.at <= end) {
+            p.value = (p.value + delta).clamp(lo, hi);
+        }
+    }
+
     pub fn write_range(&mut self, start: Samples, end: Samples, value: f32, default: f32) {
         if end <= start {
             return;

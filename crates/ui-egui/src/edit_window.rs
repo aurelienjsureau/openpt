@@ -2490,7 +2490,7 @@ fn gain_db_of_y((top, bot): (f32, f32), y: f32) -> f32 {
 }
 
 enum LineHit {
-    Auto { param: AutoParam, point: Option<Samples>, at: Samples, value: f32, per_px: f32, grab: egui::Vec2 },
+    Auto { param: AutoParam, point: Option<Samples>, at: Samples, value: f32, per_px: f32, grab: egui::Vec2, segment: Option<(Samples, Samples)> },
     Gain { clip: ClipId, point: Option<Samples>, at: Samples, db: f32, per_px: f32, grab: egui::Vec2 },
 }
 
@@ -2501,6 +2501,10 @@ fn nearest_point(q: Pos2, pts: impl Iterator<Item = (Samples, Pos2)>) -> Option<
 impl LineHit {
     fn point(&self) -> bool {
         matches!(self, Self::Auto { point: Some(_), .. } | Self::Gain { point: Some(_), .. })
+    }
+
+    fn segment(&self) -> bool {
+        matches!(self, Self::Auto { point: None, segment: Some(_), .. })
     }
 }
 
@@ -2525,18 +2529,23 @@ fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Too
         let point = lane_pts.and_then(|l| nearest_point(q, l.points.iter().map(|pt| (pt.at, pos2(x_of(s, tl, pt.at), auto_y(lane, range, pt.value))))));
         let line = lane_pts.map_or(def, |l| l.value_at(at, def));
         if let Some((pt, c)) = point {
-            return Some(LineHit::Auto { param, point: Some(pt), at, value: line, per_px, grab: c - q });
+            return Some(LineHit::Auto { param, point: Some(pt), at, value: line, per_px, grab: c - q, segment: None });
         }
         if trim {
-            return Some(LineHit::Auto { param, point: None, at, value: line, per_px, grab: egui::Vec2::ZERO });
+            return Some(LineHit::Auto { param, point: None, at, value: line, per_px, grab: egui::Vec2::ZERO, segment: None });
         }
         let line_y = auto_y(lane, range, line);
         let on_line = (line_y - q.y).abs() < 5.0;
         if !on_line && !grabber {
             return None;
         }
+        let segment = lane_pts.filter(|_| on_line && !grabber).and_then(|l| {
+            let before = l.points.iter().rev().find(|p| p.at <= at)?.at;
+            let after = l.points.iter().find(|p| p.at >= at)?.at;
+            (before < after).then_some((before, after))
+        });
         let (value, grab) = if on_line { (line, vec2(0.0, line_y - q.y)) } else { (auto_value(lane, range, q.y), egui::Vec2::ZERO) };
-        return Some(LineHit::Auto { param, point: None, at, value, per_px, grab });
+        return Some(LineHit::Auto { param, point: None, at, value, per_px, grab, segment });
     }
     if track.view != "clip_gain" {
         return None;
@@ -2572,6 +2581,7 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, press
                 clip: None,
                 start: sel.start,
                 end: sel.end,
+                points_only: false,
                 anchor_y: y,
                 per_px: *per_px,
                 applied: 0.0,
@@ -2586,6 +2596,7 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, press
                 clip: Some(*clip),
                 start: sel.start - c0,
                 end: sel.end - c0,
+                points_only: false,
                 anchor_y: y,
                 per_px: *per_px,
                 applied: 0.0,
@@ -2593,6 +2604,22 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, press
             return;
         }
         _ => {}
+    }
+    if let LineHit::Auto { param, point: None, segment: Some((start, end)), per_px, .. } = &hit
+        && !alt
+    {
+        app.gesture = Some(Gesture::LineTrim {
+            track,
+            param: Some(automation_id(param)),
+            clip: None,
+            start: *start,
+            end: *end,
+            points_only: true,
+            anchor_y: y,
+            per_px: *per_px,
+            applied: 0.0,
+        });
+        return;
     }
     match hit {
         LineHit::Auto { param, point: Some(at), .. } if alt => {
@@ -2607,6 +2634,7 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, press
             let at = match point {
                 Some(p) => p,
                 None => {
+                    let at = snap(&s, at);
                     let key = format!("auto_point:{}", track.0);
                     let _ =
                         app.engine.execute_merged("automation.set_point", &json!({"track": track.0, "param": pid, "at": at, "value": value}), &key);
@@ -2619,6 +2647,8 @@ fn press_line(app: &mut SoundApp, track: TrackId, hit: LineHit, alt: bool, press
             let at = match point {
                 Some(p) => p,
                 None => {
+                    let c0 = s.find_clip(clip).map_or(0, |(_, c)| c.start);
+                    let at = snap(&s, c0 + at) - c0;
                     let key = format!("gain_point:{}", clip.0);
                     let r = app.engine.execute_merged("clip.gain_point", &json!({"clip": clip.0, "at": at, "db": db}), &key);
                     r.ok().and_then(|v| v.get("at").and_then(serde_json::Value::as_i64)).unwrap_or(at)
@@ -2854,7 +2884,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         && gain_icon_at(p).is_none()
         && let Some(h) = line_hit(&s, track, lane, tl, p, tool)
     {
-        let icon = if in_trim_zone(&s, track, lane, tl, p) {
+        let icon = if in_trim_zone(&s, track, lane, tl, p) || h.segment() {
             egui::CursorIcon::ResizeVertical
         } else if h.point() {
             egui::CursorIcon::Grab
@@ -3144,14 +3174,14 @@ fn drive_drag(app: &mut SoundApp, ctx: &egui::Context) {
                 ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
             }
         }
-        Some(Gesture::LineTrim { track, param, clip, start, end, anchor_y, per_px, applied }) => {
+        Some(Gesture::LineTrim { track, param, clip, start, end, points_only, anchor_y, per_px, applied }) => {
             let total = (*anchor_y - p.y) * *per_px;
             let inc = total - *applied;
             if inc.abs() > 1e-4 {
                 let r = match (param.as_deref(), clip) {
                     (Some(pid), _) => app.engine.execute_merged(
                         "automation.trim_range",
-                        &json!({"track": track.0, "param": pid, "start": *start, "end": *end, "delta": inc}),
+                        &json!({"track": track.0, "param": pid, "start": *start, "end": *end, "delta": inc, "points_only": *points_only}),
                         &format!("line_trim:{}", track.0),
                     ),
                     (None, Some(c)) => app.engine.execute_merged(

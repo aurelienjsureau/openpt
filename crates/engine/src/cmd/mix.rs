@@ -211,7 +211,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Trim Automation",
             [],
             None,
-            "{track, param, start, end, delta} — offsets the segment, anchored just outside",
+            "{track, param, start, end, delta, points_only?} — offsets the segment, anchored just outside (points_only: moves the breakpoints alone)",
             always,
             trim_range
         ),
@@ -744,7 +744,11 @@ fn trim_range(e: &mut Engine, p: &Value) -> Result<Value> {
     let delta = p.get("delta").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(id, "`delta` required"))? as f32;
     let tr = e.session_mut().track_mut(t).ok_or_else(|| bad(id, "no such track"))?;
     let def = current_value(tr, &param);
-    tr.lane_mut(&param).trim_range(start, end, delta, def);
+    if bool_or(p, "points_only", false) {
+        tr.lane_mut(&param).offset_points(start, end, delta);
+    } else {
+        tr.lane_mut(&param).trim_range(start, end, delta, def);
+    }
     Ok(json!({}))
 }
 
