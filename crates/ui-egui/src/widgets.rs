@@ -893,3 +893,14 @@ mod selector_visual_regressions {
         }
     }
 }
+
+pub trait FitScreen: Sized {
+    fn fit_screen(self, ctx: &egui::Context) -> Self;
+}
+
+impl FitScreen for egui::Window<'_> {
+    fn fit_screen(self, ctx: &egui::Context) -> Self {
+        let r = ctx.content_rect().shrink(8.0);
+        self.constrain_to(r).max_width(r.width()).max_height(r.height()).vscroll(r.height() < 760.0)
+    }
+}

@@ -1,3 +1,4 @@
+use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold};
 use egui::{Align2, vec2};
@@ -11,7 +12,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -80.0))
-        .show(ctx, |ui| {
+        .fit_screen(ctx).show(ctx, |ui| {
             let age = left.saved.elapsed().map_or_else(|_| "recently".into(), |d| ago(d.as_secs()));
             let what = if left.recording { "unsaved changes and an unfinished recording" } else { "unsaved changes" };
             ui.label(format!("“{}” has {what} from an earlier run, autosaved {age}.", left.name));

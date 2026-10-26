@@ -2089,14 +2089,15 @@ mod window {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, ClientToScreen, CreateFontW, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
-        DeleteObject, DrawTextW, EndPaint, FillRect, HDC, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
+        DeleteObject, DrawTextW, EndPaint, FillRect, GetMonitorInfoW, HDC, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+        PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumThreadWindows, GA_ROOT, GW_OWNER, GetAncestor, GetForegroundWindow, GetWindow,
+        EnumThreadWindows, GA_ROOT, GW_OWNER, GetAncestor, GetForegroundWindow, GetWindow, GetWindowRect, SWP_NOSIZE,
         AdjustWindowRectEx, AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
         DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW,
         MF_CHECKED, MF_SEPARATOR, MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
@@ -2732,6 +2733,7 @@ mod window {
                     ShowWindow(h, SW_SHOW);
                     SetForegroundWindow(h);
                 }
+                keep_on_screen(h);
             }
         }
 
@@ -2763,6 +2765,23 @@ mod window {
         let mut c = RECT { left: 0, top: 0, right: 0, bottom: 0 };
         unsafe { GetClientRect(window, &mut c) };
         place_content(window, c.right, c.bottom);
+        keep_on_screen(window);
+    }
+
+    fn keep_on_screen(h: HWND) {
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: r, rcWork: r, dwFlags: 0 };
+        unsafe {
+            if GetWindowRect(h, &mut r) == 0 || GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mut mi) == 0 {
+                return;
+            }
+        }
+        let w = mi.rcWork;
+        let fit = |lo: i32, size: i32, min: i32, max: i32| if size >= max - min { min } else { lo.clamp(min, max - size) };
+        let (x, y) = (fit(r.left, r.right - r.left, w.left, w.right), fit(r.top, r.bottom - r.top, w.top, w.bottom));
+        if (x, y) != (r.left, r.top) {
+            unsafe { SetWindowPos(h, std::ptr::null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) };
+        }
     }
 }
 

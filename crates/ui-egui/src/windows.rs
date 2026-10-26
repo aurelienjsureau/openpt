@@ -1,3 +1,4 @@
+use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, mono, rgb};
 use egui::{Color32, Sense, vec2};
@@ -83,7 +84,7 @@ fn win(ctx: &egui::Context, open: &mut bool, title: &str, size: egui::Vec2, body
     if !*open {
         return;
     }
-    egui::Window::new(title).open(open).default_size(size).show(ctx, body);
+    egui::Window::new(title).open(open).default_size(size).fit_screen(ctx).show(ctx, body);
 }
 
 fn automation(app: &mut SoundApp, ctx: &egui::Context) {
@@ -448,7 +449,7 @@ fn workspace(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new("Workspace").open(&mut open).default_size(vec2(460.0, 420.0)).show(ctx, |ui| {
+    egui::Window::new("Workspace").open(&mut open).default_size(vec2(460.0, 420.0)).fit_screen(ctx).show(ctx, |ui| {
         let dir = if app.ui.workspace_dir.is_empty() { std::env::var("HOME").unwrap_or_else(|_| ".".into()) } else { app.ui.workspace_dir.clone() };
         ui.horizontal(|ui| {
             if ui.button("⬆").on_hover_text("Parent folder").clicked()
@@ -759,7 +760,7 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
     };
     let (in_dev, out_dev) = (device(true).cloned(), device(false).cloned());
     let mut runs: Vec<Value> = Vec::new();
-    egui::Window::new("I/O Setup").open(&mut open).default_size(vec2(860.0, 440.0)).show(ctx, |ui| {
+    egui::Window::new("I/O Setup").open(&mut open).default_size(vec2(860.0, 440.0)).fit_screen(ctx).show(ctx, |ui| {
         let t = Tokens::current();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;

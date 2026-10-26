@@ -1,3 +1,4 @@
+use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, mono, regular, rgb};
 use crate::widgets::{
@@ -22,7 +23,8 @@ pub fn show(app: &mut SoundApp, ui: &mut Ui) {
 
 pub fn show_separate(app: &mut SoundApp, ctx: &egui::Context) {
     let title = format!("{}  —  Mix", app.engine.session().name);
-    let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([1100.0, 720.0]).with_min_inner_size([480.0, 320.0]);
+    let size = ctx.input(|i| i.viewport().monitor_size).filter(|m| m.x > 0.0 && m.y > 0.0).map_or(egui::vec2(1100.0, 720.0), |m| m * 0.9);
+    let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_min_inner_size([480.0, 320.0]);
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("openpt.mix"), builder, |ui, _class| {
         ui.set_style(ui.ctx().global_style());
         if std::mem::take(&mut app.focus_mix) {
@@ -1600,7 +1602,7 @@ fn send_window_contents(app: &mut SoundApp, ctx: &egui::Context) {
         .auto_sized()
         .collapsible(false)
         .default_pos(ctx.pointer_latest_pos().map_or(pos2(200.0, 200.0), |p| p + vec2(24.0, -160.0)))
-        .show(ctx, |ui| {
+        .fit_screen(ctx).show(ctx, |ui| {
             ui.set_width(150.0);
             ui.vertical_centered(|ui| {
                 ui.label(egui::RichText::new(route_name(app, &send.target)).color(t.counter_text));

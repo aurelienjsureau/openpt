@@ -39,7 +39,7 @@ fn info_exposes_visible_params_with_plain_ranges() {
     let ids: Vec<&str> = info.params.iter().map(|p| p.id).collect();
     assert_eq!(ids, vec!["7", "3", "12"], "hidden 9 and bypass 11 are skipped");
     let g = info.param("7").unwrap();
-    assert_eq!((g.name, g.min, g.max, g.default, g.unit, g.taper), ("Gain", 0.0, 2.0, 1.0, Unit::Db, Taper::Linear));
+    assert_eq!((g.name, g.min, g.max, g.default, g.unit, g.taper), ("Gain", 0.0, 2.0, 0.5, Unit::Db, Taper::Linear));
     let mode = info.param("3").unwrap();
     assert_eq!((mode.unit, mode.min, mode.max), (Unit::Choice, 0.0, 2.0));
     assert_eq!(mode.choices, &["A", "B", "C"]);
@@ -79,7 +79,7 @@ fn gain_processes_audio_and_follows_params() {
     let mut short = vec![vec![1.0f32; 4]];
     p.process(&mut short, 1_000_000);
     assert!(p.set_param("7", f32::NAN), "NaN becomes the default");
-    assert_eq!(p.param("7"), Some(1.0));
+    assert_eq!(p.param("7"), Some(0.5));
     p.reset();
     p.prepare(f32::NAN, 0, 0);
     let mut io = vec![vec![0.1f32; 8]];

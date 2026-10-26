@@ -1,3 +1,4 @@
+use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold};
 use egui::{Align2, Color32, vec2};
@@ -489,7 +490,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -80.0))
-        .show(ctx, |ui| {
+        .fit_screen(ctx).show(ctx, |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
             match &mut d {
                 Dialog::NewTracks { rows } => {
@@ -1190,7 +1191,7 @@ fn audiosuite_window(app: &mut SoundApp, ctx: &egui::Context) {
     let Some(process) = app.ui.audiosuite.clone() else { return };
     let mut open = true;
     let title = openpt_dsp::plugin_info(&process).map_or_else(|| process.replace('_', " "), |p| p.name.to_string());
-    egui::Window::new(format!("AudioSuite · {title}")).open(&mut open).default_width(360.0).show(ctx, |ui| {
+    egui::Window::new(format!("AudioSuite · {title}")).open(&mut open).default_width(360.0).fit_screen(ctx).show(ctx, |ui| {
         let key = egui::Id::new(("as_params", process.clone()));
         let mut params: std::collections::BTreeMap<String, f32> = ui.ctx().memory(|m| m.data.get_temp(key)).unwrap_or_default();
         if let Some(info) = openpt_dsp::plugin_info(&process).filter(|i| crate::open_ui::handles(i.id)) {

@@ -1141,6 +1141,8 @@ impl SoundApp {
         }
         self.recorder = None;
         self.recorder_failed = false;
+        self.player = None;
+        openpt_playback::devices::release_asio();
         let player = openpt_playback::Player::with_config(self.engine.session_arc(), &self.ui.audio);
         player.locate(at);
         self.player = Some(player);
@@ -1249,6 +1251,8 @@ impl SoundApp {
         }
         self.recorder = None;
         self.recorder_failed = false;
+        self.player = None;
+        openpt_playback::devices::release_asio();
         self.player = Some(Player::with_config(self.engine.session_arc(), &self.ui.audio));
         self.sync_midi_devices();
     }

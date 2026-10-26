@@ -1,3 +1,4 @@
+use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, mono, regular, rgb};
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
@@ -593,7 +594,7 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
             .open(&mut open)
             .default_width(340.0)
             .default_pos(egui::pos2(ctx.content_rect().width() - 380.0, 120.0));
-        let window = if builtin { window.auto_sized() } else { window };
+        let window = if builtin { window.auto_sized() } else { window.fit_screen(ctx) };
         let shown = window.show(ctx, |ui| {
             if builtin {
                 ui.set_max_width(crate::plugin_ui::panel_width(info));
@@ -773,7 +774,7 @@ fn about(app: &mut SoundApp, ctx: &egui::Context) {
         return;
     }
     let tab_id = egui::Id::new("about_tab");
-    egui::Window::new("About OpenPT").open(&mut open).default_size(vec2(640.0, 420.0)).collapsible(false).show(ctx, |ui| {
+    egui::Window::new("About OpenPT").open(&mut open).default_size(vec2(640.0, 420.0)).collapsible(false).fit_screen(ctx).show(ctx, |ui| {
         let mut tab = ui.data_mut(|d| d.get_temp::<u8>(tab_id)).unwrap_or(0);
         ui.horizontal(|ui| {
             for (i, l) in (0u8..).zip(["About", "Licenses"]) {
@@ -808,7 +809,7 @@ fn session_info(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new("Session Info").open(&mut open).default_size(vec2(480.0, 360.0)).show(ctx, |ui| {
+    egui::Window::new("Session Info").open(&mut open).default_size(vec2(480.0, 360.0)).fit_screen(ctx).show(ctx, |ui| {
         let text = openpt_engine::inspect::session_text(&app.engine);
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.label(egui::RichText::new(text).font(mono(11.0)));

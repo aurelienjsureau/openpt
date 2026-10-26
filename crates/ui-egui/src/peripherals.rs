@@ -1,3 +1,4 @@
+use crate::widgets::FitScreen;
 use crate::SoundApp;
 use openpt_model::{TrackId, TrackKind};
 use serde_json::json;
@@ -218,7 +219,7 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
     let outputs = openpt_playback::surface::list_output_devices();
     let mut open = true;
     let mut close = false;
-    egui::Window::new("Peripherals").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+    egui::Window::new("Peripherals").open(&mut open).collapsible(false).resizable(false).fit_screen(ctx).show(ctx, |ui| {
         ui.horizontal(|ui| {
             for (i, name) in ["Synchronization", "Machine Control", "MIDI Controllers", "Ethernet Controllers", "Mic Preamps"].iter().enumerate() {
                 if ui.selectable_label(tab == i, *name).clicked() {

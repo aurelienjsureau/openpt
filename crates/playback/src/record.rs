@@ -163,7 +163,7 @@ impl Recorder {
     pub fn open_with(audio: &crate::AudioConfig) -> Result<Recorder, String> {
         use cpal::traits::{DeviceTrait, StreamTrait};
         let host = crate::devices::host(audio);
-        let device = crate::devices::device(&host, audio.input.as_deref(), false).ok_or("no audio input device")?;
+        let device = crate::devices::device(host, audio.input.as_deref(), false).ok_or("no audio input device")?;
         #[allow(deprecated)]
         let name = device.name().unwrap_or_else(|_| "Input".into());
         let at_rate = audio.sample_rate.and_then(|r| {
@@ -190,6 +190,8 @@ impl Recorder {
         let monitor = InputRing::new(usize::from(config.channels), config.sample_rate.0);
         let build = |config: &cpal::StreamConfig| match format {
             cpal::SampleFormat::I32 => build_input::<i32>(&device, config, &shared, &monitor),
+            cpal::SampleFormat::I24 => build_input::<cpal::I24>(&device, config, &shared, &monitor),
+            cpal::SampleFormat::F64 => build_input::<f64>(&device, config, &shared, &monitor),
             cpal::SampleFormat::I16 => build_input::<i16>(&device, config, &shared, &monitor),
             _ => build_input::<f32>(&device, config, &shared, &monitor),
         };

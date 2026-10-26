@@ -1,9 +1,11 @@
 use cpal::traits::{DeviceTrait, HostTrait};
+use std::sync::{Mutex, PoisonError};
 
 pub const STANDARD_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
 pub const STANDARD_BUFFERS: [u32; 9] = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192];
 
-pub(crate) const FORMATS: [cpal::SampleFormat; 3] = [cpal::SampleFormat::F32, cpal::SampleFormat::I32, cpal::SampleFormat::I16];
+pub(crate) const FORMATS: [cpal::SampleFormat; 5] =
+    [cpal::SampleFormat::F32, cpal::SampleFormat::I32, cpal::SampleFormat::I24, cpal::SampleFormat::F64, cpal::SampleFormat::I16];
 
 pub(crate) fn format_rank(f: cpal::SampleFormat) -> Option<usize> {
     FORMATS.iter().position(|x| *x == f)
@@ -73,30 +75,107 @@ pub fn audio_systems() -> Vec<AudioSystem> {
     cpal::available_hosts()
         .into_iter()
         .filter_map(|id| {
-            let host = cpal::host_from_id(id).ok()?;
+            let host = cached_host(id)?;
             let def_out = host.default_output_device().as_ref().and_then(device_name);
             let def_in = host.default_input_device().as_ref().and_then(device_name);
-            let outputs = host.output_devices().map(|ds| ds.filter_map(|d| describe(&d, def_out.as_deref(), true)).collect()).unwrap_or_default();
-            let inputs = host.input_devices().map(|ds| ds.filter_map(|d| describe(&d, def_in.as_deref(), false)).collect()).unwrap_or_default();
+            let mut outputs: Vec<DeviceInfo> =
+                host.output_devices().map(|ds| ds.filter_map(|d| describe(&d, def_out.as_deref(), true)).collect()).unwrap_or_default();
+            let mut inputs: Vec<DeviceInfo> =
+                host.input_devices().map(|ds| ds.filter_map(|d| describe(&d, def_in.as_deref(), false)).collect()).unwrap_or_default();
+            if is_asio(id) {
+                remember_asio(&mut outputs, &mut inputs);
+            }
             Some(AudioSystem { name: id.name().to_string(), is_default: id == default_id, outputs, inputs })
         })
         .collect()
 }
 
-pub(crate) fn host(cfg: &AudioConfig) -> cpal::Host {
-    cfg.system
+fn is_asio(id: cpal::HostId) -> bool {
+    id.name().eq_ignore_ascii_case("ASIO")
+}
+
+static ASIO_OPEN: Mutex<Option<cpal::Device>> = Mutex::new(None);
+
+fn cached_host(id: cpal::HostId) -> Option<&'static cpal::Host> {
+    static HOSTS: Mutex<Vec<(cpal::HostId, &'static cpal::Host)>> = Mutex::new(Vec::new());
+    let mut hosts = HOSTS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((_, h)) = hosts.iter().find(|(i, _)| *i == id) {
+        return Some(*h);
+    }
+    let host: &'static cpal::Host = Box::leak(Box::new(cpal::host_from_id(id).ok()?));
+    hosts.push((id, host));
+    drop(hosts);
+    if is_asio(id) && ASIO_OPEN.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+        let mut outputs: Vec<DeviceInfo> = host.output_devices().map(|ds| ds.filter_map(|d| describe(&d, None, true)).collect()).unwrap_or_default();
+        let mut inputs: Vec<DeviceInfo> = host.input_devices().map(|ds| ds.filter_map(|d| describe(&d, None, false)).collect()).unwrap_or_default();
+        remember_asio(&mut outputs, &mut inputs);
+    }
+    Some(host)
+}
+
+fn remember_asio(outputs: &mut Vec<DeviceInfo>, inputs: &mut Vec<DeviceInfo>) {
+    static SEEN: Mutex<(Vec<DeviceInfo>, Vec<DeviceInfo>)> = Mutex::new((Vec::new(), Vec::new()));
+    let merge = |live: &mut Vec<DeviceInfo>, seen: &mut Vec<DeviceInfo>| {
+        for d in live.iter() {
+            let d = DeviceInfo { is_default: false, ..d.clone() };
+            match seen.iter_mut().find(|s| s.name == d.name) {
+                Some(s) => *s = d,
+                None => seen.push(d),
+            }
+        }
+        for s in seen.iter() {
+            if !live.iter().any(|d| d.name == s.name) {
+                live.push(s.clone());
+            }
+        }
+    };
+    let mut seen = SEEN.lock().unwrap_or_else(PoisonError::into_inner);
+    let (o, i) = &mut *seen;
+    merge(outputs, o);
+    merge(inputs, i);
+}
+
+pub(crate) fn host(cfg: &AudioConfig) -> &'static cpal::Host {
+    let chosen = cfg
+        .system
         .as_deref()
         .and_then(|want| cpal::available_hosts().into_iter().find(|id| id.name().eq_ignore_ascii_case(want)))
-        .and_then(|id| cpal::host_from_id(id).ok())
-        .unwrap_or_else(|| {
-            if let Some(s) = &cfg.system {
-                log::warn!("audio system `{s}` is not available; using the default");
-            }
-            cpal::default_host()
-        })
+        .and_then(cached_host);
+    chosen.unwrap_or_else(|| {
+        if let Some(s) = &cfg.system {
+            log::warn!("audio system `{s}` is not available; using the default");
+        }
+        cached_host(cpal::default_host().id()).unwrap_or_else(|| Box::leak(Box::new(cpal::default_host())))
+    })
+}
+
+pub fn release_asio() {
+    let old = ASIO_OPEN.lock().unwrap_or_else(PoisonError::into_inner).take();
+    drop(old);
 }
 
 pub(crate) fn device(host: &cpal::Host, name: Option<&str>, output: bool) -> Option<cpal::Device> {
+    if !is_asio(host.id()) {
+        return find(host, name, output);
+    }
+    let mut open = ASIO_OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+    if !output && let Some(d) = open.as_ref() {
+        let have = device_name(d);
+        if let Some(want) = name
+            && have.as_deref() != Some(want)
+        {
+            log::warn!("ASIO input `{want}` cannot run beside the output driver; using {}", have.as_deref().unwrap_or("it"));
+        }
+        return Some(d.clone());
+    }
+    let old = open.take();
+    drop(old);
+    let found = find(host, name, output);
+    open.clone_from(&found);
+    found
+}
+
+fn find(host: &cpal::Host, name: Option<&str>, output: bool) -> Option<cpal::Device> {
     if let Some(want) = name {
         let found = if output { host.output_devices().ok() } else { host.input_devices().ok() }
             .and_then(|mut ds| ds.find(|d| device_name(d).as_deref() == Some(want)));

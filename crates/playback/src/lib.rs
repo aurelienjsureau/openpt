@@ -662,6 +662,8 @@ impl Player {
                     use cpal::traits::StreamTrait;
                     let built = match format {
                         cpal::SampleFormat::I32 => build_output::<i32>(&device, &config, state, channels, &fault, &shared),
+                        cpal::SampleFormat::I24 => build_output::<cpal::I24>(&device, &config, state, channels, &fault, &shared),
+                        cpal::SampleFormat::F64 => build_output::<f64>(&device, &config, state, channels, &fault, &shared),
                         cpal::SampleFormat::I16 => build_output::<i16>(&device, &config, state, channels, &fault, &shared),
                         _ => build_output::<f32>(&device, &config, state, channels, &fault, &shared),
                     };
@@ -1157,7 +1159,7 @@ where
 fn open_device(want_rate: u32, want_ch: u16, cfg: &AudioConfig) -> Result<(cpal::Device, cpal::StreamConfig, cpal::SampleFormat, String), String> {
     use cpal::traits::DeviceTrait;
     let host = devices::host(cfg);
-    let device = devices::device(&host, cfg.output.as_deref(), true).ok_or_else(|| "no output device".to_string())?;
+    let device = devices::device(host, cfg.output.as_deref(), true).ok_or_else(|| "no output device".to_string())?;
     #[allow(deprecated)]
     let name = device.name().unwrap_or_else(|_| "Audio device".into());
     let want_ch = want_ch.max(2);

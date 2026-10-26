@@ -187,6 +187,7 @@ pub(crate) fn unit_from_label(units: &str) -> Unit {
 }
 
 fn param_info(inst: &Instance, p: &RawParam) -> ParamInfo {
+    let dn = inst.normalized_value(p.id).unwrap_or(p.default_normalized);
     let name = if p.title.is_empty() { format!("Param {}", p.id) } else { p.title.clone() };
     let base = ParamInfo {
         id: leak(p.id.to_string()),
@@ -199,7 +200,7 @@ fn param_info(inst: &Instance, p: &RawParam) -> ParamInfo {
         choices: &[],
     };
     if p.step_count == 1 {
-        return ParamInfo { unit: Unit::Toggle, default: p.default_normalized.round() as f32, ..base };
+        return ParamInfo { unit: Unit::Toggle, default: dn.round() as f32, ..base };
     }
     if (2..=MAX_CHOICES).contains(&p.step_count) {
         let steps = f64::from(p.step_count);
@@ -207,7 +208,7 @@ fn param_info(inst: &Instance, p: &RawParam) -> ParamInfo {
             (0..=p.step_count).map(|i| leak(inst.value_text(p.id, f64::from(i) / steps).unwrap_or_else(|| i.to_string()))).collect();
         return ParamInfo {
             max: p.step_count as f32,
-            default: (p.default_normalized * steps).round() as f32,
+            default: (dn * steps).round() as f32,
             unit: Unit::Choice,
             choices: Box::leak(labels.into_boxed_slice()),
             ..base
@@ -216,7 +217,7 @@ fn param_info(inst: &Instance, p: &RawParam) -> ParamInfo {
     let unit = unit_from_label(&p.units);
     match (inst.to_plain(p.id, 0.0), inst.to_plain(p.id, 1.0)) {
         (Some(lo), Some(hi)) if hi > lo && (lo as f32).is_finite() && (hi as f32).is_finite() && (hi as f32) > (lo as f32) => {
-            let default = inst.to_plain(p.id, p.default_normalized).map_or(lo, |d| d.clamp(lo, hi));
+            let default = inst.to_plain(p.id, dn).map_or(lo, |d| d.clamp(lo, hi));
             let taper = match inst.to_plain(p.id, 0.5) {
                 Some(mid)
                     if lo > 0.0
@@ -229,7 +230,7 @@ fn param_info(inst: &Instance, p: &RawParam) -> ParamInfo {
             };
             ParamInfo { min: lo as f32, max: hi as f32, default: default as f32, unit, taper, ..base }
         }
-        _ => ParamInfo { default: p.default_normalized as f32, unit, ..base },
+        _ => ParamInfo { default: dn as f32, unit, ..base },
     }
 }
 
