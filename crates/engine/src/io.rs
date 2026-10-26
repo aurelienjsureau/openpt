@@ -445,6 +445,14 @@ impl Bounce {
         self.range
     }
 
+    pub fn use_engine(&mut self, eng: Box<openpt_mix::MixEngine>) {
+        self.render = openpt_mix::RangeRender::with_engine(eng, &self.session, self.bus, self.range);
+    }
+
+    pub fn take_engine(&mut self) -> Box<openpt_mix::MixEngine> {
+        self.render.take_engine()
+    }
+
     pub fn progress(&self) -> f32 {
         let pass = (self.done as f64 / self.range.len().max(1) as f64).min(1.0) as f32;
         match (self.normalize, self.measuring) {
@@ -473,7 +481,7 @@ impl Bounce {
                     self.peak = 0.0;
                     self.done = 0;
                     self.measuring = false;
-                    self.render = openpt_mix::RangeRender::new(&self.session, self.bus, self.range, 1024);
+                    self.render.restart();
                 }
                 None => return self.finish().map(Some),
             }

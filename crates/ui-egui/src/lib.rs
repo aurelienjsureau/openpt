@@ -439,7 +439,7 @@ pub struct SoundApp {
     last_frame: Option<f64>,
     last_meter_poll: f64,
     pub video: video_track::VideoPool,
-    pub bounce: Option<openpt_engine::io::Bounce>,
+    pub bounce: Option<bounce::Job>,
     pub(crate) rt_bounce: Option<bounce::RealtimeBounce>,
     pub(crate) live_commit: Option<bounce::LiveCommit>,
     pub(crate) ara_selection: Option<Vec<openpt_model::ClipId>>,
@@ -569,7 +569,9 @@ impl SoundApp {
             let s = self.engine.session();
             let (live, offline): (Vec<TrackId>, Vec<TrackId>) = tracks
                 .into_iter()
-                .partition(|t| bounce::commits_live(s, *t) && !(freezing && s.track(*t).is_some_and(openpt_model::Track::is_frozen)));
+                .partition(|t| {
+                    (bounce::commits_live(s, *t) || bounce::renders_live(s, *t)) && !(freezing && s.track(*t).is_some_and(openpt_model::Track::is_frozen))
+                });
             if !live.is_empty() {
                 let out = json!({"live": live.iter().map(|t| t.0).collect::<Vec<_>>(), "then": offline.iter().map(|t| t.0).collect::<Vec<_>>()});
                 bounce::start_live_commit(self, live, id, offline);

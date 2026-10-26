@@ -419,6 +419,7 @@ pub struct MixEngine {
     last_end: Samples,
     synced: (usize, usize, usize),
     order: Vec<usize>,
+    aux_waves: Vec<(usize, usize)>,
     pub latency: usize,
     track_latency: usize,
     pdc: bool,
@@ -505,6 +506,7 @@ impl MixEngine {
             last_end: 0,
             synced: (0, 0, 0),
             order: Vec::new(),
+            aux_waves: Vec::new(),
             latency: 0,
             track_latency: 0,
             pdc: false,
@@ -581,6 +583,10 @@ impl MixEngine {
 
     pub fn max_block(&self) -> usize {
         self.max_block
+    }
+
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
     }
 
     pub fn main_format(&self) -> ChannelFormat {
@@ -704,6 +710,7 @@ impl MixEngine {
         if key != self.synced {
             self.sync(s);
             self.order = processing_order(s);
+            self.aux_waves = aux_waves(s, &self.order);
             self.synced = key;
         }
     }
@@ -926,11 +933,23 @@ impl MixEngine {
         }
         self.work = work;
         let is_aux = reads_bus;
-        for t in order.iter().filter_map(|&i| s.tracks.get(i)).filter(|t| live(t)).filter(|t| is_aux(t)) {
-            let Some(mut st) = self.strips.remove(&t.id) else { continue };
-            if st.scratch.len() < self.max_block {
-                st.scratch.resize(self.max_block, 0.0);
+        let waves = std::mem::take(&mut self.aux_waves);
+        let mut batch = std::mem::take(&mut self.work);
+        let mut k = 0;
+        while k < waves.len() {
+            let wave = waves.get(k).map_or(0, |w| w.0);
+            batch.clear();
+            while let Some(&(_, i)) = waves.get(k).filter(|x| x.0 == wave) {
+                k += 1;
+                let Some(t) = s.tracks.get(i).filter(|t| live(t) && is_aux(t)) else { continue };
+                if let Some(mut st) = self.strips.remove(&t.id) {
+                    if st.scratch.len() < self.max_block {
+                        st.scratch.resize(self.max_block, 0.0);
+                    }
+                    batch.push((i, st));
+                }
             }
+            let busses = std::mem::take(&mut self.busses);
             let live_in = LiveInput {
                 input: &self.input,
                 midi_input: &self.midi_input,
@@ -938,13 +957,23 @@ impl MixEngine {
                 monitor_only: self.monitor_only,
                 recording: self.recording,
             };
-            process_strip(s, t, &mut st, &self.busses, None, &live_in, pos, frames, any_solo);
-            let ch = st.buf.len();
-            st.align.set(0, ch);
-            st.align_pre.set(0, ch);
-            self.route_strip(t, &mut st, pos, frames);
-            self.strips.insert(t.id, st);
+            run_strips(&mut batch, |(i, st)| {
+                if let Some(t) = s.tracks.get(*i) {
+                    process_strip(s, t, st, &busses, None, &live_in, pos, frames, any_solo);
+                }
+            });
+            self.busses = busses;
+            for (i, mut st) in batch.drain(..) {
+                let Some(t) = s.tracks.get(i) else { continue };
+                let ch = st.buf.len();
+                st.align.set(0, ch);
+                st.align_pre.set(0, ch);
+                self.route_strip(t, &mut st, pos, frames);
+                self.strips.insert(t.id, st);
+            }
         }
+        self.work = batch;
+        self.aux_waves = waves;
         self.order = order;
         let transport = transport_at(s, pos, !self.monitor_only, self.recording);
         for t in s.tracks.iter().filter(|t| t.kind == TrackKind::Master && !t.inactive) {
@@ -1736,7 +1765,7 @@ fn as_audio_thread(audio: bool, f: impl FnOnce()) {
 #[cfg(not(target_arch = "wasm32"))]
 fn run_strips<T: Send>(work: &mut [T], f: impl Fn(&mut T) + Sync + Send) {
     use rayon::prelude::*;
-    if work.len() >= 4 {
+    if work.len() >= 2 {
         let audio = on_audio_thread();
         let mut run = || {
             work.par_iter_mut().for_each(|w| {
@@ -1907,6 +1936,41 @@ fn order_keyed<T>(s: &Session, work: &mut [(usize, T)]) -> usize {
 
 fn reads_bus(t: &Track) -> bool {
     matches!(t.kind, TrackKind::Aux | TrackKind::Folder) || (t.kind == TrackKind::Audio && matches!(t.mixer.input, Route::Bus(_)))
+}
+
+fn writes_bus(t: &Track, b: BusId) -> bool {
+    let to = |r: &Route| *r == Route::Bus(b);
+    to(&t.mixer.output)
+        || t.mixer.sends.iter().flatten().any(|x| to(&x.target))
+        || t.instrument.iter().chain(t.mixer.inserts.iter().flatten()).any(|i| i.multi_out && i.outputs.contains(&b))
+}
+
+fn aux_waves(s: &Session, order: &[usize]) -> Vec<(usize, usize)> {
+    let live = |t: &Track| !(t.kind == TrackKind::Master || t.inactive || t.kind == TrackKind::Vca);
+    let auxes: Vec<(usize, &Track)> = order.iter().filter_map(|&i| s.tracks.get(i).map(|t| (i, t))).filter(|(_, t)| live(t) && reads_bus(t)).collect();
+    let input = |t: &Track| match t.mixer.input {
+        Route::Bus(b) => Some(b),
+        _ => None,
+    };
+    let mut level = vec![0usize; auxes.len()];
+    for (k, (_, t)) in auxes.iter().enumerate() {
+        let mut l = 0;
+        for (j, (_, e)) in auxes.iter().enumerate().take(k) {
+            let lj = level.get(j).copied().unwrap_or(0);
+            if input(t).is_some_and(|b| writes_bus(e, b)) {
+                l = l.max(lj + 1);
+            }
+            if input(e).is_some_and(|b| writes_bus(t, b)) {
+                l = l.max(lj);
+            }
+        }
+        if let Some(x) = level.get_mut(k) {
+            *x = l;
+        }
+    }
+    let mut out: Vec<(usize, usize)> = auxes.iter().zip(level).map(|((i, _), l)| (l, *i)).collect();
+    out.sort_by_key(|x| x.0);
+    out
 }
 
 fn bus_input(t: &Track, strip: &mut Strip, busses: &HashMap<BusId, BusBuf>, frames: usize) {
@@ -2836,22 +2900,40 @@ pub fn source_channels(s: &Session, bus: Option<BusId>) -> usize {
 }
 
 pub struct RangeRender {
-    eng: MixEngine,
+    eng: Box<MixEngine>,
     bus: Option<BusId>,
     tmp: Vec<Vec<f32>>,
     start: Samples,
     done: usize,
+    len: usize,
     total: usize,
     latency: usize,
 }
 
 impl RangeRender {
     pub fn new(s: &Session, bus: Option<BusId>, range: Range, block: usize) -> Self {
+        Self::with_engine(Box::new(MixEngine::new(s.sample_rate.as_f64() as f32, block)), s, bus, range)
+    }
+
+    pub fn with_engine(mut eng: Box<MixEngine>, s: &Session, bus: Option<BusId>, range: Range) -> Self {
+        eng.reset();
         let nch = source_channels(s, bus);
-        let eng = MixEngine::new(s.sample_rate.as_f64() as f32, block);
         let tmp = vec![vec![0.0f32; eng.max_block()]; nch];
         let len = if nch == 0 { 0 } else { usize::try_from(range.len().max(0)).unwrap_or(0) };
-        RangeRender { eng, bus, tmp, start: range.start, done: 0, total: len, latency: 0 }
+        RangeRender { eng, bus, tmp, start: range.start, done: 0, len, total: len, latency: 0 }
+    }
+
+    pub fn restart(&mut self) {
+        self.eng.reset();
+        self.done = 0;
+        self.total = self.len;
+        self.latency = 0;
+    }
+
+    pub fn take_engine(&mut self) -> Box<MixEngine> {
+        let spare = Box::new(MixEngine::new(self.eng.sample_rate(), 16));
+        self.done = self.total;
+        std::mem::replace(&mut self.eng, spare)
     }
 
     fn render(&mut self, s: &Session, pos: Samples, n: usize) {
@@ -3016,6 +3098,33 @@ pub fn render_track_pre_fader(s: &Session, track: TrackId, range: Range) -> Vec<
 
 fn create_plugin(id: &str) -> Option<Box<dyn Plugin>> {
     openpt_dsp::create(id).or_else(|| openpt_vst3_host::create(id)).or_else(|| openpt_au_host::create(id))
+}
+
+#[cfg(test)]
+mod aux_wave_tests {
+    use super::*;
+    use openpt_model::ChannelFormat;
+
+    #[test]
+    fn independent_auxes_share_a_wave_and_a_chain_waits_for_its_source() {
+        let mut s = Session::default();
+        let drums = s.add_bus("Drums", ChannelFormat::Stereo);
+        let gtrs = s.add_bus("Gtrs", ChannelFormat::Stereo);
+        let all = s.add_bus("All", ChannelFormat::Stereo);
+        let d = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Drums"));
+        let g = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Gtrs"));
+        let a = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("All"));
+        for (t, input) in [(d, drums), (g, gtrs), (a, all)] {
+            s.track_mut(t).unwrap().mixer.input = Route::Bus(input);
+        }
+        s.track_mut(d).unwrap().mixer.output = Route::Bus(all);
+        s.track_mut(g).unwrap().mixer.output = Route::Bus(all);
+        let waves = aux_waves(&s, &processing_order(&s));
+        let wave = |t: TrackId| waves.iter().find(|(_, i)| s.tracks[*i].id == t).map(|w| w.0).unwrap();
+        assert_eq!(wave(d), wave(g));
+        assert!(wave(a) > wave(d));
+        assert_eq!(waves.len(), 3);
+    }
 }
 
 #[cfg(test)]
