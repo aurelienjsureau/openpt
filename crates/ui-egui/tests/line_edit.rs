@@ -267,3 +267,27 @@ fn in_grid_mode_a_click_adds_its_breakpoint_on_the_grid() {
     let s = h.state().engine.session();
     assert_eq!(s.snap_to_grid(pts[0].0), pts[0].0, "on a grid line: {pts:?}");
 }
+
+#[test]
+fn ctrl_on_the_line_between_two_breakpoints_adds_one() {
+    let (mut h, kick) = harness("volume", "smart");
+    let [top, bottom, left, right] = lane(&h, kick);
+    let s = h.state().engine.session();
+    let (vol, scroll, spp) = (s.track(kick).unwrap().mixer.volume_db, s.edit.zoom.scroll, s.edit.zoom.samples_per_px);
+    let at = |x: f32| scroll + (f64::from(x - left) * spp) as i64;
+    let (x0, x1) = (left + (right - left) * 0.4, left + (right - left) * 0.6);
+    for x in [x0, x1] {
+        h.state_mut().run("automation.set_point", json!({"track": kick.0, "param": "volume", "at": at(x), "value": vol})).unwrap();
+    }
+    h.run_steps(2);
+    let y = bottom - 4.0 - (vol + 60.0) / 72.0 * (bottom - top - 8.0);
+    let mid = pos2((x0 + x1) / 2.0, y);
+    h.event(Event::ModifiersChanged(Modifiers::CTRL));
+    press(&mut h, mid, true, Modifiers::CTRL);
+    press(&mut h, mid, false, Modifiers::CTRL);
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(2);
+    let pts = volume_points(&h, kick);
+    assert_eq!(pts.len(), 3, "a breakpoint added between the two: {pts:?}");
+    assert!(pts[1].0 > at(x0) && pts[1].0 < at(x1) && (pts[1].1 - vol).abs() < 0.3, "{pts:?}");
+}

@@ -1278,7 +1278,11 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
     if h >= 37.0 {
         let (records, mixes) = (track.kind.has_playlist(), track.kind != TrackKind::Master);
         let s = app.engine.session();
-        let implied = track.kind != TrackKind::Vca && !openpt_mix::soloed(s, track) && !m.solo_safe && openpt_mix::any_solo(s);
+        let implied = track.kind != TrackKind::Vca && !m.solo_safe && openpt_mix::any_solo(s) && {
+            let mut kept = Vec::new();
+            openpt_mix::solo_kept(s, &mut kept);
+            kept.binary_search(&track.id).is_err()
+        };
         let vca_solo = !m.solo && openpt_mix::soloed(s, track);
         let vca_mute = !m.mute && openpt_mix::vca_chain(s, track).any(|v| v.mixer.mute);
         let keys = [
@@ -2514,7 +2518,7 @@ fn in_trim_zone(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2) -> bo
     sel.end > sel.start && s.edit.selected_tracks.contains(&track.id) && at >= sel.start && at <= sel.end && q.y < lane.min.y + lane.height() * 0.35
 }
 
-fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Tool) -> Option<LineHit> {
+fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Tool, add: bool) -> Option<LineHit> {
     if !matches!(tool, Tool::Grabber | Tool::Smart) || !lane.contains(q) {
         return None;
     }
@@ -2539,7 +2543,7 @@ fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Too
         if !on_line && !grabber {
             return None;
         }
-        let segment = lane_pts.filter(|_| on_line && !grabber).and_then(|l| {
+        let segment = lane_pts.filter(|_| on_line && !grabber && !add).and_then(|l| {
             let before = l.points.iter().rev().find(|p| p.at <= at)?.at;
             let after = l.points.iter().find(|p| p.at >= at)?.at;
             (before < after).then_some((before, after))
@@ -2830,7 +2834,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         }
         other => other,
     };
-    let on_line = line_hit(&s, track, lane, tl, origin, tool).is_some();
+    let on_line = line_hit(&s, track, lane, tl, origin, tool, mods.command || mods.ctrl).is_some();
     let eff = if auto_view.is_some() && tool == Tool::Smart { Tool::Selector } else { eff };
     if resp.hovered() {
         let icon = match eff {
@@ -2882,7 +2886,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     }
     if resp.hovered()
         && gain_icon_at(p).is_none()
-        && let Some(h) = line_hit(&s, track, lane, tl, p, tool)
+        && let Some(h) = line_hit(&s, track, lane, tl, p, tool, mods.command || mods.ctrl)
     {
         let icon = if in_trim_zone(&s, track, lane, tl, p) || h.segment() {
             egui::CursorIcon::ResizeVertical
@@ -2896,7 +2900,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     if resp.is_pointer_button_down_on()
         && ui.input(|i| i.pointer.primary_pressed())
         && gain_icon_at(p).is_none()
-        && let Some(h) = line_hit(&s, track, lane, tl, p, tool)
+        && let Some(h) = line_hit(&s, track, lane, tl, p, tool, mods.command || mods.ctrl)
     {
         press_line(app, track.id, h, crate::mix_window::click_mods(ui).alt, p);
     }

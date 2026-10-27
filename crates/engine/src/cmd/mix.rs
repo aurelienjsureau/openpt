@@ -619,8 +619,8 @@ fn route_to_new_aux(e: &mut Engine, p: &Value) -> Result<Value> {
         _ => (1..10_000).map(|k| format!("Aux {k}")).find(|n| !taken(s, n)).unwrap_or_else(|| "Aux".into()),
     };
     let bus = s.add_bus(&name, format);
-    let aux = s.add_track(openpt_model::TrackKind::Aux, format, Some(&name));
     let after = tracks.iter().filter_map(|t| s.track_index(*t)).max();
+    let aux = s.add_track(openpt_model::TrackKind::Aux, format, Some(&name));
     super::track::place_after(s, &[aux], after);
     if let Some(a) = s.track_mut(aux) {
         a.mixer.input = openpt_model::Route::Bus(bus);

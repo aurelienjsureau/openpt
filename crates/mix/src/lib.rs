@@ -412,6 +412,7 @@ pub struct MixEngine {
     main_fmt: ChannelFormat,
     solo_bus: Vec<Vec<f32>>,
     solo: Solo,
+    solo_kept: Vec<TrackId>,
     hw: HashMap<String, BusBuf>,
     pub meters: HashMap<TrackId, StripMeter>,
     pub main_meter: StripMeter,
@@ -499,6 +500,7 @@ impl MixEngine {
             main_fmt: ChannelFormat::Stereo,
             solo_bus: vec![vec![0.0; max_block]; MAIN_CHANNELS],
             solo: Solo::None,
+            solo_kept: Vec::new(),
             hw: HashMap::new(),
             meters: HashMap::new(),
             main_meter: StripMeter::default(),
@@ -753,7 +755,11 @@ impl MixEngine {
                 c.iter_mut().take(frames).for_each(|x| *x = 0.0);
             }
         }
-        let any_solo = self.solo;
+        if self.solo == Solo::InPlace {
+            solo_kept(s, &mut self.solo_kept);
+        }
+        let kept = std::mem::take(&mut self.solo_kept);
+        let any_solo = (self.solo, &kept[..]);
         let order = std::mem::take(&mut self.order);
         let live = |t: &Track| !(t.kind == TrackKind::Master || t.inactive || t.kind == TrackKind::Vca);
         let is_aux = reads_bus;
@@ -975,6 +981,7 @@ impl MixEngine {
         self.work = batch;
         self.aux_waves = waves;
         self.order = order;
+        self.solo_kept = kept;
         let transport = transport_at(s, pos, !self.monitor_only, self.recording);
         for t in s.tracks.iter().filter(|t| t.kind == TrackKind::Master && !t.inactive) {
             if let Some(strip) = self.strips.get_mut(&t.id) {
@@ -1311,7 +1318,7 @@ fn process_strip(
     live: &LiveInput<'_>,
     pos: Samples,
     frames: usize,
-    solo: Solo,
+    (solo, kept): (Solo, &[TrackId]),
 ) {
     strip.midi_out.clear();
     for c in strip.buf.iter_mut() {
@@ -1555,7 +1562,7 @@ fn process_strip(
     strip.gr = gr;
     strip.latency = latency.min(MAX_LATENCY);
     let auto_mute = t.mixer.automation_mode.reads() && t.lane(&AutoParam::Mute).is_some_and(|l| l.value_at(pos, 0.0) >= 0.5);
-    let soloed_out = solo == Solo::InPlace && !soloed(s, t) && !t.mixer.solo_safe && !receives_solo(s, t) && !in_soloed_folder(s, t);
+    let soloed_out = solo == Solo::InPlace && !t.mixer.solo_safe && kept.binary_search(&t.id).is_err();
     strip.listen = solo.listens() && soloed(s, t);
     strip.muted = t.mixer.mute || auto_mute || soloed_out;
     if strip.tap || (strip.listen && solo == Solo::Pfl) || t.mixer.sends.iter().flatten().any(|x| x.pre_fader) {
@@ -2027,11 +2034,47 @@ fn auxes_feeding(s: &Session, inputs: &[&Route]) -> Vec<usize> {
         .collect()
 }
 
-fn receives_solo(s: &Session, t: &Track) -> bool {
-    let Route::Bus(b) = &t.mixer.input else { return false };
-    s.tracks
-        .iter()
-        .any(|o| (soloed(s, o) || in_soloed_folder(s, o)) && (o.mixer.output == Route::Bus(*b) || o.mixer.sends.iter().flatten().any(|sn| sn.target == Route::Bus(*b))))
+pub fn solo_kept(s: &Session, out: &mut Vec<TrackId>) {
+    out.clear();
+    let n = s.tracks.len();
+    let live = |t: &Track| t.kind != TrackKind::Vca && !t.inactive;
+    let into = |t: &Track, f: &Track| {
+        f.id != t.id && ((f.is_folder() && t.folder == Some(f.id)) || matches!((&t.mixer.output, &f.mixer.input), (Route::Bus(a), Route::Bus(b)) if a == b))
+    };
+    let feeds = |t: &Track, f: &Track| {
+        f.id != t.id
+            && ((f.is_folder() && t.folder == Some(f.id))
+                || matches!(&f.mixer.input, Route::Bus(b) if t.mixer.output == Route::Bus(*b) || t.mixer.sends.iter().flatten().any(|sn| sn.target == Route::Bus(*b))))
+    };
+    let mut kept = vec![false; n];
+    let mut stack: Vec<usize> = Vec::new();
+    for (i, t) in s.tracks.iter().enumerate() {
+        if live(t) && soloed(s, t) {
+            kept[i] = true;
+            if t.is_folder() {
+                stack.push(i);
+            }
+        }
+    }
+    while let Some(f) = stack.pop() {
+        for (i, t) in s.tracks.iter().enumerate() {
+            if !kept[i] && live(t) && into(t, &s.tracks[f]) {
+                kept[i] = true;
+                stack.push(i);
+            }
+        }
+    }
+    stack.extend((0..n).filter(|&i| kept[i]));
+    while let Some(o) = stack.pop() {
+        for (i, f) in s.tracks.iter().enumerate() {
+            if !kept[i] && live(f) && feeds(&s.tracks[o], f) {
+                kept[i] = true;
+                stack.push(i);
+            }
+        }
+    }
+    out.extend(s.tracks.iter().zip(&kept).filter(|(_, k)| **k).map(|(t, _)| t.id));
+    out.sort_unstable();
 }
 
 pub fn vca_chain<'a>(s: &'a Session, t: &'a Track) -> impl Iterator<Item = &'a Track> {
@@ -2040,17 +2083,6 @@ pub fn vca_chain<'a>(s: &'a Session, t: &'a Track) -> impl Iterator<Item = &'a T
 
 pub fn soloed(s: &Session, t: &Track) -> bool {
     t.mixer.solo || vca_chain(s, t).any(|v| v.mixer.solo)
-}
-
-fn in_soloed_folder(s: &Session, t: &Track) -> bool {
-    fn up(s: &Session, t: &Track, depth: usize) -> bool {
-        if depth > s.tracks.len() {
-            return false;
-        }
-        let into = |f: &Track| f.is_folder() && (t.folder == Some(f.id) || matches!(t.mixer.output, Route::Bus(b) if f.mixer.input == Route::Bus(b)));
-        s.tracks.iter().filter(|f| f.id != t.id && into(f)).any(|f| soloed(s, f) || up(s, f, depth + 1))
-    }
-    up(s, t, 0)
 }
 
 pub fn any_solo(s: &Session) -> bool {
@@ -3347,6 +3379,45 @@ mod tests {
         s.track_mut(other).unwrap().mixer.solo = true;
         let out = render_range(&s, Range::new(0, 4800), 512);
         assert!(out[0][2000].abs() < 1e-6);
+    }
+
+    #[test]
+    fn solo_in_place_follows_sub_busses_on_both_sides_of_a_folder() {
+        let mut s = Session::default();
+        let (a, f, v) = (s.add_bus("A", ChannelFormat::Stereo), s.add_bus("F", ChannelFormat::Stereo), s.add_bus("V", ChannelFormat::Stereo));
+        let src = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Sing"));
+        let sub = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("Clean"));
+        let folder = s.add_track(TrackKind::Folder, ChannelFormat::Stereo, Some("Lead"));
+        let all = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("All"));
+        let other = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Bass"));
+        let vca = s.add_track(TrackKind::Vca, ChannelFormat::Mono, Some("Vocals"));
+        for (t, input, output) in [(src, Route::None, Route::Bus(a)), (sub, Route::Bus(a), Route::Bus(f)), (folder, Route::Bus(f), Route::Bus(v)), (all, Route::Bus(v), Route::Main)] {
+            let tr = s.track_mut(t).unwrap();
+            tr.mixer.input = input;
+            tr.mixer.output = output;
+        }
+        s.track_mut(folder).unwrap().mixer.vca = Some(vca.0);
+        let kept = |s: &Session| {
+            let mut k = Vec::new();
+            solo_kept(s, &mut k);
+            k
+        };
+        let chain = {
+            let mut c = vec![src, sub, folder, all];
+            c.sort_unstable();
+            c
+        };
+        s.track_mut(src).unwrap().mixer.solo = true;
+        assert_eq!(kept(&s), chain, "a soloed source keeps every bus down to the output");
+        s.track_mut(src).unwrap().mixer.solo = false;
+        s.track_mut(vca).unwrap().mixer.solo = true;
+        assert_eq!(kept(&s), chain, "a VCA on the folder keeps what plays into it through the sub-bus");
+        s.track_mut(vca).unwrap().mixer.solo = false;
+        s.track_mut(sub).unwrap().mixer.solo = true;
+        let mut down = vec![sub, folder, all];
+        down.sort_unstable();
+        assert_eq!(kept(&s), down, "a soloed aux still mutes its sources");
+        assert!(!kept(&s).contains(&other));
     }
 
     #[test]
