@@ -1,4 +1,4 @@
-use openpt_dsp::{Plugin, PluginEditor, PluginInfo, PluginStateReader, Transport};
+use openpt_dsp::{ChannelInfo, Plugin, PluginEditor, PluginInfo, PluginStateReader, Transport};
 
 pub(crate) struct MultiMono {
     id: String,
@@ -6,6 +6,7 @@ pub(crate) struct MultiMono {
     state: Option<Vec<u8>>,
     inner: Vec<Box<dyn Plugin>>,
     offline: bool,
+    channel: Option<ChannelInfo>,
 }
 
 impl MultiMono {
@@ -14,13 +15,16 @@ impl MultiMono {
         let refused = state.is_some_and(|st| !first.load_state(st));
         let info = first.info();
         let state = if refused { None } else { state.map(<[u8]>::to_vec) };
-        Some((MultiMono { id: id.to_string(), info, state, inner: vec![first], offline: false }, refused))
+        Some((MultiMono { id: id.to_string(), info, state, inner: vec![first], offline: false, channel: None }, refused))
     }
 
     fn grow(&mut self, channels: usize) {
         while self.inner.len() < channels {
             let Some(mut p) = super::create_plugin(&self.id) else { break };
             p.set_offline(self.offline);
+            if let Some(c) = &self.channel {
+                p.set_channel(c);
+            }
             if let Some(st) = &self.state {
                 p.load_state(st);
             }
@@ -52,6 +56,11 @@ impl Plugin for MultiMono {
     fn set_offline(&mut self, on: bool) {
         self.offline = on;
         self.inner.iter_mut().for_each(|p| p.set_offline(on));
+    }
+
+    fn set_channel(&mut self, channel: &ChannelInfo) {
+        self.inner.iter_mut().for_each(|p| p.set_channel(channel));
+        self.channel = Some(channel.clone());
     }
 
     fn reset(&mut self) {

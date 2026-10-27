@@ -1501,6 +1501,28 @@ impl Instance {
         unsafe { crate::ara::bind(self.component.as_ptr().cast(), track) }
     }
 
+    pub fn set_channel_context(&self, c: &openpt_dsp::ChannelInfo) -> bool {
+        use sv::ChannelContext::{self as cc, IInfoListenerTrait};
+        let target = self.controller.as_ref().and_then(|x| x.cast::<cc::IInfoListener>()).or_else(|| self.component.cast::<cc::IInfoListener>());
+        let Some(l) = target else { return false };
+        let attrs = HostAttributes::default();
+        let utf16 = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let uid = format!("openpt-track-{}", c.id);
+        let name_len = c.name.encode_utf16().count();
+        let [r, g, b] = c.color;
+        let argb = 0xFF00_0000u32 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+        attrs.set(cc::kChannelUIDKey, Attr::Str(utf16(&uid)));
+        attrs.set(cc::kChannelUIDLengthKey, Attr::Int(uid.len() as i64));
+        attrs.set(cc::kChannelNameKey, Attr::Str(utf16(&c.name)));
+        attrs.set(cc::kChannelNameLengthKey, Attr::Int(name_len as i64));
+        attrs.set(cc::kChannelIndexKey, Attr::Int(c.index as i64 + 1));
+        attrs.set(cc::kChannelColorKey, Attr::Int(i64::from(argb)));
+        attrs.set(cc::kChannelRuntimeIDKey, Attr::Str(utf16(&uid)));
+        attrs.set(cc::kChannelPluginLocationKey, Attr::Int(i64::from(cc::ChannelPluginLocation_::kPreVolumeFader)));
+        let Some(list) = ComWrapper::new(attrs).to_com_ptr::<sv::IAttributeList>() else { return false };
+        ok(unsafe { l.setChannelContextInfos(list.as_ptr()) })
+    }
+
     pub fn shutdown(&mut self) {
         if self.processing {
             if let Some(p) = self.processor() {

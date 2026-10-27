@@ -817,18 +817,20 @@ pub fn commit_captured(e: &mut Engine, captured: Vec<(TrackId, Vec<Vec<f32>>)>) 
 
 fn place_commit(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) -> Option<TrackId> {
     let s = e.session();
-    let (name, mixer, lanes) = s.track(t).map(|tr| (format!("{}.cm", tr.name), tr.mixer.clone(), tr.automation.clone()))?;
+    let (name, mixer, lanes, folder) = s.track(t).map(|tr| (format!("{}.cm", tr.name), tr.mixer.clone(), tr.automation.clone(), tr.folder))?;
     let fmt = ChannelFormat::for_channels(audio.len().clamp(1, 2));
     let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
     let s = e.session_mut();
     let src = add_source(s, &name, buf, None, FileFormat::Wav);
     let nt = s.add_track(TrackKind::Audio, fmt, Some(&name));
-    if let (Some(idx), Some(new_idx)) = (s.track_index(t), s.track_index(nt)) {
+    if let Some(new_idx) = s.track_index(nt) {
         let tr = s.tracks.remove(new_idx);
-        s.tracks.insert((idx + 1).min(s.tracks.len()), tr);
+        let at = s.track_index(t).map_or(s.tracks.len(), |i| i + 1);
+        s.tracks.insert(at, tr);
     }
     let cid = s.new_clip_id();
     if let Some(ntr) = s.track_mut(nt) {
+        ntr.folder = folder;
         ntr.mixer.volume_db = mixer.volume_db;
         ntr.mixer.output = mixer.output.clone();
         ntr.mixer.sends = mixer.sends.clone();

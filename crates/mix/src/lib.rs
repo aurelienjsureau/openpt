@@ -478,7 +478,7 @@ impl SlotCtx<'_> {
             let id = ins.instance_id();
             let ara = if third && id.starts_with("vst3:") { ara_track(self.session, t) } else { None };
             create_instance_with(&id, state.as_deref(), self.sr, self.mb, ch, ara.as_ref(), !self.external)
-                .map(|n| (n.plugin, state.is_some() && !n.refused_state))
+                .map(|n| (with_channel(n.plugin, self.session, t), state.is_some() && !n.refused_state))
         }?;
         if let Some(sc) = plugin.scope() {
             openpt_dsp::scope::publish(t.0, idx, &sc);
@@ -2414,6 +2414,12 @@ pub fn ara_follow(s: &Session, seen: &mut std::collections::HashMap<u64, u64>) {
     openpt_vst3_host::ara_finish_restores();
     #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
     let _ = (s, seen);
+}
+
+pub fn channel_info(s: &Session, t: TrackId) -> Option<openpt_dsp::ChannelInfo> {
+    let index = s.track_index(t)?;
+    let tr = s.track(t)?;
+    Some(openpt_dsp::ChannelInfo { id: t.0, name: tr.name.clone(), index, color: tr.color })
 }
 
 pub fn ara_track(s: &Session, t: TrackId) -> Option<openpt_dsp::AraTrack> {
@@ -4682,4 +4688,11 @@ mod tests {
         assert!(eng.strips.get(&t_ch0).unwrap().held.is_empty(), "Track filtered to Ch 0 must ignore Ch 1 event");
         assert!(eng.strips.get(&t_ch1).unwrap().held.contains(1, 60), "Track filtered to Ch 1 must receive Ch 1 event");
     }
+}
+
+fn with_channel(mut plugin: Box<dyn Plugin>, s: &Session, t: TrackId) -> Box<dyn Plugin> {
+    if let Some(c) = channel_info(s, t) {
+        plugin.set_channel(&c);
+    }
+    plugin
 }

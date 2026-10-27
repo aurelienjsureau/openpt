@@ -317,6 +317,8 @@ mod tests {
         for c in b.classes().into_iter().filter(|c| c.category == AUDIO_MODULE_CLASS) {
             let inst = b.instantiate(&c.cid).unwrap();
             println!("{} — PreSonus GR: {}", c.name, inst.reports_gain_reduction());
+            let ch = openpt_dsp::ChannelInfo { id: 7, name: "Kick In".into(), index: 2, color: [200, 40, 40] };
+            println!("channel context: {}", inst.set_channel_context(&ch));
             for p in inst.params() {
                 println!("{:>11} {:#06x} {:?} [{}]", p.id, p.flags, p.title, p.units);
             }

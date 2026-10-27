@@ -1062,6 +1062,9 @@ impl Side {
             log::debug!("plugin instance for {:?} slot {}: {} ({} ch, created: {})", spec.track, spec.slot, spec.id, spec.ch, made.is_some());
             self.shadow.insert(key, (spec.id.clone(), spec.ch, made.is_some()));
             if let Some(openpt_mix::NewInstance { mut plugin, refused_state }) = made {
+                if let Some(c) = openpt_mix::channel_info(s, spec.track) {
+                    plugin.set_channel(&c);
+                }
                 if let Some(e) = plugin.editor() {
                     self.editors.insert(key, e);
                 }

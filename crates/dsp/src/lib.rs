@@ -215,6 +215,8 @@ pub trait Plugin: Send {
 
     fn ara_update(&mut self, _track: &AraTrack) {}
 
+    fn set_channel(&mut self, _channel: &ChannelInfo) {}
+
     fn save_state(&mut self) -> Option<Vec<u8>> {
         self.state_reader()?.save_state()
     }
@@ -305,6 +307,14 @@ pub trait SampleSource: Send + Sync {
     fn frames(&self) -> usize {
         (0..self.num_channels()).filter_map(|c| self.channel(c)).map(<[f32]>::len).min().unwrap_or(0)
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChannelInfo {
+    pub id: u64,
+    pub name: String,
+    pub index: usize,
+    pub color: [u8; 3],
 }
 
 #[derive(Clone)]

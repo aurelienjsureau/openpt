@@ -164,6 +164,12 @@ impl Vst3Plugin {
 }
 
 impl Plugin for Vst3Plugin {
+    fn set_channel(&mut self, channel: &openpt_dsp::ChannelInfo) {
+        if !self.inst.set_channel_context(channel) {
+            log::debug!("{}: no channel context listener", self.info.name);
+        }
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn ara_bind(&mut self, track: &openpt_dsp::AraTrack) -> bool {
         if self.ara.is_none() {

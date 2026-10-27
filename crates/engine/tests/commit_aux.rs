@@ -80,3 +80,23 @@ fn a_committed_track_keeps_its_pan() {
     let nt = TrackId(r["tracks"][0].as_u64().unwrap());
     assert_eq!(e.session().track(nt).unwrap().mixer.pan, vec![-0.6]);
 }
+
+#[test]
+fn a_committed_track_lands_right_below_its_source() {
+    let mut s = Session::default();
+    let folder = s.add_track(TrackKind::Folder, ChannelFormat::Stereo, Some("Drums"));
+    let t = audio_track(&mut s, "Kick", 0.25);
+    let below = audio_track(&mut s, "Snare", 0.25);
+    s.track_mut(t).unwrap().folder = Some(folder);
+    let m = s.add_track(TrackKind::Master, ChannelFormat::Stereo, Some("Master"));
+    let mi = s.track_index(m).unwrap();
+    let master = s.tracks.remove(mi);
+    s.tracks.insert(0, master);
+    let mut e = Engine::new(s);
+    let r = e.execute("track.commit", &json!({"tracks": [t.0]})).unwrap();
+    let nt = TrackId(r["tracks"][0].as_u64().unwrap());
+    let s = e.session();
+    let order: Vec<_> = s.tracks.iter().map(|x| x.id).collect();
+    assert_eq!(order, vec![m, folder, t, nt, below]);
+    assert_eq!(s.track(nt).unwrap().folder, Some(folder));
+}
