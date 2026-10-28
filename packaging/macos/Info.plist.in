@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>OpenPT</string>
+  <key>CFBundleName</key>
+  <string>OpenPT</string>
+  <key>CFBundleExecutable</key>
+  <string>OpenPT</string>
+  <key>CFBundleIdentifier</key>
+  <string>fr.bourrinaudio.openpt</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@SHORT_VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@SHORT_VERSION@</string>
+  <key>OpenPTVersion</key>
+  <string>@VERSION@</string>
+  <key>OpenPTBuildCommit</key>
+  <string>@BUILD_SHA@</string>
+  <key>CFBundleIconFile</key>
+  <string>OpenPT</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.music</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>NSRequiresAquaSystemAppearance</key>
+  <false/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>OpenPT records audio from the input you choose.</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © BourrinAudio. MIT OR Apache-2.0.</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>fr.bourrinaudio.openpt.session</string>
+      <key>UTTypeDescription</key>
+      <string>OpenPT Session</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+        <string>public.content</string>
+      </array>
+      <key>UTTypeIconFile</key>
+      <string>OpenPT</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>openpt</string></array>
+      </dict>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>OpenPT Session</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>OpenPT</string>
+      <key>LSItemContentTypes</key>
+      <array><string>fr.bourrinaudio.openpt.session</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Pro Tools Session</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>ptx</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>

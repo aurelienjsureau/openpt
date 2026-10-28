@@ -1,0 +1,26 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  dmg:
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Package
+        env:
+          OPENPT_LABEL: 0.6.10-alpha
+        run: packaging/macos/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenPT-macos-arm64
+          path: dist/*.dmg
+          if-no-files-found: error
