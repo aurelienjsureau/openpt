@@ -103,7 +103,9 @@ impl eframe::App for App {
         if let Some(logger) = self.1 {
             logger.report_audio_thread();
         }
+        self.0.recorder = None;
         self.0.player = None;
+        openpt_playback::devices::release_asio();
         openpt_engine::shutdown_plugin_hosts();
     }
 }

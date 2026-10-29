@@ -104,12 +104,6 @@ fn cached_host(id: cpal::HostId) -> Option<&'static cpal::Host> {
     }
     let host: &'static cpal::Host = Box::leak(Box::new(cpal::host_from_id(id).ok()?));
     hosts.push((id, host));
-    drop(hosts);
-    if is_asio(id) && ASIO_OPEN.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
-        let mut outputs: Vec<DeviceInfo> = host.output_devices().map(|ds| ds.filter_map(|d| describe(&d, None, true)).collect()).unwrap_or_default();
-        let mut inputs: Vec<DeviceInfo> = host.input_devices().map(|ds| ds.filter_map(|d| describe(&d, None, false)).collect()).unwrap_or_default();
-        remember_asio(&mut outputs, &mut inputs);
-    }
     Some(host)
 }
 
@@ -171,6 +165,11 @@ pub(crate) fn device(host: &cpal::Host, name: Option<&str>, output: bool) -> Opt
     let old = open.take();
     drop(old);
     let found = find(host, name, output);
+    if let Some(d) = &found {
+        let mut outputs: Vec<DeviceInfo> = describe(d, None, true).into_iter().collect();
+        let mut inputs: Vec<DeviceInfo> = describe(d, None, false).into_iter().collect();
+        remember_asio(&mut outputs, &mut inputs);
+    }
     open.clone_from(&found);
     found
 }
