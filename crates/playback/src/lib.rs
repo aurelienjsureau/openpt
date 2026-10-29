@@ -2,6 +2,7 @@
 
 pub mod devices;
 pub mod midi;
+pub mod readahead;
 pub mod record;
 pub mod surface;
 
@@ -79,7 +80,7 @@ enum Cmd {
     Locate(Samples),
 }
 
-struct Shared {
+pub(crate) struct Shared {
     position: AtomicI64,
     playing: AtomicBool,
     speed: AtomicU32,
@@ -173,6 +174,7 @@ struct AudioState {
     looped: Option<Range>,
     pending: Vec<Vec<f32>>,
     fold_channels: usize,
+    monitor: Option<openpt_mix::monitor::Monitor>,
     fold: [(f32, f32); MAX_CHANNELS],
     pending_len: usize,
     read: f64,
@@ -218,6 +220,7 @@ impl AudioState {
             looped: None,
             pending: vec![vec![0.0; BLOCK]; nch],
             fold_channels,
+            monitor: None,
             pending_len: 0,
             read: 0.0,
             device_rate,
@@ -400,15 +403,27 @@ impl AudioState {
         {
             c.push(&self.pending, n);
         }
+        let fmt = self.session.main_format();
+        if openpt_mix::monitor::Monitor::wanted(&self.session.atmos, fmt) {
+            let rate = self.session.sample_rate.hz();
+            if !self.monitor.as_ref().is_some_and(|m| m.matches(&self.session.atmos, fmt, rate)) {
+                self.monitor = Some(openpt_mix::monitor::Monitor::new(&self.session.atmos, fmt, rate));
+            }
+            if let Some(m) = &mut self.monitor {
+                m.process(&mut self.pending, n);
+            }
+        } else {
+            self.monitor = None;
+        }
         if self.recording
             && self.playing
             && let Some(rec_ring) = &self.midi_record
         {
-            for &(t, off, m) in &self.mix.midi_routed {
+            for &(t, at_sample, m) in &self.mix.midi_routed_at {
                 if self.session.track(t).is_some_and(|tr| tr.mixer.record_arm) {
                     let len = if matches!(m[0] & 0xF0, 0xC0 | 0xD0) { 2 } else { 3 };
                     let event = LiveMidiEvent { port_id: 0, timestamp_us: 0, len, data: m };
-                    rec_ring.push(midi::RecordedMidiEvent { track_id: t.0, at_sample: self.pos.saturating_add(off as i64), event });
+                    rec_ring.push(midi::RecordedMidiEvent { track_id: t.0, at_sample, event });
                 }
             }
         }
@@ -449,7 +464,8 @@ impl AudioState {
                         || (self.session.edit.flag("options.midi_thru") && self.session.edit.selected_tracks.contains(&t.id)))
             });
         let midi_has_events = self.midi_input.as_ref().is_some_and(|r| !r.is_empty());
-        let monitoring = audio_monitoring || midi_monitoring || midi_has_events;
+        let instruments = self.session.tracks.iter().any(|t| t.instrument.is_some() && !t.inactive);
+        let monitoring = audio_monitoring || midi_monitoring || midi_has_events || instruments;
         if !self.playing && !monitoring {
             out.iter_mut().for_each(|x| *x = 0.0);
             if self.latency_probe {
@@ -813,6 +829,8 @@ impl Player {
     }
 
     pub fn update_session(&self, s: Arc<Session>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        readahead::watch(Arc::clone(&s), &self.shared);
         let started = std::time::Instant::now();
         let instances = self.side().prepare(&s);
         let took = started.elapsed();
@@ -1660,5 +1678,38 @@ mod tests {
         assert_eq!(rec.track_id, t.0);
         assert_eq!(rec.event.note_pitch(), 60);
         assert_eq!(rec.event.note_velocity(), 100);
+    }
+
+    #[test]
+    fn a_session_with_an_instrument_still_plays_its_audio_after_idling() {
+        use openpt_model::{ChannelFormat, Clip, Insert, SourceAudio, SourceId, TrackKind};
+        let mut s = openpt_model::Session::default();
+        let i = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+        s.track_mut(i).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        let chans: Vec<Vec<f32>> = (0..2).map(|_| vec![0.3; 480_000]).collect();
+        s.pool.insert(SourceId(5), Arc::new(SourceAudio::new(openpt_audio_io::AudioBuffer { sample_rate: 44_100, channels: chans })));
+        let id = s.new_clip_id();
+        s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::audio(id, "x", SourceId(5), 0, 0, 480_000));
+        let shared = Arc::new(Shared {
+            position: AtomicI64::new(0),
+            playing: AtomicBool::new(false),
+            speed: AtomicU32::new(1000),
+            meters: Mutex::new(MeterSnapshot::default()),
+            late: Mutex::default(),
+        });
+        let (tx, rx) = channel();
+        let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 44_100.0, channel().0);
+        let mut out = vec![0.0f32; 2 * 1024];
+        for _ in 0..20 {
+            st.fill(&mut out, 2);
+        }
+        assert!(out.iter().all(|x| x.abs() < 1e-6));
+        tx.send(Cmd::Play { from: 0, end: None, looped: None }).unwrap();
+        for _ in 0..5 {
+            st.fill(&mut out, 2);
+        }
+        assert!(out.iter().any(|x| x.abs() > 0.1), "{:?}", &out[..8]);
+        assert!(shared.position.load(Ordering::Relaxed) > 4096);
     }
 }

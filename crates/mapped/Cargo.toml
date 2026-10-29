@@ -1,0 +1,19 @@
+[package]
+name = "openpt-mapped"
+description = "OpenPT decoded-audio cache files, read through memory maps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+memmap2 = "0.9"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"

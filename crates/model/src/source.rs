@@ -44,21 +44,62 @@ impl VideoSource {
 }
 
 #[derive(Debug)]
+enum Samples {
+    Owned(Vec<Vec<f32>>),
+    #[cfg(not(target_arch = "wasm32"))]
+    Mapped(openpt_mapped::MappedSamples),
+}
+
+#[derive(Debug)]
 pub struct SourceAudio {
-    pub buffer: AudioBuffer,
+    samples: Samples,
+    sample_rate: u32,
+    frames: usize,
     pub peaks: Vec<Peaks>,
 }
 
 impl SourceAudio {
     pub fn new(buffer: AudioBuffer) -> Self {
         let peaks = buffer.channels.iter().map(|c| Peaks::build(c)).collect();
-        SourceAudio { buffer, peaks }
+        let frames = buffer.frames();
+        SourceAudio { samples: Samples::Owned(buffer.channels), sample_rate: buffer.sample_rate, frames, peaks }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn mapped(samples: openpt_mapped::MappedSamples) -> Self {
+        let peaks = (0..samples.channels()).map(|c| Peaks::build(samples.channel(c).unwrap_or(&[]))).collect();
+        SourceAudio { sample_rate: samples.sample_rate(), frames: samples.frames(), samples: Samples::Mapped(samples), peaks }
+    }
+    pub fn is_mapped(&self) -> bool {
+        !matches!(self.samples, Samples::Owned(_))
     }
     pub fn frames(&self) -> usize {
-        self.buffer.frames()
+        self.frames
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+    pub fn num_channels(&self) -> usize {
+        match &self.samples {
+            Samples::Owned(c) => c.len(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Samples::Mapped(m) => m.channels(),
+        }
     }
     pub fn channel(&self, ch: usize) -> Option<&[f32]> {
-        self.buffer.channels.get(ch).map(Vec::as_slice)
+        match &self.samples {
+            Samples::Owned(c) => c.get(ch).map(Vec::as_slice),
+            #[cfg(not(target_arch = "wasm32"))]
+            Samples::Mapped(m) => m.channel(ch),
+        }
+    }
+    pub fn channels(&self) -> Vec<&[f32]> {
+        (0..self.num_channels()).filter_map(|c| self.channel(c)).collect()
+    }
+    pub fn sample(&self, ch: usize, frame: usize) -> f32 {
+        self.channel(ch).and_then(|c| c.get(frame)).copied().unwrap_or(0.0)
+    }
+    pub fn to_buffer(&self) -> AudioBuffer {
+        AudioBuffer { sample_rate: self.sample_rate, channels: self.channels().into_iter().map(<[f32]>::to_vec).collect() }
     }
 }
 

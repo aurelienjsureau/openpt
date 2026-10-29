@@ -28,3 +28,7 @@ proptest.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+openpt-mapped.workspace = true
+openpt-transcribe.workspace = true

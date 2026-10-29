@@ -786,6 +786,10 @@ pub(crate) fn current_value(tr: &openpt_model::Track, param: &AutoParam) -> f32 
         AutoParam::SendLevel(i) => tr.mixer.sends.get(usize::from(*i)).and_then(Option::as_ref).map_or(-144.0, |s| s.level_db),
         AutoParam::SendPan(i) => tr.mixer.sends.get(usize::from(*i)).and_then(Option::as_ref).map_or(0.0, |s| s.pan),
         AutoParam::SendMute(i) => tr.mixer.sends.get(usize::from(*i)).and_then(Option::as_ref).map_or(0.0, |s| f32::from(u8::from(s.mute))),
+        AutoParam::Surround(a) => {
+            let sp = tr.mixer.surround.unwrap_or_else(|| openpt_model::SurroundPan::from_stereo(tr.mixer.pan.first().copied().unwrap_or(0.0)));
+            [sp.x, sp.y, sp.z, sp.divergence].get(usize::from(*a)).copied().unwrap_or(0.0)
+        }
         AutoParam::Plugin { slot, param } => {
             tr.mixer.inserts.get(usize::from(*slot)).and_then(Option::as_ref).and_then(|i| if param == openpt_model::BYPASS_PARAM { Some(f32::from(u8::from(i.bypass))) } else { i.params.get(param).copied() }).unwrap_or(0.0)
         }

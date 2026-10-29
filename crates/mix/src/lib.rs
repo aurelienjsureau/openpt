@@ -1,5 +1,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod hrir_kemar;
+pub mod monitor;
 mod multi_mono;
 
 use openpt_dsp::pan::{PanLaw, SpeakerPos, SurroundParams, gains};
@@ -308,6 +310,8 @@ struct Strip {
     extras: Vec<Vec<Vec<f32>>>,
     extra_align: Vec<DelayLine>,
     midi_out: Vec<(usize, [u8; 3])>,
+    midi_lat: Vec<usize>,
+    midi_pos: Samples,
 }
 
 const MAX_LATENCY: usize = 1 << 20;
@@ -397,6 +401,8 @@ impl Strip {
             key_feed: Vec::new(),
             extras: Vec::new(),
             midi_out: Vec::with_capacity(512),
+            midi_lat: Vec::with_capacity(512),
+            midi_pos: 0,
             extra_align: Vec::new(),
             heat: openpt_dsp::heat::Heat::default(),
         }
@@ -431,6 +437,7 @@ pub struct MixEngine {
     pub input: Vec<Vec<f32>>,
     pub midi_input: Vec<(usize, LiveMidiEvent)>,
     pub midi_routed: Vec<(TrackId, usize, [u8; 3])>,
+    pub midi_routed_at: Vec<(TrackId, Samples, [u8; 3])>,
     pub monitor_only: bool,
     pub recording: bool,
     pub metronome: bool,
@@ -519,6 +526,7 @@ impl MixEngine {
             input: Vec::new(),
             midi_input: Vec::with_capacity(256),
             midi_routed: Vec::with_capacity(2048),
+            midi_routed_at: Vec::with_capacity(2048),
             monitor_only: false,
             recording: false,
             metronome: false,
@@ -621,6 +629,7 @@ impl MixEngine {
         self.main_meter = StripMeter::default();
         self.midi_input.clear();
         self.midi_routed.clear();
+        self.midi_routed_at.clear();
     }
 
     pub fn sync(&mut self, s: &Session) {
@@ -781,19 +790,26 @@ impl MixEngine {
             }
         }
         self.midi_routed.clear();
+        self.midi_routed_at.clear();
         for t in s.tracks.iter().filter(|t| t.kind.is_midi() && !t.inactive) {
             let Some(from) = t.midi_from else { continue };
             let listening =
                 t.mixer.record_arm || t.mixer.input_monitor || (s.edit.flag("options.midi_thru") && s.edit.selected_tracks.contains(&t.id));
             let Some(src) = s.track(from.track()).filter(|_| listening) else { continue };
             let routed = &mut self.midi_routed;
-            let mut push = |off: usize, m: [u8; 3]| {
+            let routed_at = &mut self.midi_routed_at;
+            let mut push = |off: usize, m: [u8; 3], at: Samples| {
                 if routed.len() < routed.capacity() {
                     routed.push((t.id, off.min(frames.saturating_sub(1)), m));
                 }
+                if routed_at.len() < routed_at.capacity() {
+                    routed_at.push((t.id, at, m));
+                }
             };
             match from {
-                MidiFrom::Track(_) if !self.monitor_only => track_events(s, src, pos, frames, &mut push),
+                MidiFrom::Track(_) if !self.monitor_only => {
+                    track_events(s, src, pos, frames, &mut |off: usize, m: [u8; 3]| push(off, m, pos.saturating_add(off as i64)))
+                }
                 MidiFrom::Track(_) => {}
                 MidiFrom::Plugins(_) => {
                     let st = work
@@ -801,8 +817,11 @@ impl MixEngine {
                         .find(|(i, _)| s.tracks.get(*i).is_some_and(|x| x.id == src.id))
                         .map(|(_, st)| st)
                         .or_else(|| self.strips.get(&src.id));
-                    for &(off, m) in st.map_or(&[][..], |st| st.midi_out.as_slice()) {
-                        push(off, m);
+                    let Some(st) = st else { continue };
+                    let input_lat = if is_aux(src) { self.aux_out.get(&src.id).copied().unwrap_or(0).saturating_sub(st.latency) } else { 0 };
+                    for (k, &(off, m)) in st.midi_out.iter().enumerate() {
+                        let lat = input_lat.saturating_add(st.midi_lat.get(k).copied().unwrap_or(0));
+                        push(off, m, st.midi_pos.saturating_add(off as i64).saturating_sub(lat as i64));
                     }
                 }
             }
@@ -1254,7 +1273,8 @@ impl MixEngine {
             let mut start = 0;
             while start < frames {
                 let (at, end) = pan_segment(t, pos, start, frames);
-                let spec = PanSpec { stereo: [pan_at(t, 0, at), pan_at(t, 1, at)], surround: t.mixer.surround.as_ref() };
+                let sp = surround_at(t, at);
+                let spec = PanSpec { stereo: [pan_at(t, 0, at), pan_at(t, 1, at)], surround: sp.as_ref() };
                 let m = build_matrix(src_fmt, from.len(), fmt, n, &spec, law);
                 apply_matrix_span(from, start..end, &mut self.solo_bus, &m, 1.0);
                 start = end;
@@ -1275,7 +1295,8 @@ impl MixEngine {
         let mut start = 0;
         while start < frames {
             let (at, end) = pan_segment(t, pos, start, frames);
-            let spec = PanSpec { stereo: [pan_at(t, 0, at), pan_at(t, 1, at)], surround: t.mixer.surround.as_ref() };
+            let sp = surround_at(t, at);
+            let spec = PanSpec { stereo: [pan_at(t, 0, at), pan_at(t, 1, at)], surround: sp.as_ref() };
             let m = build_matrix(src_fmt, src.len(), dst_fmt, dst.len(), &spec, law);
             apply_matrix_span(src, start..end, dst, &m, 1.0);
             start = end;
@@ -1321,6 +1342,8 @@ fn process_strip(
     (solo, kept): (Solo, &[TrackId]),
 ) {
     strip.midi_out.clear();
+    strip.midi_lat.clear();
+    strip.midi_pos = pos;
     for c in strip.buf.iter_mut() {
         c.iter_mut().take(frames).for_each(|x| *x = 0.0);
     }
@@ -1377,20 +1400,18 @@ fn process_strip(
             let is_selected = s.edit.selected_tracks.contains(&t.id);
             let midi_target = t.mixer.record_arm || t.mixer.input_monitor || (s.edit.flag("options.midi_thru") && is_selected);
 
-            if live.monitor_only && !midi_target {
-                if let Some(inst) = strip.instrument.as_mut().filter(|i| !i.failed)
-                    && live.midi_input.iter().any(|(_, ev)| ev.is_control_change() && (ev.cc_controller() == 120 || ev.cc_controller() == 123))
-                {
-                    inst.plugin.all_notes_off();
-                    for (ch, p) in strip.held.iter() {
-                        inst.plugin.note_off_chan(0, ch, p);
-                    }
-                    strip.held.clear();
-                    if strip.buf.len() >= 2 {
-                        inst.plugin.process(&mut strip.buf, frames);
-                    }
+            if live.monitor_only
+                && !midi_target
+                && let Some(inst) = strip.instrument.as_mut().filter(|i| !i.failed)
+                && live.midi_input.iter().any(|(_, ev)| ev.is_control_change() && (ev.cc_controller() == 120 || ev.cc_controller() == 123))
+            {
+                inst.plugin.all_notes_off();
+                for (ch, p) in strip.held.iter() {
+                    inst.plugin.note_off_chan(0, ch, p);
                 }
-            } else if let Some(inst) = strip.instrument.as_mut().filter(|i| !i.failed) {
+                strip.held.clear();
+            }
+            if let Some(inst) = strip.instrument.as_mut().filter(|i| !i.failed) {
                 if let Some(ins) = &t.instrument {
                     apply_params(inst, ins, t, INSTRUMENT_SLOT, pos);
                 }
@@ -1462,6 +1483,7 @@ fn process_strip(
                     }
                 }
                 inst.plugin.take_midi_out(&mut strip.midi_out);
+                strip.midi_lat.resize(strip.midi_out.len(), 0);
                 if contain_failure(inst, &mut strip.buf, frames) {
                     strip.failures.record(INSTRUMENT_SLOT);
                 }
@@ -1532,6 +1554,7 @@ fn process_strip(
         }
         slot.took_us = elapsed_us(t0);
         slot.plugin.take_midi_out(&mut strip.midi_out);
+        strip.midi_lat.resize(strip.midi_out.len(), latency.saturating_add(slot.plugin.latency()));
         if contain_failure(slot, &mut strip.buf, frames) {
             strip.failures.record(i);
             continue;
@@ -1955,19 +1978,22 @@ fn writes_bus(t: &Track, b: BusId) -> bool {
 fn aux_waves(s: &Session, order: &[usize]) -> Vec<(usize, usize)> {
     let live = |t: &Track| !(t.kind == TrackKind::Master || t.inactive || t.kind == TrackKind::Vca);
     let auxes: Vec<(usize, &Track)> = order.iter().filter_map(|&i| s.tracks.get(i).map(|t| (i, t))).filter(|(_, t)| live(t) && reads_bus(t)).collect();
-    let input = |t: &Track| match t.mixer.input {
-        Route::Bus(b) => Some(b),
-        _ => None,
+    let reads = |t: &Track| -> Vec<BusId> {
+        let mut v: Vec<BusId> = key_busses(t).collect();
+        if let Route::Bus(b) = t.mixer.input {
+            v.push(b);
+        }
+        v
     };
     let mut level = vec![0usize; auxes.len()];
     for (k, (_, t)) in auxes.iter().enumerate() {
         let mut l = 0;
         for (j, (_, e)) in auxes.iter().enumerate().take(k) {
             let lj = level.get(j).copied().unwrap_or(0);
-            if input(t).is_some_and(|b| writes_bus(e, b)) {
+            if reads(t).iter().any(|b| writes_bus(e, *b)) {
                 l = l.max(lj + 1);
             }
-            if input(e).is_some_and(|b| writes_bus(t, b)) {
+            if reads(e).iter().any(|b| writes_bus(t, *b)) {
                 l = l.max(lj);
             }
         }
@@ -2161,7 +2187,7 @@ fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &mut 
     let block = Range { start: pos, end: pos.saturating_add(frames as i64) };
     let Some(isect) = clip.range().intersect(&block) else { return };
     let Some(audio) = s.pool.get(source) else { return };
-    let nsrc = audio.buffer.channels.len();
+    let nsrc = audio.num_channels();
     if nsrc == 0 {
         return;
     }
@@ -2170,7 +2196,7 @@ fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &mut 
     let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
     const STEP: usize = 32;
     for (ch, dst) in buf.iter_mut().enumerate() {
-        let src = audio.buffer.channels.get(ch % nsrc).map(Vec::as_slice).unwrap_or(&[]);
+        let src = audio.channel(ch % nsrc).unwrap_or(&[]);
         let mut i = i0;
         while i < i1 {
             let seg_end = (i + STEP).min(i1);
@@ -2449,10 +2475,10 @@ struct PoolSample(Arc<SourceAudio>);
 
 impl SampleSource for PoolSample {
     fn sample_rate(&self) -> f32 {
-        self.0.buffer.sample_rate as f32
+        self.0.sample_rate() as f32
     }
     fn num_channels(&self) -> usize {
-        self.0.buffer.num_channels()
+        self.0.num_channels()
     }
     fn channel(&self, ch: usize) -> Option<&[f32]> {
         self.0.channel(ch)
@@ -2607,10 +2633,27 @@ pub fn pan_at(t: &Track, idx: usize, pos: Samples) -> f32 {
     base
 }
 
+pub fn surround_at(t: &Track, pos: Samples) -> Option<SurroundPan> {
+    let lanes = t.mixer.automation_mode.reads() && t.automation.iter().any(|l| matches!(l.param, AutoParam::Surround(_)) && !l.points.is_empty());
+    if !lanes {
+        return t.mixer.surround;
+    }
+    let mut sp = t.mixer.surround.unwrap_or_else(|| SurroundPan::from_stereo(t.mixer.pan.first().copied().unwrap_or(0.0)));
+    for (a, v) in [&mut sp.x, &mut sp.y, &mut sp.z, &mut sp.divergence].into_iter().enumerate() {
+        if let Some(l) = t.lane(&AutoParam::Surround(a as u8))
+            && !l.points.is_empty()
+        {
+            *v = l.value_at(pos, *v);
+        }
+    }
+    sp.sanitize();
+    Some(sp)
+}
+
 const PAN_STEP: Samples = 64;
 
 fn pan_segment(t: &Track, pos: Samples, start: usize, frames: usize) -> (Samples, usize) {
-    let automated = t.mixer.automation_mode.reads() && t.automation.iter().any(|l| matches!(l.param, AutoParam::Pan(_)) && !l.points.is_empty());
+    let automated = t.mixer.automation_mode.reads() && t.automation.iter().any(|l| matches!(l.param, AutoParam::Pan(_) | AutoParam::Surround(_)) && !l.points.is_empty());
     if !automated {
         return (pos, frames);
     }
@@ -2700,7 +2743,7 @@ fn layout_of(fmt: ChannelFormat, out: &mut [SpeakerPos; MAX_CHANNELS]) -> usize 
 }
 
 fn surround_params(sp: &SurroundPan, dx: f32) -> SurroundParams {
-    SurroundParams { x: (sp.x + dx).clamp(-1.0, 1.0), y: sp.y, z: sp.z, divergence: sp.divergence, center: sp.center / 100.0 }
+    SurroundParams { x: (sp.x + dx * (1.0 - sp.x.abs().min(1.0))).clamp(-1.0, 1.0), y: sp.y, z: sp.z, divergence: sp.divergence, center: sp.center / 100.0 }
 }
 
 fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: usize, pan: &PanSpec<'_>, law: PanLaw) -> Matrix {
@@ -4428,7 +4471,7 @@ mod tests {
     #[test]
     fn surround_track_passes_through_bit_exact() {
         let (s, _) = multichannel_session(ChannelFormat::Surround51, ChannelFormat::Surround51, 4800);
-        let src = s.pool.get(SourceId(901)).unwrap().buffer.channels.clone();
+        let src = s.pool.get(SourceId(901)).unwrap().to_buffer().channels;
         let out = render_range(&s, Range::new(0, 4800), 512);
         assert_eq!(out.len(), 6);
         for (o, x) in out.iter().zip(src.iter()) {

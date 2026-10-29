@@ -239,7 +239,7 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
                 for (row, c) in app.ui.peripherals.iter_mut().enumerate().take(CONTROLLER_ROWS) {
                     ui.label(format!("#{}", row + 1));
                     egui::ComboBox::from_id_salt(("pc_type", row)).width(90.0).selected_text(c.kind.as_str()).show_ui(ui, |ui| {
-                        for k in ["none", "HUI"] {
+                        for k in ["none", "HUI", crate::midi_learn::KIND] {
                             ui.selectable_value(&mut c.kind, k.to_string(), k);
                         }
                     });
@@ -268,6 +268,8 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
                 }
             }
             ui.label(egui::RichText::new("A port used by a controller is not also a MIDI input for recording.").small());
+            ui.separator();
+            crate::midi_learn::window_rows(app, ui);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("OK").clicked() {

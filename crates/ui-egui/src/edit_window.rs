@@ -1836,6 +1836,9 @@ fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
     if crate::mix_window::has_panner(app, track) {
         opts.extend(if track.mixer.pan.len() == 2 { &["pan", "pan2"][..] } else { &["pan"][..] });
     }
+    if app.engine.session().edit.flag(&format!("object.{}", id)) || app.engine.session().main_format().channels() > 2 {
+        opts.extend(["surround_x", "surround_y", "surround_z", "surround_size"]);
+    }
     opts.push("mute");
     for o in opts {
         if ui.selectable_label(track.view == o, track_view_label(track, o)).clicked() {
@@ -1912,6 +1915,25 @@ pub(crate) fn track_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
             }
         }
     }
+    ui.separator();
+    if ui.button("Save Track Preset...").clicked() {
+        let name = app.engine.session().track(id).map(|t| t.name.clone()).unwrap_or_default();
+        app.dialogs.open = Some(crate::dialogs::Dialog::SaveTrackPreset { track: tid, name, category: crate::track_presets::DEFAULT_CATEGORY.into() });
+        ui.close();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.engine.session().track(id).is_some_and(|t| t.kind == openpt_model::TrackKind::Audio) && ui.button("Audio to MIDI...").clicked() {
+        crate::audio_to_midi::open(app, Some(id));
+        ui.close();
+    }
+    ui.menu_button("Recall Track Preset", |ui| {
+        crate::track_presets::recall_menu(ui, &mut |p| {
+            let r = app.run("track.load_preset", json!({"path": p.path.display().to_string(), "tracks": selection}));
+            if let Err(e) = r {
+                app.ui.status = e;
+            }
+        });
+    });
     if let Some(t) = app.engine.session().track(id)
         && t.kind.is_midi()
     {
@@ -2467,6 +2489,10 @@ fn auto_default(track: &Track, p: &AutoParam) -> f32 {
                 AutoParam::SendPan(_) => snd.pan,
                 _ => f32::from(u8::from(snd.mute)),
             }
+        }
+        AutoParam::Surround(a) => {
+            let sp = track.mixer.surround.unwrap_or_else(|| openpt_model::SurroundPan::from_stereo(track.mixer.pan.first().copied().unwrap_or(0.0)));
+            [sp.x, sp.y, sp.z, sp.divergence].get(usize::from(*a)).copied().unwrap_or(0.0)
         }
         AutoParam::Plugin { .. } => 0.0,
     }
@@ -3324,6 +3350,7 @@ fn automation_id(p: &AutoParam) -> String {
         AutoParam::SendLevel(i) => format!("send_{}_level", (b'a' + i) as char),
         AutoParam::SendPan(i) => format!("send_{}_pan", (b'a' + i) as char),
         AutoParam::SendMute(i) => format!("send_{}_mute", (b'a' + i) as char),
+        AutoParam::Surround(a) => format!("surround_{}", openpt_model::SURROUND_AXES.get(usize::from(*a)).copied().unwrap_or("x")),
         AutoParam::Plugin { slot, param } => format!("plugin:{}:{param}", (b'a' + slot) as char),
     }
 }
@@ -3612,6 +3639,12 @@ fn clip_context_menu(app: &mut SoundApp, ui: &mut Ui, clip: Option<ClipId>) {
         } else {
             let _ = app.run("clip.quantize_to_grid", json!({"clips": ids}));
         }
+        ui.close();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if ui.button("Audio to MIDI...").clicked() {
+        let track = app.engine.session().find_clip(c).map(|(t, _)| t);
+        crate::audio_to_midi::open(app, track);
         ui.close();
     }
     item(app, ui, "Identify Sync Point", "clip.identify_sync_point");
@@ -4189,10 +4222,10 @@ mod tests {
                         let source = clip.source().unwrap();
                         if channels == 2 {
                             let audio = h.state().engine.session().pool.get(source).unwrap().clone();
-                            let left = audio.buffer.channels[0].clone();
+                            let left = audio.channel(0).map(<[f32]>::to_vec).unwrap_or_default();
                             let right = left.iter().map(|sample| sample * 0.5).collect();
                             let audio = openpt_model::SourceAudio::new(openpt_audio_io::AudioBuffer {
-                                sample_rate: audio.buffer.sample_rate,
+                                sample_rate: audio.sample_rate(),
                                 channels: vec![left, right],
                             });
                             let s = h.state_mut().engine.session_mut();

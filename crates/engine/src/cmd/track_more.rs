@@ -245,6 +245,9 @@ fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     let t = tracks_required(e, "track.save_preset", p)?;
     let first = *t.first().ok_or_else(|| bad("track.save_preset", "no track"))?;
     let tr = e.session().track(first).ok_or_else(|| bad("track.save_preset", "no track"))?;
+    if let Some(parent) = std::path::Path::new(&path).parent().filter(|d| !d.as_os_str().is_empty()) {
+        crate::io::make_dir(parent)?;
+    }
     let preset = json!({
         "format": PRESET_FORMAT,
         "version": 1,
@@ -262,15 +265,22 @@ fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({"path": path, "track": first}))
 }
 
-fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
-    let id = "track.load_preset";
-    let path = str_param(p, "path").ok_or_else(|| bad(id, "`path` required"))?.to_string();
-    let tracks = tracks_required(e, id, p)?;
-    let text = crate::io::read_text(&path)?;
+pub(crate) fn read_preset(path: &str) -> Result<Value> {
+    let text = crate::io::read_text(path)?;
     let v: Value = serde_json::from_str(&text).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
     if v.get("format").and_then(Value::as_str) != Some(PRESET_FORMAT) {
         return Err(EngineError::Io(format!("{path}: not a OpenPT track preset")));
     }
+    Ok(v)
+}
+
+pub(crate) fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "track.load_preset";
+    let path = str_param(p, "path").ok_or_else(|| bad(id, "`path` required"))?.to_string();
+    let tracks = tracks_required(e, id, p)?;
+    let v = read_preset(&path)?;
+    let color: Option<[u8; 3]> = v.get("color").cloned().and_then(|x| serde_json::from_value(x).ok());
+    let comments = v.get("comments").and_then(Value::as_str).map(str::to_string);
     let mut mixer: openpt_model::Mixer =
         serde_json::from_value(v.get("mixer").cloned().unwrap_or(Value::Null)).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
     mixer.sanitize();
@@ -291,6 +301,12 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
             }
             if tr.kind == TrackKind::Instrument && instrument.is_some() {
                 tr.instrument = instrument.clone();
+            }
+            if let Some(c) = color {
+                tr.color = c;
+            }
+            if let Some(c) = comments.as_ref().filter(|c| !c.is_empty()) {
+                tr.comments.clone_from(c);
             }
         }
     }
@@ -606,6 +622,27 @@ mod tests {
         let hats = e.session().track_by_name("Hats").unwrap();
         assert_eq!(hats.mixer.inserts[0].as_ref().map(|i| i.plugin.as_str()), Some("compressor"));
         assert_eq!(hats.mixer.volume_db, -5.0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_tracks_from_a_preset_take_its_type_width_color_and_inserts() {
+        let dir = std::env::temp_dir().join(format!("sc-preset-new-{}", std::process::id()));
+        let path = dir.join("Bass").join("DI Bass.json").to_string_lossy().into_owned();
+        let mut e = crate::demo::demo_engine();
+        let bass = e.session().track_by_name("Bass").unwrap().clone();
+        e.execute("edit.select", &json!({"tracks": ["Bass"]})).unwrap();
+        e.execute("track.save_preset", &json!({"path": path})).unwrap();
+        let made = e.execute("track.new", &json!({"rows": [{"count": 2, "preset": path}]})).unwrap();
+        let ids: Vec<u64> = made["tracks"].as_array().unwrap().iter().filter_map(Value::as_u64).collect();
+        assert_eq!(ids.len(), 2);
+        for id in ids {
+            let t = e.session().track(TrackId(id)).unwrap();
+            assert_eq!((t.kind, t.format, t.color), (bass.kind, bass.format, bass.color));
+            assert_eq!(t.mixer.inserts[0].as_ref().map(|i| i.plugin.as_str()), Some("compressor"));
+            assert_eq!(t.mixer.volume_db, bass.mixer.volume_db);
+            assert!(t.name.starts_with("Bass"), "{}", t.name);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -381,6 +381,63 @@ impl Default for HeatSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AtmosMonitor {
+    #[default]
+    Speakers,
+    Binaural,
+    Surround51,
+    Stereo,
+}
+
+impl AtmosMonitor {
+    pub const ALL: [AtmosMonitor; 4] = [AtmosMonitor::Speakers, AtmosMonitor::Binaural, AtmosMonitor::Surround51, AtmosMonitor::Stereo];
+    pub fn label(self) -> &'static str {
+        match self {
+            AtmosMonitor::Speakers => "Speakers (main output format)",
+            AtmosMonitor::Binaural => "Binaural (headphones)",
+            AtmosMonitor::Surround51 => "5.1 downmix",
+            AtmosMonitor::Stereo => "Stereo downmix (Lo/Ro)",
+        }
+    }
+    pub fn id(self) -> &'static str {
+        match self {
+            AtmosMonitor::Speakers => "speakers",
+            AtmosMonitor::Binaural => "binaural",
+            AtmosMonitor::Surround51 => "5.1",
+            AtmosMonitor::Stereo => "stereo",
+        }
+    }
+    pub fn from_id(s: &str) -> Option<AtmosMonitor> {
+        AtmosMonitor::ALL.into_iter().find(|m| m.id().eq_ignore_ascii_case(s.trim()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct AtmosSettings {
+    pub monitor: AtmosMonitor,
+    pub surround_trim_db: f32,
+    pub height_trim_db: f32,
+    pub binaural_gain_db: f32,
+}
+
+impl Default for AtmosSettings {
+    fn default() -> Self {
+        AtmosSettings { monitor: AtmosMonitor::Speakers, surround_trim_db: -3.0, height_trim_db: -3.0, binaural_gain_db: 0.0 }
+    }
+}
+
+impl AtmosSettings {
+    pub fn sanitize(&mut self) {
+        let clamp = |v: f32| if v.is_finite() { v.clamp(-24.0, 6.0) } else { -3.0 };
+        self.surround_trim_db = clamp(self.surround_trim_db);
+        self.height_trim_db = clamp(self.height_trim_db);
+        self.binaural_gain_db = if self.binaural_gain_db.is_finite() { self.binaural_gain_db.clamp(-24.0, 12.0) } else { 0.0 };
+    }
+}
+
 pub type InputPath = OutputPath;
 
 pub fn default_inputs() -> Vec<InputPath> {

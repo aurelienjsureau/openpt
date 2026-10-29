@@ -43,15 +43,51 @@ pub fn separate_closed(app: &mut SoundApp) {
 }
 
 pub(crate) fn content(app: &mut SoundApp, ui: &mut Ui) {
-    if app.engine.session().heat.active {
+    let heat = app.engine.session().heat.active;
+    let fmt = app.engine.session().main_format();
+    let immersive = fmt.channels() > 2 && !fmt.is_ambisonic();
+    if heat || immersive {
         let full = ui.available_rect_before_wrap();
-        let col = Rect::from_min_max(pos2(full.max.x - 66.0, full.min.y), full.max);
-        heat_panel(app, ui, col);
-        let mut left = ui.new_child(egui::UiBuilder::new().max_rect(full.with_max_x(col.min.x - 2.0)));
+        let mut col = Rect::from_min_max(pos2(full.max.x - 66.0, full.min.y), full.max);
+        ui.painter().rect_filled(col, 0.0, Tokens::current().strip_bg);
+        if heat {
+            heat_panel(app, ui, col);
+            col.min.y += 128.0;
+        }
+        if immersive {
+            monitor_panel(app, ui, col);
+        }
+        let mut left = ui.new_child(egui::UiBuilder::new().max_rect(full.with_max_x(full.max.x - 68.0)));
         strips(app, &mut left);
         return;
     }
     strips(app, ui);
+}
+
+fn monitor_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
+    let t = Tokens::current();
+    let modes = openpt_model::AtmosMonitor::ALL;
+    let sec = Rect::from_min_size(col.min + vec2(4.0, 4.0), vec2(col.width() - 8.0, 20.0 + modes.len() as f32 * 19.0));
+    inset(ui.painter(), sec, t.strip_section);
+    section_label(ui, sec, "MONITOR");
+    let current = app.engine.session().atmos.monitor;
+    let mut c = ui.new_child(
+        egui::UiBuilder::new().max_rect(sec.shrink2(vec2(4.0, 16.0)).translate(vec2(0.0, 4.0))).layout(egui::Layout::top_down(egui::Align::Center)),
+    );
+    c.spacing_mut().item_spacing.y = 3.0;
+    for m in modes {
+        let short = match m {
+            openpt_model::AtmosMonitor::Speakers => "SPEAKERS",
+            openpt_model::AtmosMonitor::Binaural => "BINAURAL",
+            openpt_model::AtmosMonitor::Surround51 => "5.1",
+            openpt_model::AtmosMonitor::Stereo => "STEREO",
+        };
+        if text_toggle(&mut c, vec2(sec.width() - 8.0, 16.0), short, current == m, t.mode_on, m.label()).clicked() && current != m {
+            if let Err(e) = app.run("setup.atmos", json!({"monitor": m.id()})) {
+                app.ui.status = e;
+            }
+        }
+    }
 }
 
 fn heat_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
@@ -529,7 +565,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
             if (v - before).abs() > f32::EPSILON {
                 ui_pan(app, &c, id, i, v);
             }
-            let _ = resp;
+            crate::midi_learn::on_right_click(app, ui, resp.rect, openpt_model::LearnTarget::Pan { track: id, index: i });
             let pr = Rect::from_center_size(pos2(cx, y + 42.0), vec2(ks + 8.0, 13.0));
             inset(ui.painter(), pr, t.counter_bg);
             let (_, entered) =
@@ -555,6 +591,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         if crate::widgets::pressed(&row, &rr) {
             track_button(app, &row, "mix.record_arm", id);
         }
+        crate::midi_learn::on_right_click(app, &row, rr.rect, openpt_model::LearnTarget::RecordArm { track: id });
     }
     y += 22.0;
     let mut row = ui.new_child(
@@ -565,10 +602,12 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         let sr = text_toggle(&mut row, vec2(bw, 18.0), "S", track.mixer.solo, t.solo, "Solo · Ctrl-click: Solo Safe · Alt-click: all tracks");
         safe_mark(&row, sr.rect, track.mixer.solo_safe);
         solo_button(app, &row, &sr, id);
+        crate::midi_learn::on_right_click(app, &row, sr.rect, openpt_model::LearnTarget::Solo { track: id });
         let mr = text_toggle(&mut row, vec2(bw, 18.0), "M", track.mixer.mute, t.mute, "Mute · Alt-click: all tracks");
         if crate::widgets::pressed(&row, &mr) {
             track_button(app, &row, "mix.mute", id);
         }
+        crate::midi_learn::on_right_click(app, &row, mr.rect, openpt_model::LearnTarget::Mute { track: id });
     }
     y += 26.0;
     let bottom_h = 64.0;
@@ -602,6 +641,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         app.gesture = Some(crate::Gesture::Fader { track: id, start_db: track.mixer.volume_db });
         ui_volume(app, ui, id, db);
     }
+    crate::midi_learn::on_right_click(app, ui, fr, openpt_model::LearnTarget::Volume { track: id });
     let md = app.meters.get(&id).copied().unwrap_or_default();
     let slot = fader_slot(fr);
     let meter_left = if wide_meter { fr.max.x + 4.0 } else { x0 + inner_w - 1.0 - thin_w };
@@ -878,6 +918,8 @@ fn insert_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize
     if ui.button("no insert").clicked() {
         run_pick(app, ui, "mix.insert_remove", json!({"track": id.0, "slot": slot}));
     }
+    ui.separator();
+    crate::midi_learn::insert_menu_items(app, ui, id, slot);
 }
 
 pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize) {
@@ -1655,6 +1697,8 @@ fn send_window_contents(app: &mut SoundApp, ctx: &egui::Context) {
 fn send_options_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize, send: &openpt_model::SendSlot) {
     ui.set_min_width(230.0);
     ui.strong(format!("Send {} · {}", (b'A' + slot as u8) as char, route_name(app, &send.target)));
+    crate::midi_learn::menu_items(app, ui, &openpt_model::LearnTarget::SendLevel { track: id, slot });
+    ui.separator();
     let mut db = send.level_db.max(-60.0);
     if ui.add(egui::Slider::new(&mut db, -60.0..=12.0).text("Level").suffix(" dB")).changed() {
         let _ = app.engine.execute_merged("mix.send_level", &json!({"track": id.0, "slot": slot, "db": db}), &format!("send:{}:{slot}", id.0));

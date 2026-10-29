@@ -75,18 +75,17 @@ pub(crate) fn render(s: &mut Session, id: &str, cid: ClipId, mut w: Warp, clip_l
         return Err(bad(id, format!("a warped clip must be between 1 sample and {:.0} s", max as f64 / s.sample_rate.as_f64())));
     }
     let sr = s.sample_rate;
-    let nch = audio.buffer.num_channels().max(1);
+    let nch = audio.num_channels().max(1);
     let mut out: Vec<Vec<f32>> = vec![Vec::with_capacity(usize::try_from(clip_len).unwrap_or(0)); nch];
-    let set = openpt_dsp::offline::Stretch::for_algorithm(algo, &audio.buffer.channels, sr.as_f64() as f32);
+    let set = openpt_dsp::offline::Stretch::for_algorithm(algo, &audio.to_buffer().channels, sr.as_f64() as f32);
     for pair in w.anchors(clip_len).windows(2) {
         let [a, b] = pair else { continue };
         let n = usize::try_from((b.src - a.src).max(1)).unwrap_or(1);
         let want = usize::try_from((b.at - a.at).max(1)).unwrap_or(1);
         let from = usize::try_from((w.offset + a.src).max(0)).unwrap_or(0);
         let seg: Vec<Vec<f32>> = audio
-            .buffer
-            .channels
-            .iter()
+            .channels()
+            .into_iter()
             .map(|c| {
                 let mut v: Vec<f32> = c.iter().skip(from).take(n).copied().collect();
                 v.resize(n, 0.0);
@@ -282,7 +281,7 @@ fn events(e: &mut Engine, p: &Value) -> Result<Value> {
     let audio = s.pool.get(w.source).cloned().ok_or_else(|| bad(id, "the clip's audio is not loaded"))?;
     let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
     let n = usize::try_from(w.length.max(0)).unwrap_or(0);
-    let seg: Vec<Vec<f32>> = audio.buffer.channels.iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
+    let seg: Vec<Vec<f32>> = audio.channels().into_iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
     let hits = openpt_dsp::offline::detect_transients(&seg, s.sample_rate.as_f64() as f32, sens);
     let events: Vec<Samples> = hits.into_iter().map(|h| c.start + w.to_clip(c.length, h as Samples)).collect();
     let markers: Vec<Value> = w.markers.iter().enumerate().map(|(i, m)| json!({"index": i, "at": c.start + m.at, "src": m.src})).collect();
@@ -298,7 +297,7 @@ fn warp_at_events(e: &mut Engine, p: &Value) -> Result<Value> {
     let audio = s.pool.get(w.source).cloned().ok_or_else(|| bad(id, "the clip's audio is not loaded"))?;
     let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
     let n = usize::try_from(w.length.max(0)).unwrap_or(0);
-    let seg: Vec<Vec<f32>> = audio.buffer.channels.iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
+    let seg: Vec<Vec<f32>> = audio.channels().into_iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
     let hits = openpt_dsp::offline::detect_transients(&seg, s.sample_rate.as_f64() as f32, f64_or(p, "sensitivity", 0.5) as f32);
     let mut added = 0;
     for h in hits {
@@ -348,7 +347,7 @@ pub(crate) fn quantize(s: &mut Session, id: &str, cid: ClipId, grid_ticks: i64, 
     let audio = s.pool.get(w.source).cloned().ok_or_else(|| bad(id, "the clip's audio is not loaded"))?;
     let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
     let n = usize::try_from(w.length.max(0)).unwrap_or(0);
-    let seg: Vec<Vec<f32>> = audio.buffer.channels.iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
+    let seg: Vec<Vec<f32>> = audio.channels().into_iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
     let sr = s.sample_rate;
     let hits = openpt_dsp::offline::detect_transients(&seg, sr.as_f64() as f32, 0.5);
     let grid = grid_ticks.max(1) as f64;
@@ -437,7 +436,7 @@ fn merged_events(s: &Session, id: &str, clips: &[ClipId]) -> Result<Vec<Samples>
         let audio = s.pool.get(w.source).cloned().ok_or_else(|| bad(id, "the clip's audio is not loaded"))?;
         let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
         let n = usize::try_from(w.length.max(0)).unwrap_or(0);
-        let seg: Vec<Vec<f32>> = audio.buffer.channels.iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
+        let seg: Vec<Vec<f32>> = audio.channels().into_iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
         all.extend(openpt_dsp::offline::detect_transients(&seg, sr.as_f64() as f32, 0.5).into_iter().map(|h| c.start + w.to_clip(c.length, h as Samples)));
     }
     all.sort_unstable();

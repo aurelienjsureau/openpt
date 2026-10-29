@@ -102,7 +102,7 @@ fn add_source_audio(s: &mut Session, name: &str, audio: Arc<SourceAudio>, path: 
         id,
         name: stem.clone(),
         path: stored,
-        channels: u16::try_from(audio.buffer.num_channels()).unwrap_or(u16::MAX),
+        channels: u16::try_from(audio.num_channels()).unwrap_or(u16::MAX),
         frames: audio.frames() as u64,
         sample_rate: sr,
         format,
@@ -157,17 +157,20 @@ fn prepare_audio(name: &str, bytes: &[u8], path: Option<&str>, session_rate: u32
         file_rate: info.sample_rate,
         time_reference: info.bwf.map(|b| b.time_reference),
         field: openpt_audio_io::field_info(bytes),
-        audio: Arc::new(SourceAudio::new(buf)),
+        audio: match path {
+            Some(p) => crate::audio_cache::store(Path::new(p), session_rate, Arc::new(SourceAudio::new(buf))),
+            None => Arc::new(SourceAudio::new(buf)),
+        },
     })
 }
 
 pub fn place_prepared(e: &mut Engine, p: PreparedAudio, target: Option<TrackId>, at: Samples) -> Result<Value> {
     let name = p.name.as_str();
     let session_rate = e.session().sample_rate.hz();
-    if p.audio.buffer.sample_rate != session_rate {
+    if p.audio.sample_rate() != session_rate {
         return Err(EngineError::Io(format!("{name}: the session sample rate changed during the import")));
     }
-    let channels = p.audio.buffer.num_channels();
+    let channels = p.audio.num_channels();
     let s = e.session_mut();
     let src = add_source_audio(s, name, p.audio, p.path.as_deref(), p.format);
     if let Some(sx) = s.sources.last_mut() {
@@ -1019,7 +1022,7 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
             }
         }
         let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: openpt_audio_io::BitDepth::Float32, dither: false, bwf: None };
-        let bytes = openpt_audio_io::encode(&audio.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
+        let bytes = openpt_audio_io::encode(&audio.to_buffer(), &opts).map_err(|err| EngineError::Io(err.to_string()))?;
         let (name, new) = store_wav(&audio_dir, &stem, &bytes)?;
         src.path = format!("Audio Files/{name}");
         src.unsaved = false;
@@ -1199,8 +1202,12 @@ pub(crate) fn decode_file(files: &mut DecodedFiles, p: &Path, rate: u32) -> std:
     files
         .entry(file_key(p))
         .or_insert_with(|| {
+            if let Some(a) = crate::audio_cache::cached(p, rate) {
+                return Ok(a);
+            }
             let bytes = read_file(p).map_err(|_| p.display().to_string())?;
-            decode_source(&bytes, p.extension().and_then(|x| x.to_str()), rate).map_err(|err| format!("{}: {err}", p.display()))
+            let a = decode_source(&bytes, p.extension().and_then(|x| x.to_str()), rate).map_err(|err| format!("{}: {err}", p.display()))?;
+            Ok(crate::audio_cache::store(p, rate, a))
         })
         .clone()
 }
@@ -1246,7 +1253,7 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
             k += 1;
         }
         let opts_wav = EncodeOptions { format: FileFormat::Wav, bit_depth: openpt_audio_io::BitDepth::Float32, dither: false, bwf: None };
-        let bytes = openpt_audio_io::encode(&audio.buffer, &opts_wav).map_err(|err| EngineError::Io(err.to_string()))?;
+        let bytes = openpt_audio_io::encode(&audio.to_buffer(), &opts_wav).map_err(|err| EngineError::Io(err.to_string()))?;
         w.start_file(target.as_str(), opts).map_err(zerr)?;
         w.write_all(&bytes).map_err(ioerr)?;
         taken.insert(target.clone());
@@ -1824,7 +1831,7 @@ mod save_tests {
         save_session(&mut reopen(&path("B/B.openpt")), &path("A/B.openpt")).unwrap();
         let levels = ["A/A.openpt", "A/A v2.openpt", "B/B.openpt", "A/B.openpt"].map(|p| {
             let r = reopen(&path(p));
-            r.session().pool.get(r.session().sources[0].id).unwrap().buffer.channels[0][0]
+            r.session().pool.get(r.session().sources[0].id).unwrap().sample(0, 0)
         });
         assert_eq!(levels, [0.5, -0.25, 0.75, 0.75]);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1866,7 +1873,7 @@ mod save_tests {
         let dir = std::env::temp_dir().join(format!("openpt-own-folder-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = |p: &str| dir.join(p).to_string_lossy().into_owned();
-        let level = |r: &Engine| r.session().pool.get(r.session().sources[0].id).unwrap().buffer.channels[0][0];
+        let level = |r: &Engine| r.session().pool.get(r.session().sources[0].id).unwrap().sample(0, 0);
         save_session(&mut with_take(-0.25), &path("B/Other.openpt")).unwrap();
         let mut e = with_take(0.5);
         save_session(&mut e, &path("A/A.openpt")).unwrap();
@@ -1914,7 +1921,7 @@ mod save_tests {
         bare.execute("session.save", &json!({})).unwrap();
         second.execute("session.save_as", &json!({"path": path, "replace": true})).unwrap();
         let r = reopen(&path);
-        assert_eq!(r.session().pool.get(r.session().sources[0].id).unwrap().buffer.channels[0][0], -0.25);
+        assert_eq!(r.session().pool.get(r.session().sources[0].id).unwrap().sample(0, 0), -0.25);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2168,7 +2175,7 @@ mod bundle_tests {
         assert_eq!(r.session().tracks.len(), e.session().tracks.len());
         for src in &e.session().sources {
             let (a, b) = (e.session().pool.get(src.id).unwrap(), r.session().pool.get(src.id).unwrap());
-            assert_eq!(a.buffer.channels, b.buffer.channels, "{}: float WAV keeps every sample", src.name);
+            assert_eq!(a.channels(), b.channels(), "{}: float WAV keeps every sample", src.name);
         }
         assert!(!r.is_dirty());
         assert_eq!(r.path.as_deref(), Some("Midnight Groove.openptz"));
@@ -2462,12 +2469,12 @@ fn ptx_clips(s: &mut Session, p: &openpt_ptx::PtxSession, session_dir: &Path, mi
                     let Some(left) = audio(s, file, missing) else { continue };
                     let buf = match right.and_then(|r| audio(s, r, missing)) {
                         Some(r) => {
-                            let mut b = left.buffer.clone();
+                            let mut b = left.to_buffer();
                             b.channels.truncate(1);
-                            b.channels.extend(r.buffer.channels.first().cloned());
+                            b.channels.extend(r.channel(0).map(<[f32]>::to_vec));
                             b
                         }
-                        None => left.buffer.clone(),
+                        None => left.to_buffer(),
                     };
                     let file_name = p.audio_files.get(file).cloned().unwrap_or_default();
                     let id = add_source_audio(s, &file_name, Arc::new(SourceAudio::new(buf)), None, FileFormat::Wav);

@@ -13,11 +13,12 @@ pub struct NewTrackRow {
     pub kind: String,
     pub timebase: String,
     pub name: String,
+    pub preset: String,
 }
 
 impl Default for NewTrackRow {
     fn default() -> Self {
-        NewTrackRow { count: 1, format: "Mono".into(), kind: "audio".into(), timebase: "samples".into(), name: "Audio".into() }
+        NewTrackRow { count: 1, format: "Mono".into(), kind: "audio".into(), timebase: "samples".into(), name: "Audio".into(), preset: String::new() }
     }
 }
 
@@ -119,6 +120,11 @@ pub enum Dialog {
     MidiInputDevices {
         devices: Vec<(String, bool)>,
     },
+    SaveTrackPreset {
+        track: u64,
+        name: String,
+        category: String,
+    },
     SaveChanges {
         then: (String, Value),
     },
@@ -154,6 +160,7 @@ impl Dialogs {
             Dialog::ScoreSetup { .. } => "score_setup",
             Dialog::MidiInputDevices { .. } => "midi_input_devices",
             Dialog::SaveChanges { .. } => "save_changes",
+            Dialog::SaveTrackPreset { .. } => "save_track_preset",
         })
     }
 
@@ -302,6 +309,11 @@ impl Dialogs {
                     })
                     .collect();
                 Dialog::Conform { bpm: String::new(), bar: 1, grid: "1/16".into(), refs, all_tracks: true }
+            }
+            "track.save_preset" => {
+                let s = e.session();
+                let Some(t) = s.edit.selected_tracks.first().and_then(|t| s.track(*t)) else { return false };
+                Dialog::SaveTrackPreset { track: t.id.0, name: t.name.clone(), category: crate::track_presets::DEFAULT_CATEGORY.into() }
             }
             "track.move_to_new_folder" => {
                 let tracks = e.session().edit.selected_tracks.iter().map(|t| t.0).collect();
@@ -482,6 +494,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         Dialog::MidiInputDevices { .. } => "MIDI Input Devices",
         Dialog::SaveChanges { then } if then.0 == "session.revert" => "Revert to Saved",
         Dialog::SaveChanges { .. } => "Unsaved Changes",
+        Dialog::SaveTrackPreset { .. } => "Save Track Preset",
     }
     .to_string();
     let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
@@ -497,7 +510,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     ui.set_min_width(900.0);
                     let (mut add, mut remove) = (None, None);
                     let many = rows.len() > 1;
-                    for (i, NewTrackRow { count, format, kind, timebase, name }) in rows.iter_mut().enumerate() {
+                    for (i, NewTrackRow { count, format, kind, timebase, name, preset }) in rows.iter_mut().enumerate() {
                     ui.push_id(i, |ui| ui.horizontal(|ui| {
                         ui.label("Create");
                         crate::widgets::value_box(ui, |ui| ui.add_sized([46.0, 20.0], egui::DragValue::new(count).range(1..=128)));
@@ -532,6 +545,25 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                 ui.selectable_value(timebase, "samples".to_string(), "Samples");
                                 ui.selectable_value(timebase, "ticks".to_string(), "Ticks");
                             });
+                        let shown = std::path::Path::new(preset.as_str()).file_stem().map_or_else(|| "No Preset".to_string(), |s| s.to_string_lossy().into_owned());
+                        egui::ComboBox::from_id_salt("nt_preset").width(130.0).selected_text(shown).show_ui(ui, |ui| {
+                            if ui.selectable_label(preset.is_empty(), "No Preset").clicked() {
+                                preset.clear();
+                            }
+                            let mut last = String::new();
+                            for p in crate::track_presets::list() {
+                                if p.category != last {
+                                    ui.separator();
+                                    ui.weak(&p.category);
+                                    last.clone_from(&p.category);
+                                }
+                                let path = p.path.display().to_string();
+                                if ui.selectable_label(*preset == path, &p.name).clicked() {
+                                    *preset = path;
+                                    name.clone_from(&p.name);
+                                }
+                            }
+                        }).response.on_hover_text("Track preset: type, width, inserts, sends, color");
                         ui.label("Name:");
                         ui.add(egui::TextEdit::singleline(name).desired_width(220.0));
                         if ui.small_button("+").on_hover_text("Add a row").clicked() {
@@ -552,7 +584,11 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     if buttons(ui, "Create", enter) {
                         let list: Vec<Value> = rows
                             .iter()
-                            .map(|r| json!({"count": r.count, "format": r.format, "kind": r.kind, "timebase": r.timebase, "name": r.name}))
+                            .map(|r| if r.preset.is_empty() {
+                                    json!({"count": r.count, "format": r.format, "kind": r.kind, "timebase": r.timebase, "name": r.name})
+                                } else {
+                                    json!({"count": r.count, "timebase": r.timebase, "name": r.name, "preset": r.preset})
+                                })
                             .collect();
                         action = Some(("track.new".into(), json!({"rows": list})));
                     }
@@ -793,6 +829,36 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                             action = Some(("file.update_linked_session".into(), json!({"path": path})));
                         }
                     });
+                }
+                Dialog::SaveTrackPreset { track, name, category } => {
+                    ui.set_min_width(380.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Name");
+                        let r = ui.add(egui::TextEdit::singleline(name).desired_width(260.0));
+                        if !r.has_focus() && ui.memory(|m| m.focused().is_none()) {
+                            r.request_focus();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Category");
+                        ui.add(egui::TextEdit::singleline(category).desired_width(180.0));
+                        egui::ComboBox::from_id_salt("tp_cat").width(80.0).selected_text("…").show_ui(ui, |ui| {
+                            for c in crate::track_presets::categories() {
+                                if ui.selectable_label(*category == c, &c).clicked() {
+                                    *category = c;
+                                }
+                            }
+                        });
+                    });
+                    let target = crate::track_presets::path_for(category, name);
+                    if target.as_ref().is_some_and(|p| p.exists()) {
+                        ui.weak("A preset with this name exists in this category: it will be replaced.");
+                    }
+                    if buttons(ui, "Save", enter)
+                        && let Some(p) = target
+                    {
+                        action = Some(("track.save_preset".into(), json!({"path": p.display().to_string(), "track": track})));
+                    }
                 }
                 Dialog::NewFolder { name, routing, route, tracks } => {
                     ui.horizontal(|ui| {

@@ -236,6 +236,59 @@ impl HuiPort {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub struct LearnPort {
+    _input: midir::MidiInputConnection<()>,
+    rx: std::sync::mpsc::Receiver<Vec<u8>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl LearnPort {
+    pub fn open(input: &str) -> Result<LearnPort, String> {
+        let mut mi = midir::MidiInput::new("OpenPT MIDI Learn").map_err(|e| e.to_string())?;
+        mi.ignore(midir::Ignore::All);
+        let ip =
+            mi.ports().into_iter().find(|p| mi.port_name(p).is_ok_and(|n| n == input)).ok_or_else(|| format!("MIDI input “{input}” not found"))?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let conn = mi
+            .connect(
+                &ip,
+                "OpenPT MIDI Learn in",
+                move |_, bytes, _| {
+                    let _ = tx.send(bytes.to_vec());
+                },
+                (),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(LearnPort { _input: conn, rx })
+    }
+
+    pub fn poll(&mut self) -> Vec<[u8; 3]> {
+        let mut out = Vec::new();
+        while let Ok(bytes) = self.rx.try_recv() {
+            let mut status = 0u8;
+            let mut i = 0;
+            while i < bytes.len() {
+                let b = bytes.get(i).copied().unwrap_or(0);
+                if b >= 0xF0 {
+                    i += 1;
+                    continue;
+                }
+                if b & 0x80 != 0 {
+                    status = b;
+                    i += 1;
+                }
+                let len = if matches!(status & 0xF0, 0xC0 | 0xD0) { 1 } else { 2 };
+                if status != 0 {
+                    out.push([status, bytes.get(i).copied().unwrap_or(0), if len == 2 { bytes.get(i + 1).copied().unwrap_or(0) } else { 0 }]);
+                }
+                i += len;
+            }
+        }
+        out
+    }
+}
+
 pub fn list_output_devices() -> Vec<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {

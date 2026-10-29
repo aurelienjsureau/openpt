@@ -4,7 +4,7 @@ use openpt_time::{Range, Samples};
 use serde_json::Value;
 use std::sync::OnceLock;
 
-mod audio_midi;
+pub mod audio_midi;
 mod audiosuite;
 mod clip;
 mod clip_list;

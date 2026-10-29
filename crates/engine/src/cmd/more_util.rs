@@ -142,9 +142,8 @@ pub fn render_stretched(s: &mut Session, cmd: &str, c: &Clip, out_len: Samples) 
     let a = usize::try_from(offset.max(0)).unwrap_or(0);
     let n = src_len as usize;
     let ch: Vec<Vec<f32>> = audio
-        .buffer
-        .channels
-        .iter()
+        .channels()
+        .into_iter()
         .map(|x| {
             let mut v: Vec<f32> = x.iter().skip(a).take(n).copied().collect();
             v.resize(n, 0.0);

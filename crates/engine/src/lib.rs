@@ -1,5 +1,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod adm;
+pub mod audio_cache;
 pub mod autosave;
 pub mod beat_detective;
 pub mod catalog;

@@ -33,3 +33,11 @@ Icon Font) ship inside the egui crate under their own open licenses (see ATTRIBU
 
 MP3 export uses LAME (https://lame.sourceforge.io), LGPL-2.0, through the mp3lame-sys and
 mp3lame-encoder crates.
+
+Audio to MIDI runs the Basic Pitch model (crates/transcribe/models/basic-pitch-nmp.onnx),
+Copyright 2022 Spotify AB, Apache License 2.0 (https://github.com/spotify/basic-pitch), through
+tract (Sonos, MIT or Apache 2.0).
+
+Binaural monitoring uses head-related impulse responses from the MIT Media Lab KEMAR
+measurements by Bill Gardner and Keith Martin (1994), provided free with no restrictions on use
+provided the authors are cited (https://sound.media.mit.edu/resources/KEMAR.html).

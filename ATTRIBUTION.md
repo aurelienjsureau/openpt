@@ -34,3 +34,5 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 | `assets/app-icon/openpt.icns` | BourrinAudio | original, rendered from `icon.svg` | MIT OR Apache-2.0 |
 | `assets/app-icon/openpt.ico` | BourrinAudio | original, rendered from `icon.svg` | MIT OR Apache-2.0 |
 | `assets/app-icon/hicolor/` | BourrinAudio | original, rendered from `icon.svg` (16–512 px PNGs and the scalable SVG) | MIT OR Apache-2.0 |
+| `crates/transcribe/models/basic-pitch-nmp.onnx` | Spotify AB | https://github.com/spotify/basic-pitch (basic_pitch/saved_models/icassp_2022/nmp.onnx) | Apache-2.0 |
+| `crates/mix/src/hrir_kemar.rs` | Bill Gardner, Keith Martin (MIT Media Lab) | https://sound.media.mit.edu/resources/KEMAR.html (diffuse-field set, 11 directions) | free use with citation |

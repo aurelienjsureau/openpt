@@ -1,5 +1,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod audio_to_midi;
 pub mod bounce;
 pub mod control;
 pub mod dashboard;
@@ -12,6 +14,7 @@ pub mod icons;
 pub mod import_jobs;
 pub mod menus;
 pub mod midi_editor;
+pub mod midi_learn;
 pub mod mix_window;
 pub mod open_ui;
 pub mod ops_windows;
@@ -29,6 +32,7 @@ pub mod shortcuts;
 pub mod spot;
 pub mod theme;
 pub mod toolbar;
+pub mod track_presets;
 pub mod video_track;
 pub mod video_window;
 pub mod warp_view;
@@ -376,6 +380,9 @@ pub struct SoundApp {
     recent_checked: Option<(f64, Vec<String>, Vec<bool>)>,
     pub player: Option<Player>,
     pub(crate) surfaces: peripherals::Surfaces,
+    pub(crate) learn: midi_learn::Learn,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) audio_to_midi: Option<audio_to_midi::Converter>,
     play_sel: Option<Range>,
     pub(crate) grab_anchor: Option<(Range, Range)>,
     pub recorder: Option<openpt_playback::record::Recorder>,
@@ -472,6 +479,9 @@ impl SoundApp {
             engine,
             player,
             surfaces: Default::default(),
+            learn: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            audio_to_midi: None,
             play_sel: None,
             grab_anchor: None,
             recorder: None,
@@ -810,6 +820,9 @@ impl SoundApp {
     }
 
     pub(crate) fn touch_param(&mut self, t: TrackId, slot: usize, param: &str, value: f32) {
+        if self.learn.last_param.as_ref().is_none_or(|(a, b, c)| (*a, *b, c.as_str()) != (t, slot, param)) {
+            self.learn.last_param = Some((t, slot, param.to_string()));
+        }
         use openpt_model::AutomationMode as M;
         let writing =
             self.engine.session().track(t).is_some_and(|tr| matches!(tr.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch));
@@ -1622,6 +1635,7 @@ impl SoundApp {
         self.frame_ms = self.frame_ms * 0.9 + dt * 1000.0 * 0.1;
         control::drain(self, ctx);
         peripherals::run(self, ctx);
+        midi_learn::run(self, ctx);
         self.follow_selection_while_playing(ctx);
         self.ara_requests();
         self.note_recent_session();
@@ -1755,6 +1769,9 @@ impl SoundApp {
         dashboard::show(self, &ctx);
         preferences::show(self, &ctx);
         peripherals::window(self, &ctx);
+        midi_learn::popup(self, &ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        audio_to_midi::window(self, &ctx);
         dialogs::show(self, &ctx);
         if self.meters_live() {
             let editors = self.player.as_ref().is_some_and(Player::any_editor_open);

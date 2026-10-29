@@ -21,6 +21,9 @@ pub const UI_COMMANDS: &[(&str, &str, &str, Option<&str>)] = &[
     ("window.audio_health", "Session Audio Health", "", None),
     ("window.about", "About OpenPT", "", None),
     ("window.dashboard", "Dashboard", "File > Dashboard...", None),
+    ("track.ara", "Melodyne", "Track > ARA Plugins > Melodyne", None),
+    ("clip.ara", "Melodyne", "Clip > ARA Plugins > Melodyne", None),
+    ("window.ara", "ARA Plugins", "Window > ARA Plugins", None),
     ("transport.discard_take", "Stop and Discard Take", "", Some("Cmd+.")),
     ("clip_list.find", "Find Clip", "", Some("Cmd+Shift+F")),
     ("window.preferences", "Preferences", "Setup > Preferences...", None),
@@ -48,6 +51,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, Option<&str>)] = &[
     ("window.config_update", "Update Active Configuration", "Window > Configurations > Update Active Configuration", None),
     ("window.config_auto_update", "Auto-Update Active Configuration", "Window > Configurations > Auto-Update Active Configuration", None),
     ("window.renderer", "Renderer", "Window > Renderer", None),
+    ("window.trim_downmix", "Trim and Downmix", "Window > Trim and Downmix", None),
     ("window.ui_customization", "UI Customization", "Window > UI Customization", None),
     ("window.arrange_tile", "Tile", "Window > Arrange > Tile", None),
     ("window.arrange_tile_h", "Tile Horizontal", "Window > Arrange > Tile Horizontal", None),
@@ -336,6 +340,7 @@ fn checked_state(app: &SoundApp, path: &str, id: Option<&str>) -> bool {
         Some("window.clip_list_view") | Some("window.clip_list") => app.ui.show_clip_list,
         Some("window.narrow_mix") => app.ui.narrow_mix,
         Some("window.renderer") => app.extra.show_renderer,
+        Some("window.trim_downmix") => app.extra.show_trim_downmix,
         Some("window.ui_customization") => app.extra.show_ui_customization,
         Some("window.config_auto_update") => app.extra.auto_update_config,
         Some("view.mix_section") => path.rsplit(" > ").next().map(mix_section_id).is_some_and(|s| app.ui.mix_views.iter().any(|v| v == s)),
@@ -483,6 +488,9 @@ pub fn run_ui_command(app: &mut SoundApp, id: &str, p: &Value) -> Option<Result<
     }
     if id == "ui.audio_device" {
         return Some(crate::windows::audio_device_command(app, p));
+    }
+    if matches!(id, "track.ara" | "clip.ara" | "window.ara") {
+        return Some(ara_command(app, id, p));
     }
     let toggle = |v: &mut bool| {
         *v = p.get("value").and_then(Value::as_bool).unwrap_or(!*v);
@@ -690,6 +698,56 @@ pub fn run_ui_command(app: &mut SoundApp, id: &str, p: &Value) -> Option<Result<
         _ => return None,
     };
     Some(Ok(r))
+}
+
+fn ara_slot(t: &openpt_model::Track, plugin: &str) -> Option<usize> {
+    t.mixer.inserts.iter().position(|i| i.as_ref().is_some_and(|i| i.plugin == plugin))
+}
+
+fn ara_command(app: &mut SoundApp, id: &str, p: &Value) -> Result<Value, String> {
+    let name = p.get("plugin").and_then(Value::as_str).unwrap_or("Melodyne").to_string();
+    let plugin = openpt_vst3_host::cached()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|d| d.name.eq_ignore_ascii_case(&name))
+        .map(|d| d.id)
+        .ok_or_else(|| format!("{name} is not installed (or the plug-in scan has not finished)"))?;
+    let s = app.engine.session();
+    let mut tracks: Vec<openpt_model::TrackId> = match id {
+        "clip.ara" => {
+            let mut v: Vec<_> = openpt_engine::cmd::clip_ids_param(&app.engine, p).iter().filter_map(|c| s.find_clip(*c).map(|(t, _)| t)).collect();
+            v.dedup();
+            v
+        }
+        "track.ara" => p.get("track").and_then(Value::as_u64).map(|t| vec![openpt_model::TrackId(t)]).unwrap_or_else(|| s.edit.selected_tracks.clone()),
+        _ => Vec::new(),
+    };
+    if id == "window.ara" {
+        let bound: Vec<_> = s.tracks.iter().filter(|t| ara_slot(t, &plugin).is_some()).map(|t| t.id).collect();
+        let pick = s.edit.selected_tracks.iter().find(|t| bound.contains(t)).or_else(|| bound.first()).copied();
+        tracks = pick.into_iter().collect();
+        if tracks.is_empty() {
+            return Err(format!("no track uses {name}: Track > ARA Plugins > {name} first"));
+        }
+    }
+    tracks.retain(|t| s.track(*t).is_some_and(|tr| matches!(tr.kind, openpt_model::TrackKind::Audio)));
+    if tracks.is_empty() {
+        return Err("select an audio track or clip".into());
+    }
+    let mut added = Vec::new();
+    for t in &tracks {
+        if app.engine.session().track(*t).is_some_and(|tr| ara_slot(tr, &plugin).is_none()) {
+            app.run("mix.insert", json!({"track": t.0, "plugin": plugin}))?;
+            added.push(t.0);
+        }
+    }
+    let first = tracks.first().copied();
+    if let Some(t) = first
+        && let Some(slot) = app.engine.session().track(t).and_then(|tr| ara_slot(tr, &plugin))
+    {
+        crate::mix_window::open_plugin(app, t, slot);
+    }
+    Ok(json!({"plugin": plugin, "tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "inserted": added}))
 }
 
 pub fn parity() -> Value {

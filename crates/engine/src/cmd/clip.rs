@@ -303,17 +303,15 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
     let widths: Vec<usize> = audio_tracks.iter().map(|t| s.track(*t).map_or(0, |x| x.format.channels())).collect();
     let width = |i: usize| widths.get(i).copied().unwrap_or(0);
     let mut placed = Vec::new();
-    let all_mono = files.iter().all(|f| f.2.buffer.num_channels() == 1);
+    let all_mono = files.iter().all(|f| f.2.num_channels() == 1);
     if files.len() > 1 && all_mono && width(from) == files.len() {
         let frames = files.iter().map(|f| f.2.frames()).max().unwrap_or(0);
         let channels = files
             .iter()
             .map(|f| {
-                f.2.buffer
-                    .channels
-                    .first()
+                f.2.channel(0)
                     .map(|c| {
-                        let mut c = c.clone();
+                        let mut c = c.to_vec();
                         c.resize(frames, 0.0);
                         c
                     })
@@ -324,9 +322,9 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
         let buf = openpt_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels };
         let src = crate::io::add_source(s, &name, buf, None, files[0].1);
         placed.push(place_on(s, track, src, name, i64::try_from(frames).unwrap_or(i64::MAX), at)?);
-    } else if files.len() == 1 && files[0].2.buffer.num_channels() > 1 && width(from) == 1 {
+    } else if files.len() == 1 && files[0].2.num_channels() > 1 && width(from) == 1 {
         let (name, format, audio) = &files[0];
-        let n = audio.buffer.num_channels();
+        let n = audio.num_channels();
         let targets: Vec<TrackId> =
             (from..audio_tracks.len()).take_while(|i| width(*i) == 1).take(n).filter_map(|i| audio_tracks.get(i).copied()).collect();
         if targets.len() < n {
@@ -337,7 +335,7 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
             let ch_name = format!("{name}.{}", fmt.channel_label(k));
             let buf = openpt_audio_io::AudioBuffer {
                 sample_rate: s.sample_rate.hz(),
-                channels: vec![audio.buffer.channels.get(k).cloned().unwrap_or_default()],
+                channels: vec![audio.channel(k).map(<[f32]>::to_vec).unwrap_or_default()],
             };
             let src = crate::io::add_source(s, &ch_name, buf, None, *format);
             placed.push(place_on(s, t, src, ch_name, i64::try_from(audio.frames()).unwrap_or(i64::MAX), at)?);
@@ -348,7 +346,7 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
                 Some(t) => *t,
                 None => s.add_track(
                     openpt_model::TrackKind::Audio,
-                    openpt_model::ChannelFormat::for_channels(audio.buffer.num_channels().min(2)),
+                    openpt_model::ChannelFormat::for_channels(audio.num_channels().min(2)),
                     Some(name),
                 ),
             };
@@ -601,10 +599,10 @@ mod tests {
         assert_eq!(clip.name, "Gtr");
         let openpt_model::ClipContent::Audio { source, .. } = clip.content else { panic!("audio clip") };
         let joined = e.session().pool.get(source).unwrap().clone();
-        assert_eq!(joined.buffer.num_channels(), 2);
+        assert_eq!(joined.num_channels(), 2);
         assert_eq!(joined.frames(), 100, "the shorter file is padded");
-        assert_eq!(joined.buffer.channels[1][0], -0.5);
-        assert_eq!(joined.buffer.channels[1][90], 0.0);
+        assert_eq!(joined.sample(1, 0), -0.5);
+        assert_eq!(joined.sample(1, 90), 0.0);
         let monos = e.execute("track.new", &json!({"format": "mono", "count": 2})).unwrap()["tracks"].clone();
         let (a, b) = (monos[0].as_u64().unwrap(), monos[1].as_u64().unwrap());
         e.execute("clip.place_sources", &json!({"sources": [source.0], "track": a, "at": 0})).unwrap();

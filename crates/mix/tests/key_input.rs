@@ -76,6 +76,44 @@ fn key_listen_plays_the_key() {
 }
 
 #[test]
+fn an_aux_keyed_by_another_aux_hears_the_whole_key() {
+    for kick_first in [false, true] {
+        let mut s = fixture(true, false, kick_first);
+        let ids: Vec<_> = s.tracks.iter().map(|t| (t.id, t.name.clone())).collect();
+        let bass = ids.iter().find(|(_, n)| n == "Bass").unwrap().0;
+        let kick = ids.iter().find(|(_, n)| n == "Kick").unwrap().0;
+        let key = s.track(kick).unwrap().mixer.sends[0].as_ref().unwrap().target.clone();
+        let (bass_in, kick_in) = (s.add_bus("BassIn", ChannelFormat::Mono), s.add_bus("KickIn", ChannelFormat::Mono));
+        let comp = s.track_mut(bass).unwrap().mixer.inserts[0].take();
+        s.track_mut(bass).unwrap().mixer.output = Route::Bus(bass_in);
+        let k = s.track_mut(kick).unwrap();
+        k.mixer.sends[0] = None;
+        k.mixer.output = Route::Bus(kick_in);
+        let aux = |s: &mut Session, name: &str, input| {
+            let a = s.add_track(TrackKind::Aux, ChannelFormat::Mono, Some(name));
+            s.track_mut(a).unwrap().mixer.input = Route::Bus(input);
+            a
+        };
+        let (kick_aux, bass_aux) = if kick_first {
+            let k = aux(&mut s, "Kick Bus", kick_in);
+            (k, aux(&mut s, "Bass Bus", bass_in))
+        } else {
+            let b = aux(&mut s, "Bass Bus", bass_in);
+            (aux(&mut s, "Kick Bus", kick_in), b)
+        };
+        let ka = s.track_mut(kick_aux).unwrap();
+        ka.mixer.output = Route::None;
+        let mut send = SendSlot::new(key);
+        send.level_db = 0.0;
+        ka.mixer.sends[0] = Some(send);
+        s.track_mut(bass_aux).unwrap().mixer.inserts[0] = comp;
+        let (quiet, loud) = halves(&s);
+        assert!(quiet > 0.03, "no kick: the bass passes ({quiet})");
+        assert!(loud < quiet * 0.3, "kick aux on the key: the bass aux ducks ({loud} vs {quiet}, kick first: {kick_first})");
+    }
+}
+
+#[test]
 fn a_latent_plugin_elsewhere_does_not_make_the_key_late() {
     let render = |latent: bool| {
         let mut s = fixture(true, false, false);

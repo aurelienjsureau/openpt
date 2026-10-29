@@ -247,6 +247,9 @@ fn main() -> eframe::Result {
         if !failed.is_empty() {
             log::warn!("scheduling: could not set {}", failed.join(", "));
         }
+        if std::env::var_os("OPENPT_NO_AUDIO_CACHE").is_none() {
+            openpt_engine::audio_cache::set_dir(openpt_engine::audio_cache::default_dir());
+        }
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {

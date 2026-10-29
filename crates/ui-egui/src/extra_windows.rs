@@ -10,6 +10,7 @@ const AUTO_UPDATE_SECS: f64 = 2.0;
 #[derive(Debug, Clone)]
 pub struct ExtraState {
     pub show_renderer: bool,
+    pub show_trim_downmix: bool,
     pub show_ui_customization: bool,
     pub auto_update_config: bool,
     pub ui_scale: f32,
@@ -23,6 +24,7 @@ impl Default for ExtraState {
     fn default() -> Self {
         Self {
             show_renderer: false,
+            show_trim_downmix: false,
             show_ui_customization: false,
             auto_update_config: false,
             ui_scale: 1.0,
@@ -41,6 +43,7 @@ pub fn run(app: &mut SoundApp, id: &str, p: &Value) -> Option<Value> {
     };
     Some(match id {
         "window.renderer" => flag(&mut app.extra.show_renderer),
+        "window.trim_downmix" => flag(&mut app.extra.show_trim_downmix),
         "window.ui_customization" => flag(&mut app.extra.show_ui_customization),
         "window.config_auto_update" => flag(&mut app.extra.auto_update_config),
         _ => return None,
@@ -50,6 +53,7 @@ pub fn run(app: &mut SoundApp, id: &str, p: &Value) -> Option<Value> {
 pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     auto_update(app, ctx);
     renderer(app, ctx);
+    trim_downmix(app, ctx);
     ui_customization(app, ctx);
     apply_customization(app, ctx);
 }
@@ -92,7 +96,7 @@ fn renderer(app: &mut SoundApp, ctx: &egui::Context) {
         .iter()
         .filter(|tr| tr.kind != TrackKind::Master && app.engine.session().edit.flag(&format!("object.{}", tr.id.0)))
         .map(|tr| {
-            let sp = tr.mixer.surround.unwrap_or_default();
+            let sp = openpt_mix::surround_at(tr, app.position()).unwrap_or_default();
             (tr.name.clone(), sp.x, sp.y, sp.z)
         })
         .collect();
@@ -134,6 +138,16 @@ fn renderer(app: &mut SoundApp, ctx: &egui::Context) {
             } else {
                 ui.label(egui::RichText::new(format!("{} object track(s)", objects.len())).small().color(t.text_dim));
             }
+            ui.separator();
+            monitor_controls(app, ui);
+            ui.horizontal(|ui| {
+                if ui.button("Trim and Downmix…").clicked() {
+                    app.extra.show_trim_downmix = true;
+                }
+                if ui.button("Export ADM BWF…").on_hover_text("Bed (main output) + object tracks as a Dolby Atmos ADM BWF master").clicked() {
+                    export_adm(app);
+                }
+            });
         },
     );
     app.extra.show_renderer = open;
@@ -179,4 +193,92 @@ fn ui_customization(app: &mut SoundApp, ctx: &egui::Context) {
         },
     );
     app.extra.show_ui_customization = open;
+}
+
+fn set_atmos(app: &mut SoundApp, p: Value) {
+    if let Err(e) = app.run("setup.atmos", p) {
+        app.ui.status = e;
+    }
+}
+
+fn monitor_controls(app: &mut SoundApp, ui: &mut egui::Ui) {
+    let a = app.engine.session().atmos;
+    let fmt = app.engine.session().main_format();
+    ui.horizontal(|ui| {
+        ui.label("Monitor");
+        egui::ComboBox::from_id_salt("atmos_monitor").width(220.0).selected_text(a.monitor.label()).show_ui(ui, |ui| {
+            for m in openpt_model::AtmosMonitor::ALL {
+                if ui.selectable_label(a.monitor == m, m.label()).clicked() {
+                    set_atmos(app, json!({"monitor": m.id()}));
+                }
+            }
+        });
+    });
+    if fmt.channels() <= 2 && a.monitor != openpt_model::AtmosMonitor::Speakers {
+        ui.weak("The main output is stereo: set an immersive format (e.g. 7.1.4) in I/O Setup to use the renderer.");
+    }
+    if a.monitor == openpt_model::AtmosMonitor::Binaural {
+        let mut g = a.binaural_gain_db;
+        if ui.add(egui::Slider::new(&mut g, -24.0..=12.0).text("Headphone level").suffix(" dB")).changed() {
+            set_atmos(app, json!({"binaural_gain_db": g}));
+        }
+    }
+}
+
+fn export_adm(app: &mut SoundApp) {
+    let s = app.engine.session();
+    let suggested = format!("{} Atmos.wav", s.name);
+    let dir = app.engine.path.as_deref().and_then(|p| std::path::Path::new(p).parent()).map(std::path::Path::to_path_buf);
+    let start = dir.map_or_else(|| suggested.clone(), |d| d.join(&suggested).display().to_string());
+    let picked = match &app.services.pick_save {
+        Some(pick) => pick("file.export_adm", &start),
+        None => Some(start),
+    };
+    let Some(path) = picked else { return };
+    let sel = app.engine.session().edit.selection;
+    let mut p = json!({"path": path});
+    if !sel.is_empty() {
+        p["start"] = json!(sel.start);
+        p["end"] = json!(sel.end);
+    }
+    app.ui.status = match app.run("file.export_adm", p) {
+        Ok(v) => {
+            let mut msg = format!("ADM BWF written: {} bed + {} object(s), {} channels", v["bed"].as_str().unwrap_or(""), v["objects"], v["channels"]);
+            if let Some(w) = v["warning"].as_str() {
+                msg.push_str(" · ");
+                msg.push_str(w);
+            }
+            msg
+        }
+        Err(e) => e,
+    };
+}
+
+fn trim_downmix(app: &mut SoundApp, ctx: &egui::Context) {
+    let mut open = app.extra.show_trim_downmix;
+    if !open {
+        return;
+    }
+    egui::Window::new(egui::RichText::new("Trim and Downmix").font(bold(13.0))).open(&mut open).resizable(false).fit_screen(ctx).show(ctx, |ui| {
+        let a = app.engine.session().atmos;
+        ui.label(format!("Source: {}", app.engine.session().main_format().label()));
+        monitor_controls(app, ui);
+        ui.separator();
+        ui.strong("Downmix trims");
+        let (mut s, mut h) = (a.surround_trim_db, a.height_trim_db);
+        let rs = ui.add(egui::Slider::new(&mut s, -24.0..=6.0).text("Surround trim").suffix(" dB"));
+        let rh = ui.add(egui::Slider::new(&mut h, -24.0..=6.0).text("Height trim").suffix(" dB"));
+        if rs.changed() || rh.changed() {
+            set_atmos(app, json!({"surround_trim_db": s, "height_trim_db": h}));
+        }
+        ui.horizontal(|ui| {
+            for (label, sv, hv) in [("Music (−3 / −3)", -3.0, -3.0), ("Film (−3 / −6)", -3.0, -6.0), ("Flat (0 / 0)", 0.0, 0.0)] {
+                if ui.small_button(label).clicked() {
+                    set_atmos(app, json!({"surround_trim_db": sv, "height_trim_db": hv}));
+                }
+            }
+        });
+        ui.weak("Trims shape the 5.1 and stereo (Lo/Ro) downmixes you monitor; the bed and objects themselves are not changed.");
+    });
+    app.extra.show_trim_downmix = open;
 }

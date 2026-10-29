@@ -309,6 +309,8 @@ pub struct Session {
     pub ara_archives: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_sessions: Vec<SessionLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub midi_learn: Vec<crate::MidiLearn>,
     pub tracks: Vec<Track>,
     pub sources: Vec<Source>,
     #[serde(default)]
@@ -319,6 +321,8 @@ pub struct Session {
     pub inputs: Vec<crate::InputPath>,
     #[serde(default)]
     pub heat: crate::HeatSettings,
+    #[serde(default)]
+    pub atmos: crate::AtmosSettings,
     pub markers: Vec<MemoryLocation>,
     pub groups: Vec<Group>,
     pub edit: EditState,
@@ -361,6 +365,7 @@ impl Session {
             key_signatures: Vec::new(),
             ara_archives: Vec::new(),
             linked_sessions: Vec::new(),
+            midi_learn: Vec::new(),
             tracks: Vec::new(),
             sources: Vec::new(),
             videos: Vec::new(),
@@ -368,6 +373,7 @@ impl Session {
             outputs: vec![OutputPath { name: "Out 1-2".into(), first_channel: 0, format: ChannelFormat::Stereo }],
             inputs: crate::default_inputs(),
             heat: crate::HeatSettings::default(),
+            atmos: crate::AtmosSettings::default(),
             markers: Vec::new(),
             groups: Vec::new(),
             edit: EditState::default(),

@@ -86,6 +86,7 @@ pub fn specs() -> Vec<CommandSpec> {
             }
         ),
         cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac|mp3, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: false, fold_down?: stereo}", always, bounce),
+        cmd!(noundo "file.export_adm", "Export ADM BWF (Dolby Atmos)...", [], None, "{path, start?, end?} — the main mix as the bed plus every object track as an object with its position, as a 24-bit ADM BWF master", always, crate::adm::export),
         cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo}", has_tracks, |e, p| {
             stems(e, p, "file.bounce_stems", None)
         }),
@@ -711,8 +712,8 @@ mod tests {
         assert_eq!(e.session().tracks[0].format, ChannelFormat::Surround51);
         let src = e.session().sources[0].id;
         let audio = e.session().pool.get(src).unwrap();
-        assert_eq!(audio.buffer.channels.len(), 6);
-        assert!((audio.buffer.channels[5][0] - 0.6).abs() < 1e-3);
+        assert_eq!(audio.num_channels(), 6);
+        assert!((audio.sample(5, 0) - 0.6).abs() < 1e-3);
 
         let mut e = Engine::default();
         e.execute("track.new", &json!({"name": "Bed", "format": "5.1"})).unwrap();

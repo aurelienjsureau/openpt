@@ -10,7 +10,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New...",
             ["Track"],
             Some("Cmd+Shift+N"),
-            "{count?: 1, format?: mono|stereo|5.1…, kind?: audio|aux|master|midi|instrument|vca|folder, name?, timebase?: samples|ticks, instrument?: plugin id} or {rows: [those]}",
+            "{count?: 1, format?: mono|stereo|5.1…, kind?: audio|aux|master|midi|instrument|vca|folder, name?, timebase?: samples|ticks, instrument?: plugin id, preset?: track preset path} or {rows: [those]}",
             always,
             new_track
         ),
@@ -393,6 +393,24 @@ fn new_track(e: &mut Engine, p: &Value) -> Result<Value> {
             all.extend(v["tracks"].as_array().cloned().unwrap_or_default());
         }
         return Ok(json!({"tracks": all}));
+    }
+    if let Some(path) = str_param(p, "preset").filter(|x| !x.trim().is_empty()) {
+        let preset = super::track_more::read_preset(path)?;
+        let mut row = p.clone();
+        if let Some(obj) = row.as_object_mut() {
+            obj.remove("preset");
+            for (key, from) in [("kind", "kind"), ("format", "width"), ("name", "name")] {
+                if obj.get(key).and_then(Value::as_str).is_none_or(|x| x.trim().is_empty())
+                    && let Some(v) = preset.get(from).and_then(Value::as_str)
+                {
+                    obj.insert(key.into(), json!(v));
+                }
+            }
+        }
+        let made = new_track(e, &row)?;
+        let tracks = made["tracks"].clone();
+        super::track_more::load_preset(e, &json!({"path": path, "tracks": tracks}))?;
+        return Ok(made);
     }
     let count = i64_or(p, "count", 1).clamp(1, 128);
     let kind = match str_param(p, "kind") {

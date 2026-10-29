@@ -50,6 +50,7 @@ pub enum AutoParam {
     SendLevel(u8),
     SendPan(u8),
     SendMute(u8),
+    Surround(u8),
     Plugin {
         slot: u8,
         param: String,
@@ -57,6 +58,7 @@ pub enum AutoParam {
 }
 
 pub const BYPASS_PARAM: &str = "master_bypass";
+pub const SURROUND_AXES: [&str; 4] = ["x", "y", "z", "size"];
 
 impl AutoParam {
     pub fn label(&self) -> String {
@@ -68,6 +70,7 @@ impl AutoParam {
             AutoParam::SendLevel(i) => format!("send {} level", slot_letter(*i)),
             AutoParam::SendPan(i) => format!("send {} pan", slot_letter(*i)),
             AutoParam::SendMute(i) => format!("send {} mute", slot_letter(*i)),
+            AutoParam::Surround(a) => format!("surround {}", SURROUND_AXES.get(usize::from(*a)).copied().unwrap_or("x")),
             AutoParam::Plugin { slot, param } => format!("insert {} {param}", slot_letter(*slot)),
         }
     }
@@ -78,6 +81,10 @@ impl AutoParam {
             "pan" | "pan1" => return Some(AutoParam::Pan(0)),
             "pan2" => return Some(AutoParam::Pan(1)),
             "mute" => return Some(AutoParam::Mute),
+            "surround_x" => return Some(AutoParam::Surround(0)),
+            "surround_y" => return Some(AutoParam::Surround(1)),
+            "surround_z" => return Some(AutoParam::Surround(2)),
+            "surround_size" => return Some(AutoParam::Surround(3)),
             _ => {}
         }
         if let Some(rest) = s.strip_prefix("send_") {
@@ -101,6 +108,9 @@ impl AutoParam {
             AutoParam::Volume | AutoParam::SendLevel(_) => (-144.0, 12.0, 0.0),
             AutoParam::Pan(_) | AutoParam::SendPan(_) => (-1.0, 1.0, 0.0),
             AutoParam::Mute | AutoParam::SendMute(_) => (0.0, 1.0, 0.0),
+            AutoParam::Surround(0) => (-1.0, 1.0, 0.0),
+            AutoParam::Surround(1) => (-1.0, 1.0, 1.0),
+            AutoParam::Surround(_) => (0.0, 1.0, 0.0),
             AutoParam::Plugin { .. } => (f32::MIN, f32::MAX, 0.0),
         }
     }

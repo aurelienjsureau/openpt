@@ -48,8 +48,8 @@ fn channel_source(s: &mut Session, id: &str, src: SourceId, ch: usize) -> Result
         return Ok(found.id);
     }
     let audio = s.pool.get(src).cloned().ok_or_else(|| bad(id, "the file's audio is not loaded"))?;
-    let data = audio.buffer.channels.get(ch).cloned().ok_or_else(|| bad(id, "no such channel"))?;
-    let buf = openpt_audio_io::AudioBuffer { sample_rate: audio.buffer.sample_rate, channels: vec![data] };
+    let data = audio.channel(ch).map(<[f32]>::to_vec).ok_or_else(|| bad(id, "no such channel"))?;
+    let buf = openpt_audio_io::AudioBuffer { sample_rate: audio.sample_rate(), channels: vec![data] };
     let new = crate::io::add_source(s, &name, buf, None, x.format);
     if let Some(y) = s.sources.iter_mut().find(|y| y.id == new) {
         y.time_reference = x.time_reference;
@@ -218,7 +218,7 @@ mod tests {
             let c = &tr.clips()[0];
             let ClipContent::Audio { source, .. } = c.content else { panic!() };
             let audio = s.pool.get(source).unwrap();
-            assert_eq!((audio.buffer.num_channels(), audio.buffer.channels[0][10]), (1, level), "{name}");
+            assert_eq!((audio.num_channels(), audio.sample(0, 10)), (1, level), "{name}");
         }
     }
 
@@ -234,6 +234,6 @@ mod tests {
         let c = s.find_clip(ClipId(clip)).unwrap().1;
         let ClipContent::Audio { source, offset } = c.content else { panic!() };
         assert_eq!(offset, i64::from(s.sample_rate.hz()), "one second into the boom file");
-        assert_eq!(s.pool.get(source).unwrap().buffer.channels[0][0], 0.6, "its second channel, on a mono track");
+        assert_eq!(s.pool.get(source).unwrap().sample(0, 0), 0.6, "its second channel, on a mono track");
     }
 }

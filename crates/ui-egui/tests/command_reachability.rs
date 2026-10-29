@@ -17,7 +17,6 @@ const KNOWN_UNREACHED: &[&str] = &[
     "setup.playback_engine",
     "setup.peripherals",
     "setup.reset_edit_state",
-    "track.load_preset",
     "track.pin",
     "track.trim_automation_write",
     "track.vca",

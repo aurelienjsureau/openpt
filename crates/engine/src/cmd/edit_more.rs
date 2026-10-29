@@ -1267,7 +1267,7 @@ mod tests {
         let nsrc = nc.source().unwrap();
         assert_ne!(nsrc, src);
         assert_eq!(e.session().source(nsrc).unwrap().frames, 30_000);
-        assert!(e.session().pool.get(nsrc).unwrap().buffer.channels[0].iter().any(|v| v.abs() > 0.1));
+        assert!(e.session().pool.get(nsrc).unwrap().channel(0).unwrap_or(&[]).iter().any(|v| v.abs() > 0.1));
     }
 
     #[test]

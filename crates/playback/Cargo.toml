@@ -28,6 +28,7 @@ asio = ["cpal/asio"]
 
 [dev-dependencies]
 serde_json.workspace = true
+openpt-mapped.workspace = true
 
 [lints]
 workspace = true

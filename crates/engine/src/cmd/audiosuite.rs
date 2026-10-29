@@ -193,7 +193,7 @@ mod tests {
         let c = e.session().tracks[0].clips()[0].clone();
         assert!((c.gain_db + 6.0).abs() < 1e-6, "{}", c.gain_db);
         assert_eq!(c.gain_env, vec![(0, 0.0), (32, -12.0)]);
-        let sample = e.session().pool.get(c.source().unwrap()).unwrap().buffer.channels[0][0];
+        let sample = e.session().pool.get(c.source().unwrap()).unwrap().sample(0, 0);
         assert!((sample + 0.5).abs() < 1e-3, "invert flips the file and leaves the gain on the clip, got {sample}");
 
         let (mut e, id) = gained_clip();
@@ -201,7 +201,7 @@ mod tests {
         let c = e.session().tracks[0].clips()[0].clone();
         assert!((c.gain_db + 6.0).abs() < 1e-6, "{}", c.gain_db);
         assert_eq!(c.gain_env, vec![(0, 0.0), (32, -12.0)]);
-        let sample = e.session().pool.get(c.source().unwrap()).unwrap().buffer.channels[0][0];
+        let sample = e.session().pool.get(c.source().unwrap()).unwrap().sample(0, 0);
         assert!((sample - 0.5).abs() < 1e-3, "duplicate keeps the file level and the clip gain, got {sample}");
     }
 
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(e.execute("audiosuite.process", &generator).unwrap()["processed"], 1);
         let c = e.session().tracks[1].clips()[0].clone();
         assert_eq!((c.start, c.length), (48_000, 48_000));
-        let buf = &e.session().pool.get(c.source().unwrap()).unwrap().buffer;
+        let buf = e.session().pool.get(c.source().unwrap()).unwrap().to_buffer();
         assert_eq!(buf.channels.len(), 2);
         let peak = buf.channels[1].iter().fold(0.0f32, |m, x| m.max(x.abs()));
         assert!((peak - 0.5).abs() < 0.01, "-6 dB sine peaks near 0.5, got {peak}");
