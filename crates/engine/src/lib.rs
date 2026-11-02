@@ -114,6 +114,8 @@ pub struct Engine {
     dirty_at: Cell<(u64, bool)>,
     merge_key: Option<String>,
     merge_hold: Option<String>,
+    merge_top: Option<usize>,
+    merge_absorb: bool,
     pub messages: Vec<String>,
     pub last_selection: Option<(openpt_time::Range, Vec<TrackId>)>,
 }
@@ -144,6 +146,8 @@ impl Engine {
             dirty_at: Cell::new((0, false)),
             merge_key: None,
             merge_hold: None,
+            merge_top: None,
+            merge_absorb: false,
             messages: Vec::new(),
             last_selection: None,
         }
@@ -268,6 +272,10 @@ impl Engine {
         if Arc::ptr_eq(&before, &self.doc) {
             return;
         }
+        if self.merge_absorb {
+            self.redo.clear();
+            return;
+        }
         self.undo.push(HistoryEntry { label: label.to_string(), doc: before });
         self.redo.clear();
         if self.undo.len() > self.history_limit {
@@ -324,9 +332,6 @@ impl Engine {
                 return Err(EngineError::Internal(id.to_string(), panic_message(&*p)));
             }
         };
-        if !Arc::ptr_eq(&before, &self.doc) {
-            self.merge_key = None;
-        }
         match result {
             Ok(v) => {
                 if !Arc::ptr_eq(&before, &self.doc) && !self.doc.vca_plan(false).is_empty() {
@@ -364,12 +369,14 @@ impl Engine {
 
     pub fn execute_merged(&mut self, id: &str, params: &Value, key: &str) -> Result<Value> {
         let key = self.merge_hold.clone().unwrap_or_else(|| key.to_string());
-        let continuing = self.merge_key.as_ref() == Some(&key);
-        let before_len = self.undo.len();
-        let r = self.execute(id, params)?;
-        if continuing && self.undo.len() == before_len + 1 && before_len > 0 {
-            self.undo.pop();
-        }
+        let top_before = self.undo_top();
+        let continuing = self.merge_key.as_ref() == Some(&key) && self.merge_top.is_some() && top_before == self.merge_top;
+        self.merge_absorb = continuing;
+        let r = self.execute(id, params);
+        self.merge_absorb = false;
+        let r = r?;
+        let pushed = self.undo_top() != top_before;
+        self.merge_top = if continuing || pushed { self.undo_top() } else { None };
         self.merge_key = Some(key);
         Ok(r)
     }
@@ -382,6 +389,11 @@ impl Engine {
 
     pub fn end_merge(&mut self) {
         self.merge_key = None;
+        self.merge_top = None;
+    }
+
+    fn undo_top(&self) -> Option<usize> {
+        self.undo.last().map(|h| Arc::as_ptr(&h.doc) as usize)
     }
 
     pub fn run(&mut self, id: &str) -> Result<Value> {
@@ -490,6 +502,34 @@ mod merge_tests {
         e.execute("mix.pan", &json!({"tracks": [t.0], "pan": 0.5})).unwrap();
         e.execute_merged("mix.volume", &json!({"track": t.0, "db": -3.0}), "fader").unwrap();
         assert_eq!(e.undo_history().len(), 3);
+    }
+
+    #[test]
+    fn a_gesture_stays_one_step_when_the_history_is_full() {
+        let mut e = Engine::default();
+        let t = e.session_mut().add_track(openpt_model::TrackKind::Audio, openpt_model::ChannelFormat::Mono, None);
+        for i in 0..e.history_limit + 5 {
+            e.execute("mix.pan", &json!({"tracks": [t.0], "pan": if i % 2 == 0 { 0.5 } else { -0.5 }})).unwrap();
+        }
+        let full = e.undo_history().len();
+        for i in 1..=40 {
+            e.execute_merged("mix.volume", &json!({"track": t.0, "db": -0.4 * i as f32}), "fader").unwrap();
+        }
+        e.end_merge();
+        assert_eq!(e.undo_history().len(), full);
+        e.undo();
+        assert_eq!(e.session().track(t).unwrap().mixer.volume_db, 0.0);
+    }
+
+    #[test]
+    fn a_change_outside_the_history_does_not_split_a_gesture() {
+        let mut e = Engine::default();
+        let t = e.session_mut().add_track(openpt_model::TrackKind::Audio, openpt_model::ChannelFormat::Mono, None);
+        e.execute_merged("mix.volume", &json!({"track": t.0, "db": -1.0}), "fader").unwrap();
+        e.session_mut().edit.playhead = 1000;
+        e.execute_merged("mix.volume", &json!({"track": t.0, "db": -2.0}), "fader").unwrap();
+        e.end_merge();
+        assert_eq!(e.undo_history().len(), 1);
     }
 }
 
