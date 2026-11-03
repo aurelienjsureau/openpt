@@ -29,7 +29,7 @@ pub(crate) const PARAM_QUEUE_CAP: usize = 1024;
 const OUTPUTS_CAP: usize = 256;
 const MAX_STATE_BYTES: usize = 64 << 20;
 const EDIT_CAP: usize = 256;
-const STATE_MAGIC: &[u8; 4] = b"SCV3";
+pub(crate) const STATE_MAGIC: &[u8; 4] = b"SCV3";
 
 fn read_c8(buf: &[c_char]) -> String {
     let bytes: Vec<u8> = buf.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
@@ -1502,8 +1502,14 @@ impl Instance {
     }
 
     pub fn set_channel_context(&self, c: &openpt_dsp::ChannelInfo) -> bool {
+        channel_context(self.controller.as_ref(), &self.component, c)
+    }
+}
+
+fn channel_context(controller: Option<&ComPtr<sv::IEditController>>, component: &ComPtr<sv::IComponent>, c: &openpt_dsp::ChannelInfo) -> bool {
+    {
         use sv::ChannelContext::{self as cc, IInfoListenerTrait};
-        let target = self.controller.as_ref().and_then(|x| x.cast::<cc::IInfoListener>()).or_else(|| self.component.cast::<cc::IInfoListener>());
+        let target = controller.and_then(|x| x.cast::<cc::IInfoListener>()).or_else(|| component.cast::<cc::IInfoListener>());
         let Some(l) = target else { return false };
         let attrs = HostAttributes::default();
         let utf16 = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
@@ -1522,7 +1528,9 @@ impl Instance {
         let Some(list) = ComWrapper::new(attrs).to_com_ptr::<sv::IAttributeList>() else { return false };
         ok(unsafe { l.setChannelContextInfos(list.as_ptr()) })
     }
+}
 
+impl Instance {
     pub fn shutdown(&mut self) {
         if self.processing {
             if let Some(p) = self.processor() {
@@ -1654,7 +1662,7 @@ impl Drop for Instance {
     }
 }
 
-fn split_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
+pub(crate) fn split_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
     if data.len() > MAX_STATE_BYTES.saturating_mul(2) {
         return None;
     }
@@ -1880,6 +1888,12 @@ impl EditorLink {
             return Vec::new();
         }
         self.lock().window.as_ref().map(window::HostWindow::take_actions).unwrap_or_default()
+    }
+
+    pub fn set_channel_context(&self, c: &openpt_dsp::ChannelInfo) -> bool {
+        let g = self.lock();
+        let Some(component) = &g.component else { return false };
+        channel_context(g.controller.as_ref(), component, c)
     }
 
     pub fn load_state(&self, data: &[u8]) -> bool {
@@ -2122,7 +2136,7 @@ mod window {
         EnumThreadWindows, GA_ROOT, GW_OWNER, GetAncestor, GetForegroundWindow, GetWindow, GetWindowRect, SWP_NOSIZE,
         AdjustWindowRectEx, AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
         DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW,
-        MF_CHECKED, MF_SEPARATOR, MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+        MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
         SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu,
         WM_CLOSE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT,
         WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
@@ -2441,13 +2455,35 @@ mod window {
             if m.is_null() {
                 return 0;
             }
+            let mut subs: std::collections::HashMap<String, windows_sys::Win32::UI::WindowsAndMessaging::HMENU> = std::collections::HashMap::new();
             for (id, label, checked) in entries {
                 if *id == 0 {
                     AppendMenuW(m, MF_SEPARATOR, 0, std::ptr::null());
-                } else {
-                    let w = wide(label);
-                    AppendMenuW(m, MF_STRING | if *checked { MF_CHECKED } else { 0 }, *id, w.as_ptr());
+                    continue;
                 }
+                let parts: Vec<&str> = label.split(" › ").collect();
+                let (leaf, dirs) = parts.split_last().map_or((label.as_str(), &[][..]), |(l, d)| (*l, d));
+                let mut parent = m;
+                let mut path = String::new();
+                for d in dirs {
+                    path.push_str(d);
+                    path.push('\u{1}');
+                    parent = match subs.get(&path) {
+                        Some(s) => *s,
+                        None => {
+                            let s = CreatePopupMenu();
+                            if s.is_null() {
+                                break;
+                            }
+                            let w = wide(d);
+                            AppendMenuW(parent, MF_POPUP, s as usize, w.as_ptr());
+                            subs.insert(path.clone(), s);
+                            s
+                        }
+                    };
+                }
+                let w = wide(leaf);
+                AppendMenuW(parent, MF_STRING | if *checked { MF_CHECKED } else { 0 }, *id, w.as_ptr());
             }
             let mut p = POINT { x: r.left, y: r.bottom };
             ClientToScreen(hwnd, &mut p);

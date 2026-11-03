@@ -3,6 +3,9 @@
 pub mod scan;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod presets;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod isolated;
 #[cfg(not(target_arch = "wasm32"))]
 pub use isolated::{Scanner, scan_child, set_scanner};

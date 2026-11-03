@@ -555,6 +555,17 @@ struct Side {
     garbage: Receiver<Vec<Box<dyn Plugin>>>,
     old_sessions: Option<Receiver<Arc<Session>>>,
     ara_seen: HashMap<u64, u64>,
+    channels: HashMap<(TrackId, usize), openpt_dsp::ChannelInfo>,
+    pending: Vec<PreparedInstance>,
+    loading: Option<Arc<Session>>,
+    load: LoadProgress,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LoadProgress {
+    pub done: usize,
+    pub total: usize,
+    pub next: Option<String>,
 }
 
 impl Side {
@@ -568,6 +579,10 @@ impl Side {
             garbage,
             old_sessions: None,
             ara_seen: HashMap::new(),
+            channels: HashMap::new(),
+            pending: Vec::new(),
+            loading: None,
+            load: LoadProgress::default(),
         }
     }
 
@@ -590,6 +605,8 @@ impl Side {
     }
 
     fn forget(&mut self, key: (TrackId, usize)) {
+        self.pending.retain(|p| (p.track, p.slot) != key);
+        self.channels.remove(&key);
         self.shadow.remove(&key);
         self.states.remove(&key);
         self.refused.remove(&key);
@@ -628,6 +645,13 @@ impl Player {
         let p = Player::open(Arc::clone(&session), cfg);
         p.side().return_old_sessions(&p.tx);
         p.update_session(session);
+        p
+    }
+
+    pub fn with_config_queued(session: Arc<Session>, cfg: &AudioConfig) -> Player {
+        let p = Player::open(Arc::clone(&session), cfg);
+        p.side().return_old_sessions(&p.tx);
+        p.queue_session(session);
         p
     }
 
@@ -832,12 +856,48 @@ impl Player {
         #[cfg(not(target_arch = "wasm32"))]
         readahead::watch(Arc::clone(&s), &self.shared);
         let started = std::time::Instant::now();
-        let instances = self.side().prepare(&s);
+        let instances = {
+            let mut side = self.side();
+            side.loading = None;
+            side.prepare(&s)
+        };
         let took = started.elapsed();
         if took.as_millis() >= 50 {
             log::warn!("slow session update: {} ms ({} new plugin instances)", took.as_millis(), instances.len());
         }
         let _ = self.tx.send(Cmd::Session(s, instances));
+    }
+
+    pub fn queue_session(&self, s: Arc<Session>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        readahead::watch(Arc::clone(&s), &self.shared);
+        let mut side = self.side();
+        if side.loading.is_none() {
+            side.load = LoadProgress::default();
+        }
+        side.loading = Some(s);
+    }
+
+    pub fn pump_session(&self, budget: std::time::Duration) -> Option<LoadProgress> {
+        let mut side = self.side();
+        let s = side.loading.clone()?;
+        let finished = side.prepare_until(&s, Some(std::time::Instant::now() + budget));
+        if !finished {
+            return Some(side.load.clone());
+        }
+        let instances = std::mem::take(&mut side.pending);
+        if side.load.total > 1 {
+            log::info!("session plugins loaded: {} instances", side.load.total);
+        }
+        side.loading = None;
+        side.load = LoadProgress::default();
+        drop(side);
+        let _ = self.tx.send(Cmd::Session(s, instances));
+        None
+    }
+
+    pub fn loading(&self) -> bool {
+        self.side().loading.is_some()
     }
 
     pub fn take_late_blocks(&self) -> Option<LateBlocks> {
@@ -1054,6 +1114,12 @@ impl Side {
     }
 
     fn prepare(&mut self, s: &Session) -> Vec<PreparedInstance> {
+        self.prepare_until(s, None);
+        self.load = LoadProgress::default();
+        std::mem::take(&mut self.pending)
+    }
+
+    fn prepare_until(&mut self, s: &Session, deadline: Option<std::time::Instant>) -> bool {
         self.collect_garbage();
         let sr = s.sample_rate.as_f64() as f32;
         if (sr - self.rate).abs() > 0.5 {
@@ -1068,13 +1134,23 @@ impl Side {
         for k in stale {
             self.forget(k);
         }
-        let mut out = Vec::new();
-        for spec in specs {
+        let (live, todo): (Vec<_>, Vec<_>) = specs.into_iter().partition(|spec| self.shadow.get(&(spec.track, spec.slot)).is_some_and(|(id, ch, _)| *id == spec.id && *ch == spec.ch));
+        for spec in live {
             let key = (spec.track, spec.slot);
-            if self.shadow.get(&key).is_some_and(|(id, ch, _)| *id == spec.id && *ch == spec.ch) {
-                continue;
+            let Some(c) = openpt_mix::channel_info(s, spec.track) else { continue };
+            if self.channels.get(&key) != Some(&c) {
+                if let Some(e) = self.editors.get_mut(&key) {
+                    e.set_channel(&c);
+                }
+                self.channels.insert(key, c);
             }
+        }
+        self.load.total = self.load.done + todo.len();
+        let mut todo = todo.into_iter().peekable();
+        while let Some(spec) = todo.next() {
+            let key = (spec.track, spec.slot);
             self.forget(key);
+            self.load.done += 1;
             let ara = if spec.id.starts_with("vst3:") { openpt_mix::ara_track(s, spec.track) } else { None };
             let made = openpt_mix::create_instance_on(&spec.id, spec.state.as_deref(), sr, BLOCK, spec.ch, ara.as_ref());
             log::debug!("plugin instance for {:?} slot {}: {} ({} ch, created: {})", spec.track, spec.slot, spec.id, spec.ch, made.is_some());
@@ -1082,6 +1158,7 @@ impl Side {
             if let Some(openpt_mix::NewInstance { mut plugin, refused_state }) = made {
                 if let Some(c) = openpt_mix::channel_info(s, spec.track) {
                     plugin.set_channel(&c);
+                    self.channels.insert(key, c);
                 }
                 if let Some(e) = plugin.editor() {
                     self.editors.insert(key, e);
@@ -1093,11 +1170,18 @@ impl Side {
                     self.refused.insert(key);
                 }
                 let state_loaded = spec.state.is_some() && !refused_state;
-                out.push(PreparedInstance { track: spec.track, slot: spec.slot, id: spec.id, ch: spec.ch, plugin, state_loaded });
+                self.pending.push(PreparedInstance { track: spec.track, slot: spec.slot, id: spec.id, ch: spec.ch, plugin, state_loaded });
+            }
+            if let Some(next) = todo.peek()
+                && deadline.is_some_and(|d| std::time::Instant::now() >= d)
+            {
+                self.load.next = Some(next.id.clone());
+                return false;
             }
         }
+        self.load.next = None;
         openpt_mix::ara_follow(s, &mut self.ara_seen);
-        out
+        true
     }
 }
 

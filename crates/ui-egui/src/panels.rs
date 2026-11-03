@@ -822,13 +822,58 @@ fn preset_dir(app: &SoundApp, plugin: &str) -> Option<std::path::PathBuf> {
     app.preset_dir.as_ref().map(|d| d.join(crate::preset_folder_name(plugin)))
 }
 
-pub(crate) fn preset_names(app: &SoundApp, plugin: &str) -> Vec<String> {
-    let Some(dir) = preset_dir(app, plugin) else { return Vec::new() };
-    let mut names: Vec<String> = std::fs::read_dir(&dir)
+fn user_preset_names(app: &SoundApp, plugin: &str) -> Vec<String> {
+    let mut names: Vec<String> = preset_dir(app, plugin)
+        .and_then(|dir| std::fs::read_dir(&dir).ok())
         .map(|rd| rd.flatten().filter_map(|e| e.path().file_stem().and_then(|x| x.to_str()).map(str::to_string)).collect())
         .unwrap_or_default();
     names.sort();
     names
+}
+
+pub(crate) fn preset_names(app: &SoundApp, plugin: &str) -> Vec<String> {
+    let mut names = user_preset_names(app, plugin);
+    let factory = factory_vst3(plugin);
+    names.extend(factory.iter().map(openpt_vst3_host::presets::FactoryPreset::label).filter(|l| !names.contains(l)).collect::<Vec<_>>());
+    names
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn factory_vst3(plugin: &str) -> Vec<openpt_vst3_host::presets::FactoryPreset> {
+    let bare = plugin.strip_prefix(openpt_model::MULTI_MONO_PREFIX).unwrap_or(plugin);
+    if bare.starts_with(openpt_vst3_host::ID_PREFIX) { openpt_vst3_host::presets::for_plugin(bare) } else { Vec::new() }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn factory_vst3(_plugin: &str) -> Vec<openpt_vst3_host::presets::FactoryPreset> {
+    Vec::new()
+}
+
+fn apply_state(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, bytes: &[u8], name: &str) {
+    let Some(p) = &app.player else { return };
+    if !p.load_plugin_state(tid, slot, bytes) {
+        app.ui.status = format!("{} refused the preset {name}", info.name);
+        return;
+    }
+    let ids: Vec<String> = app
+        .engine
+        .session()
+        .track(tid)
+        .and_then(|t| t.mixer.inserts.get(slot).cloned().flatten())
+        .map(|i| i.params.keys().cloned().collect())
+        .unwrap_or_default();
+    let params: serde_json::Map<String, serde_json::Value> = p.editor_params(tid, slot, &ids).into_iter().map(|(k, x)| (k, json!(x))).collect();
+    let state = openpt_model::b64::encode(bytes);
+    let _ = app.engine.execute("mix.insert_state", &json!({"track": tid.0, "slot": slot, "state": state}));
+    let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": name}));
+}
+
+fn recall_factory(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, preset: &openpt_vst3_host::presets::FactoryPreset) {
+    let label = preset.label();
+    match openpt_vst3_host::presets::read_state(&preset.path) {
+        Some(bytes) => apply_state(app, tid, slot, info, &bytes, &label),
+        None => app.ui.status = format!("Could not read the preset {label}"),
+    }
 }
 
 pub(crate) fn recall_preset(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, name: Option<&str>) {
@@ -837,30 +882,21 @@ pub(crate) fn recall_preset(app: &mut SoundApp, tid: openpt_model::TrackId, slot
         let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": defaults, "preset": "<factory default>"}));
         return;
     };
-    let Some(dir) = preset_dir(app, info.id) else { return };
-    let Some(v) = std::fs::read_to_string(dir.join(format!("{name}.json"))).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    else {
-        app.ui.status = format!("Could not read the preset {name}");
+    let user = preset_dir(app, info.id)
+        .and_then(|dir| std::fs::read_to_string(dir.join(format!("{name}.json"))).ok())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    let Some(v) = user else {
+        match factory_vst3(info.id).into_iter().find(|f| f.label() == name) {
+            Some(f) => recall_factory(app, tid, slot, info, &f),
+            None => app.ui.status = format!("Could not read the preset {name}"),
+        }
         return;
     };
     if let Some(state) = v.get("state").and_then(serde_json::Value::as_str)
         && let Some(bytes) = openpt_model::b64::decode(state)
-        && let Some(p) = &app.player
+        && app.player.is_some()
     {
-        if !p.load_plugin_state(tid, slot, &bytes) {
-            app.ui.status = format!("{} refused the preset {name}", info.name);
-            return;
-        }
-        let ids: Vec<String> = app
-            .engine
-            .session()
-            .track(tid)
-            .and_then(|t| t.mixer.inserts.get(slot).cloned().flatten())
-            .map(|i| i.params.keys().cloned().collect())
-            .unwrap_or_default();
-        let params: serde_json::Map<String, serde_json::Value> = p.editor_params(tid, slot, &ids).into_iter().map(|(k, x)| (k, json!(x))).collect();
-        let _ = app.engine.execute("mix.insert_state", &json!({"track": tid.0, "slot": slot, "state": state}));
-        let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": name}));
+        apply_state(app, tid, slot, info, &bytes, name);
         return;
     }
     let params: serde_json::Map<String, serde_json::Value> = v
@@ -912,11 +948,12 @@ fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot
             ui.close();
         }
     }
+    factory_menu(app, ui, tid, slot, info);
     if preset_dir(app, info.id).is_none() {
         ui.label("User presets need the desktop app.");
         return;
     }
-    for n in preset_names(app, info.id) {
+    for n in user_preset_names(app, info.id) {
         if ui.button(&n).clicked() {
             recall_preset(app, tid, slot, info, Some(&n));
             ui.close();
@@ -932,4 +969,38 @@ fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot
         }
     });
     ui.ctx().memory_mut(|m| m.data.insert_temp(key, name));
+}
+
+fn factory_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo) {
+    let factory = factory_vst3(info.id);
+    if factory.is_empty() {
+        return;
+    }
+    ui.menu_button(format!("Factory Presets ({})", factory.len()), |ui| {
+        let mut picked = None;
+        let mut folders: Vec<&str> = factory.iter().map(|f| f.folder.as_str()).collect();
+        folders.dedup();
+        for folder in folders {
+            let items: Vec<&openpt_vst3_host::presets::FactoryPreset> = factory.iter().filter(|f| f.folder == folder).collect();
+            let mut list = |ui: &mut Ui| {
+                egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
+                    for f in &items {
+                        if ui.button(&f.name).clicked() {
+                            picked = Some((*f).clone());
+                        }
+                    }
+                });
+            };
+            if folder.is_empty() {
+                list(ui);
+            } else {
+                ui.menu_button(folder, list);
+            }
+        }
+        if let Some(f) = picked {
+            recall_factory(app, tid, slot, info, &f);
+            ui.close();
+        }
+    });
+    ui.separator();
 }

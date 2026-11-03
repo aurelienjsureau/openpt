@@ -122,6 +122,8 @@ pub const AUDIOSUITE: &[(&str, &str)] = &[
     ("AudioSuite > EQ > OpenEQ", "open_eq"),
     ("AudioSuite > Dynamics > OpenComp", "open_comp"),
     ("AudioSuite > Dynamics > OpenG", "open_g"),
+    ("AudioSuite > Dynamics > OpenDS", "open_ds"),
+    ("AudioSuite > Dynamics > OpenL", "open_l"),
     ("AudioSuite > Dynamics > OpenMB", "open_mb"),
     ("AudioSuite > Pitch Shift > Pitch II", "pitch_shift"),
     ("AudioSuite > Pitch Shift > Pitch Shift Legacy", "pitch_shift"),

@@ -162,6 +162,11 @@ struct MultiEditor {
 }
 
 impl PluginEditor for MultiEditor {
+    fn set_channel(&mut self, channel: &ChannelInfo) {
+        self.first.set_channel(channel);
+        self.others.iter_mut().for_each(|e| e.set_channel(channel));
+    }
+
     fn open(&mut self) -> Result<(), String> {
         self.first.open()
     }

@@ -9,6 +9,8 @@ pub mod open_drt;
 pub mod open_echo;
 pub mod open_eq;
 pub mod open_g;
+pub mod open_ds;
+pub mod open_l;
 pub mod open_mb;
 pub mod open_r;
 pub mod open_sat;
@@ -25,6 +27,8 @@ pub(crate) static REGISTRY: &[&PluginInfo] = &[
     &open_eq::OPEN_EQ_INFO,
     &open_comp::OPEN_COMP_INFO,
     &open_g::OPEN_G_INFO,
+    &open_ds::OPEN_DS_INFO,
+    &open_l::OPEN_L_INFO,
     &open_mb::OPEN_MB_INFO,
     &open_sat::OPEN_SAT_INFO,
     &open_drt::OPEN_DRT_INFO,
@@ -115,6 +119,8 @@ pub(crate) fn instantiate(id: &str) -> Option<Box<dyn Plugin>> {
         "open_comp" => Box::new(open_comp::OpenComp::new()),
         "open_drt" => Box::new(open_drt::OpenDrt::new()),
         "open_g" => Box::new(open_g::OpenG::new()),
+        "open_ds" => Box::new(open_ds::OpenDs::new()),
+        "open_l" => Box::new(open_l::OpenL::new()),
         "open_r" => Box::new(open_r::OpenR::new()),
         "open_echo" => Box::new(open_echo::OpenEcho::new()),
         _ => return None,

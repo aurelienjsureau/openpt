@@ -520,6 +520,10 @@ impl Vst3Editor {
 }
 
 impl PluginEditor for Vst3Editor {
+    fn set_channel(&mut self, channel: &openpt_dsp::ChannelInfo) {
+        self.link.set_channel_context(channel);
+    }
+
     fn open(&mut self) -> Result<(), String> {
         let _ = self.host.take_edits();
         self.link.open(self.info.name)

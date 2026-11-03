@@ -375,6 +375,8 @@ Event > Retrospective Record
 AudioSuite > EQ > OpenEQ
 AudioSuite > Dynamics > OpenComp
 AudioSuite > Dynamics > OpenG
+AudioSuite > Dynamics > OpenDS
+AudioSuite > Dynamics > OpenL
 AudioSuite > Dynamics > OpenMB
 AudioSuite > Pitch Shift > Pitch II
 AudioSuite > Pitch Shift > Pitch Shift Legacy

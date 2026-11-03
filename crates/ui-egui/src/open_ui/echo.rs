@@ -6,8 +6,76 @@ const H: f32 = 470.0;
 const FLOOR: f32 = -48.0;
 const TAPE: Color32 = Color32::from_rgb(236, 206, 84);
 
+#[derive(Default)]
+struct EchoUi {
+    advanced: bool,
+}
+
 pub fn show(ui: &mut Ui, cx: &mut Ctx) {
-    let (body, _) = plate(ui, vec2(W, H), "Echo");
+    let (body, head) = plate(ui, vec2(W, H), "Echo");
+    let adv = with_state::<EchoUi, _>(cx.id, |st| {
+        let b = Rect::from_min_size(pos2(head.max.x - 170.0, head.center().y - 10.0), vec2(90.0, 20.0));
+        if button(ui, b, "ADVANCED", st.advanced, ACCENT).clicked() {
+            st.advanced = !st.advanced;
+        }
+        st.advanced
+    });
+    if adv { advanced(ui, cx, body) } else { simple(ui, cx, body) }
+}
+
+fn simple(ui: &mut Ui, cx: &mut Ctx, body: Rect) {
+    let style = cx.idx("style").min(STYLES.len() - 1);
+    let mode = cx.idx("mode").min(MODES.len() - 1);
+    let top = body.min.y + 10.0;
+    let p = &ui.painter().clone();
+    let mut x = body.min.x + 12.0;
+    p.text(pos2(x, top + 12.0), Align2::LEFT_CENTER, "STYLE", bold(10.0), ACCENT);
+    if let Some(k) = choice(ui, Rect::from_min_size(pos2(x + 44.0, top), vec2(170.0, 24.0)), (cx.id, "style"), STYLES, style) {
+        cx.set("style", k as f32);
+    }
+    x += 240.0;
+    p.text(pos2(x, top + 12.0), Align2::LEFT_CENTER, "MODE", bold(10.0), ACCENT);
+    if let Some(k) = choice(ui, Rect::from_min_size(pos2(x + 40.0, top), vec2(130.0, 24.0)), (cx.id, "mode"), MODES, mode) {
+        cx.set("mode", k as f32);
+    }
+    x += 200.0;
+    let sync = cx.on("sync");
+    if button(ui, Rect::from_min_size(pos2(x, top), vec2(70.0, 24.0)), "SYNC", sync, READOUT).clicked() {
+        cx.set("sync", if sync { 0.0 } else { 1.0 });
+    }
+    let g = Rect::from_min_size(pos2(body.min.x + 12.0, top + 34.0), vec2(W - 24.0, 200.0));
+    echoes(ui, cx, g, mode);
+    let strip = Rect::from_min_max(pos2(body.min.x + 12.0, g.max.y + 10.0), body.max - vec2(12.0, 8.0));
+    p.rect_filled(strip, 3.0, PLATE_HI);
+    let cell = vec2(150.0, strip.height() - 12.0);
+    let n = if mode == DUAL { 5.0 } else { 4.0 };
+    let mut x = strip.center().x - n * cell.x * 0.5;
+    let y = strip.min.y + 6.0;
+    let (tl, tr) = times(cx);
+    let ids: &[(&str, &str, &str, f32)] = if mode == DUAL { &[("time", "note", "Time L", tl), ("time_r", "note_r", "Time R", tr)] } else { &[("time", "note", "Time", tl)] };
+    for &(t_id, n_id, name, ms) in ids {
+        time_knob(ui, cx, Rect::from_min_size(pos2(x, y), cell), t_id, n_id, name, ms);
+        x += cell.x;
+    }
+    for (id, label, color) in [("feedback", "Feedback", ACCENT), ("high_cut", "High Cut", TAPE), ("mix", "Mix", READOUT)] {
+        knob(ui, cx, Rect::from_min_size(pos2(x, y), cell), id, label, color);
+        x += cell.x;
+    }
+}
+
+fn time_knob(ui: &mut Ui, cx: &mut Ctx, r: Rect, t_id: &str, n_id: &str, name: &str, ms: f32) {
+    let sync = cx.on("sync");
+    let id = if sync { n_id } else { t_id };
+    let Some(prm) = cx.param(id) else { return };
+    let v = cx.get(id);
+    let text = |v: f32| if sync { NOTES[(v.round().max(0.0) as usize).min(NOTES.len() - 1)].to_string() } else { time_text(v) };
+    knob_with(ui, cx, r, prm, v, name, ACCENT, &text);
+    if sync {
+        ui.painter().text(pos2(r.center().x, r.max.y - 2.0), Align2::CENTER_BOTTOM, time_text(ms), regular(9.0), DIM);
+    }
+}
+
+fn advanced(ui: &mut Ui, cx: &mut Ctx, body: Rect) {
     let style = cx.idx("style").min(STYLES.len() - 1);
     let mode = cx.idx("mode").min(MODES.len() - 1);
     let top = body.min.y + 10.0;

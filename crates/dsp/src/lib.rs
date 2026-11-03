@@ -242,6 +242,7 @@ pub trait PluginEditor: Send {
     fn idle(&mut self) -> Vec<(String, f32)>;
     fn set_param(&mut self, _id: &str, _value: f32) {}
     fn set_header(&mut self, _header: &EditorHeader) {}
+    fn set_channel(&mut self, _channel: &ChannelInfo) {}
     fn header_actions(&mut self) -> Vec<HeaderAction> {
         Vec::new()
     }

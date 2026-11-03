@@ -23,6 +23,7 @@ pub mod panels;
 pub mod peripherals;
 pub mod plugin_ui;
 pub mod preferences;
+pub mod progress;
 pub mod prof;
 mod recent;
 pub mod recovery;
@@ -450,6 +451,7 @@ pub struct SoundApp {
     pub(crate) rt_bounce: Option<bounce::RealtimeBounce>,
     pub(crate) live_commit: Option<bounce::LiveCommit>,
     pub(crate) ara_selection: Option<Vec<openpt_model::ClipId>>,
+    pub(crate) plugin_load: Option<openpt_playback::LoadProgress>,
     #[cfg(test)]
     _palette_lock: theme::TestPaletteGuard,
 }
@@ -548,6 +550,7 @@ impl SoundApp {
             rt_bounce: None,
             live_commit: None,
             ara_selection: None,
+            plugin_load: None,
             #[cfg(test)]
             _palette_lock: theme::lock_test_palette(),
         }
@@ -630,7 +633,7 @@ impl SoundApp {
     }
 
     pub(crate) fn modal_open(&self) -> bool {
-        self.dialogs.open.is_some() || self.ui.show_dashboard || self.ui.show_preferences || self.import_job.is_some()
+        self.dialogs.open.is_some() || self.ui.show_dashboard || self.ui.show_preferences || self.import_job.is_some() || self.plugin_load.is_some()
     }
 
     pub fn position(&self) -> Samples {
@@ -1156,7 +1159,7 @@ impl SoundApp {
         self.recorder_failed = false;
         self.player = None;
         openpt_playback::devices::release_asio();
-        let player = openpt_playback::Player::with_config(self.engine.session_arc(), &self.ui.audio);
+        let player = openpt_playback::Player::with_config_queued(self.engine.session_arc(), &self.ui.audio);
         player.locate(at);
         self.player = Some(player);
         self.sync_midi_devices();
@@ -1266,7 +1269,7 @@ impl SoundApp {
         self.recorder_failed = false;
         self.player = None;
         openpt_playback::devices::release_asio();
-        self.player = Some(Player::with_config(self.engine.session_arc(), &self.ui.audio));
+        self.player = Some(Player::with_config_queued(self.engine.session_arc(), &self.ui.audio));
         self.sync_midi_devices();
     }
 
@@ -1673,9 +1676,11 @@ impl SoundApp {
         if self.engine.revision != self.last_rev {
             self.last_rev = self.engine.revision;
             if let Some(p) = &self.player {
-                p.update_session(self.engine.session_arc());
+                p.queue_session(self.engine.session_arc());
             }
         }
+        self.plugin_load = self.player.as_ref().and_then(|p| p.pump_session(std::time::Duration::from_millis(40)));
+        progress::plugin_load(self, ctx);
         self.autosave_changes();
         self.write_automation(ctx);
         self.autosave();

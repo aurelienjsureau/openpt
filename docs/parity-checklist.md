@@ -55,6 +55,8 @@ UI-layer commands (windows, AudioSuite) are counted by the app's own report (`en
 - AudioSuite > EQ > OpenEQ
 - AudioSuite > Dynamics > OpenComp
 - AudioSuite > Dynamics > OpenG
+- AudioSuite > Dynamics > OpenDS
+- AudioSuite > Dynamics > OpenL
 - AudioSuite > Dynamics > OpenMB
 - AudioSuite > Pitch Shift > Pitch II
 - AudioSuite > Pitch Shift > Pitch Shift Legacy

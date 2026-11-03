@@ -17,7 +17,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Package
         env:
-          OPENPT_LABEL: 0.6.10-alpha
+          OPENPT_LABEL: 0.7.0-alpha
         run: packaging/macos/package.sh
       - uses: actions/upload-artifact@v4
         with:
