@@ -207,6 +207,16 @@ impl EditState {
     pub fn flag(&self, id: &str) -> bool {
         self.flags.contains(id)
     }
+    pub fn is_object(&self, track: TrackId) -> bool {
+        use std::io::Write as _;
+        let mut key = [0u8; 32];
+        let mut rest = &mut key[..];
+        if write!(rest, "object.{}", track.0).is_err() {
+            return false;
+        }
+        let used = 32 - rest.len();
+        std::str::from_utf8(&key[..used]).is_ok_and(|id| self.flags.contains(id))
+    }
     pub fn set_flag(&mut self, id: &str, on: bool) {
         if on {
             self.flags.insert(id.to_string());

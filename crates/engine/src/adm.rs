@@ -1,11 +1,16 @@
 use crate::{Engine, Result};
-use openpt_model::{ChannelFormat, Route, Session, Speaker, SurroundPan, TrackId};
+use openpt_model::{BinauralDistance, ChannelFormat, Route, Session, Speaker, SurroundPan, TrackId};
 use openpt_time::{Range, Samples};
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 
 const META_STEP: Samples = 1024;
 const MAX_CHANNELS: usize = 128;
+const DBMD_VERSION: u32 = 0x0100_0006;
+const DBMD_SUPPLEMENTAL_SEGMENT: u8 = 10;
+const DBMD_SYNC: u32 = 0xF872_6FBD;
+const DBMD_TRIM_CONFIGS: usize = 9;
+const DBMD_HEAD_TRACK_DEFAULT: u8 = 0x80;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectBlock {
@@ -18,6 +23,7 @@ pub struct ObjectBlock {
 pub struct AdmObject {
     pub name: String,
     pub blocks: Vec<ObjectBlock>,
+    pub binaural: BinauralDistance,
 }
 
 pub fn is_object(s: &Session, t: TrackId) -> bool {
@@ -205,7 +211,44 @@ pub fn chna(bed: ChannelFormat, objects: usize) -> Vec<u8> {
     v
 }
 
-pub fn wav(rate: u32, channels: &[Vec<f32>], chna: &[u8], axml: &str) -> Vec<u8> {
+fn binaural_code(d: BinauralDistance) -> u8 {
+    match d {
+        BinauralDistance::Off => 0,
+        BinauralDistance::Near => 1,
+        BinauralDistance::Far => 2,
+        BinauralDistance::Mid => 3,
+    }
+}
+
+pub fn binaural_modes(s: &Session, bed: ChannelFormat, objects: &[AdmObject]) -> Vec<BinauralDistance> {
+    let beds = bed.speakers().iter().enumerate().map(|(c, sp)| if sp.is_lfe() { BinauralDistance::Off } else { s.atmos.binaural_distance.get(c).copied().unwrap_or_default() });
+    beds.chain(objects.iter().map(|o| o.binaural)).collect()
+}
+
+pub fn dbmd(modes: &[BinauralDistance]) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(142 + 2 * modes.len());
+    payload.extend_from_slice(&DBMD_SYNC.to_le_bytes());
+    payload.extend_from_slice(&u16::try_from(modes.len()).unwrap_or(u16::MAX).to_le_bytes());
+    payload.push(0);
+    for _ in 0..DBMD_TRIM_CONFIGS {
+        payload.push(1);
+        payload.extend_from_slice(&[0; 14]);
+    }
+    payload.resize(payload.len() + modes.len(), 0);
+    payload.extend(modes.iter().map(|m| DBMD_HEAD_TRACK_DEFAULT | binaural_code(*m)));
+    let size = u16::try_from(payload.len()).unwrap_or(u16::MAX);
+    let sum = payload.iter().fold(size as u8, |sum, b| sum.wrapping_add(*b));
+    let mut out = Vec::with_capacity(payload.len() + 9);
+    out.extend_from_slice(&DBMD_VERSION.to_le_bytes());
+    out.push(DBMD_SUPPLEMENTAL_SEGMENT);
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&payload);
+    out.push(sum.wrapping_neg());
+    out.push(0);
+    out
+}
+
+pub fn wav(rate: u32, channels: &[Vec<f32>], chna: &[u8], axml: &str, dbmd: &[u8]) -> Vec<u8> {
     let nch = channels.len();
     let frames = channels.iter().map(Vec::len).max().unwrap_or(0);
     let data_len = frames * nch * 3;
@@ -232,12 +275,13 @@ pub fn wav(rate: u32, channels: &[Vec<f32>], chna: &[u8], axml: &str) -> Vec<u8>
             data.extend_from_slice(&q.to_le_bytes()[..3]);
         }
     }
-    let mut body = Vec::with_capacity(data_len + axml.len() + chna.len() + 64);
+    let mut body = Vec::with_capacity(data_len + axml.len() + chna.len() + dbmd.len() + 64);
     body.extend_from_slice(b"WAVE");
     chunk(b"fmt ", &fmt, &mut body);
     chunk(b"chna", chna, &mut body);
     chunk(b"data", &data, &mut body);
     chunk(b"axml", axml.as_bytes(), &mut body);
+    chunk(b"dbmd", dbmd, &mut body);
     let mut out = Vec::with_capacity(body.len() + 8);
     out.extend_from_slice(b"RIFF");
     out.extend_from_slice(&u32::try_from(body.len()).unwrap_or(u32::MAX).to_le_bytes());
@@ -267,7 +311,7 @@ pub fn export(e: &mut Engine, p: &Value) -> Result<Value> {
     for t in &objects {
         let mut solo = s.clone();
         let Some(track) = solo.track(*t) else { continue };
-        let (name, width) = (track.name.clone(), track.channels().clamp(1, 2));
+        let (name, width, binaural) = (track.name.clone(), track.channels().clamp(1, 2), track.mixer.binaural_distance);
         let bus = solo.add_bus(&format!("ADM object {}", t.0), ChannelFormat::for_channels(width));
         if let Some(tr) = solo.track_mut(*t) {
             tr.mixer.output = Route::Bus(bus);
@@ -279,11 +323,11 @@ pub fn export(e: &mut Engine, p: &Value) -> Result<Value> {
                 let shift = if side == 0 { -0.5 } else { 0.5 };
                 let blocks = blocks.iter().map(|b| ObjectBlock { pan: SurroundPan { x: (b.pan.x + shift).clamp(-1.0, 1.0), ..b.pan }, ..b.clone() }).collect();
                 channels.push(ch);
-                meta.push(AdmObject { name: format!("{name} {}", if side == 0 { "L" } else { "R" }), blocks });
+                meta.push(AdmObject { name: format!("{name} {}", if side == 0 { "L" } else { "R" }), blocks, binaural });
             }
         } else if let Some(ch) = audio.into_iter().next() {
             channels.push(ch);
-            meta.push(AdmObject { name, blocks });
+            meta.push(AdmObject { name, blocks, binaural });
         }
     }
     if channels.len() > MAX_CHANNELS {
@@ -292,7 +336,7 @@ pub fn export(e: &mut Engine, p: &Value) -> Result<Value> {
     let rate = s.sample_rate.hz();
     let length = range.len();
     let xml = axml(&s.name, rate, bed, &meta, length);
-    let bytes = wav(rate, &channels, &chna(bed, meta.len()), &xml);
+    let bytes = wav(rate, &channels, &chna(bed, meta.len()), &xml, &dbmd(&binaural_modes(&s, bed, &meta)));
     crate::io::write_file(&path, &bytes)?;
     let warn = (![48_000, 96_000].contains(&rate)).then(|| format!("Dolby Atmos masters are 48 or 96 kHz; this session runs at {rate} Hz"));
     Ok(json!({"path": path, "bed": bed.label(), "objects": meta.len(), "channels": channels.len(), "warning": warn}))
@@ -320,13 +364,45 @@ mod tests {
         let row = |i: usize| String::from_utf8_lossy(&c[4 + 40 * i + 2..4 + 40 * i + 39]).to_string();
         assert_eq!(row(0), "ATU_00000001AT_00011001_01AP_00011001");
         assert_eq!(row(13), "ATU_0000000EAT_00031002_01AP_00031002");
-        let x = axml("t", 48_000, ChannelFormat::Atmos714, &[AdmObject { name: "a".into(), blocks: vec![] }, AdmObject { name: "b".into(), blocks: vec![] }], 48_000);
+        let x = axml("t", 48_000, ChannelFormat::Atmos714, &[AdmObject { name: "a".into(), blocks: vec![], binaural: BinauralDistance::Mid }, AdmObject { name: "b".into(), blocks: vec![], binaural: BinauralDistance::Mid }], 48_000);
         for i in 0..14 {
             let r = row(i);
             assert!(x.contains(&format!("UID=\"{}\"", &r[..12])), "{r}");
             assert!(x.contains(&format!("audioTrackFormatID=\"{}\"", &r[12..26])), "{r}");
             assert!(x.contains(&format!("audioPackFormatID=\"{}\"", &r[26..])), "{r}");
         }
+    }
+
+    #[test]
+    fn the_dbmd_chunk_carries_one_binaural_mode_per_track() {
+        let modes = [BinauralDistance::Off, BinauralDistance::Near, BinauralDistance::Far, BinauralDistance::Mid];
+        let d = dbmd(&modes);
+        assert_eq!(u32::from_le_bytes([d[0], d[1], d[2], d[3]]), 0x0100_0006);
+        assert_eq!(d[4], 10);
+        let size = usize::from(u16::from_le_bytes([d[5], d[6]]));
+        let payload = &d[7..7 + size];
+        assert_eq!(u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]), 0xF872_6FBD);
+        assert_eq!(u16::from_le_bytes([payload[4], payload[5]]), 4);
+        let sum = payload.iter().fold(size as u8, |s, b| s.wrapping_add(*b));
+        assert_eq!(sum.wrapping_add(d[7 + size]), 0, "two's complement checksum");
+        assert_eq!(d[8 + size], 0, "segment list terminator");
+        assert_eq!(d.len(), 9 + size);
+        let headphone = &payload[size - 4..];
+        assert_eq!(headphone.iter().map(|b| b & 7).collect::<Vec<_>>(), vec![0, 1, 2, 3]);
+        assert!(payload[7..142].chunks(15).all(|cfg| cfg[0] == 1 && cfg[1..].iter().all(|b| *b == 0)), "automatic trims");
+    }
+
+    #[test]
+    fn a_session_writes_lfe_off_then_bed_then_objects() {
+        let mut s = Session::default();
+        s.atmos.binaural_distance = [BinauralDistance::Far; openpt_model::BINAURAL_CHANNELS];
+        let o = AdmObject { name: "o".into(), blocks: vec![], binaural: BinauralDistance::Near };
+        let modes = binaural_modes(&s, ChannelFormat::Atmos714, &[o]);
+        assert_eq!(modes.len(), 13);
+        let lfe = ChannelFormat::Atmos714.speakers().iter().position(|sp| sp.is_lfe()).unwrap();
+        assert_eq!(modes[lfe], BinauralDistance::Off);
+        assert_eq!(modes[0], BinauralDistance::Far);
+        assert_eq!(modes[12], BinauralDistance::Near);
     }
 }
 
@@ -355,6 +431,10 @@ mod export_tests {
             ids.push(t);
         }
         e.execute("track.object", &json!({"tracks": [ids[1].0, ids[2].0], "object": true})).unwrap();
+        e.execute("track.binaural_distance", &json!({"tracks": [ids[1].0], "distance": "near"})).unwrap();
+        e.execute("track.binaural_distance", &json!({"tracks": [ids[2].0], "distance": "far"})).unwrap();
+        e.execute("setup.atmos", &json!({"binaural_distance": "off", "channel": 0})).unwrap();
+        assert!(e.execute("track.binaural_distance", &json!({"tracks": [ids[1].0], "distance": "nope"})).is_err());
         e.execute("mix.surround_pan", &json!({"track": ids[1].0, "x": -1.0, "y": 1.0})).unwrap();
         for (at, x) in [(0, -1.0), (n as i64, 1.0)] {
             e.execute("automation.set_point", &json!({"track": ids[1].0, "param": "surround_x", "at": at, "value": x})).unwrap();
@@ -370,6 +450,15 @@ mod export_tests {
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.matches("<audioBlockFormat audioBlockFormatID=\"AB_00031001_").count() > 10, "the moving object gets many blocks");
         assert_eq!(text.matches("<audioBlockFormat audioBlockFormatID=\"AB_00031002_").count(), 1, "a still object gets one");
+        let at = bytes.windows(4).position(|w| w == b"dbmd").unwrap();
+        let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]) as usize;
+        assert_eq!(at + 8 + size + size % 2, bytes.len(), "dbmd is the last chunk");
+        let end = at + 8 + size - 2;
+        let modes: Vec<u8> = bytes[end - 15..end].iter().map(|b| b & 7).collect();
+        assert_eq!(modes[0], 0, "channel 0 set to off");
+        assert_eq!(modes[3], 0, "the LFE is off");
+        assert_eq!(modes[11], 3, "an untouched bed channel stays on mid");
+        assert_eq!(&modes[12..], &[1, 2, 2], "fly is near, both sides of keys are far");
         if let Some(out) = std::env::var_os("OPENPT_ADM_OUT") {
             std::fs::copy(&path, out).unwrap();
         }

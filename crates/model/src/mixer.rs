@@ -414,6 +414,44 @@ impl AtmosMonitor {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BinauralDistance {
+    Off,
+    Near,
+    #[default]
+    Mid,
+    Far,
+}
+
+impl BinauralDistance {
+    pub const ALL: [BinauralDistance; 4] = [BinauralDistance::Off, BinauralDistance::Near, BinauralDistance::Mid, BinauralDistance::Far];
+    pub fn label(self) -> &'static str {
+        match self {
+            BinauralDistance::Off => "Off",
+            BinauralDistance::Near => "Near",
+            BinauralDistance::Mid => "Mid",
+            BinauralDistance::Far => "Far",
+        }
+    }
+    pub fn id(self) -> &'static str {
+        match self {
+            BinauralDistance::Off => "off",
+            BinauralDistance::Near => "near",
+            BinauralDistance::Mid => "mid",
+            BinauralDistance::Far => "far",
+        }
+    }
+    pub fn from_id(s: &str) -> Option<BinauralDistance> {
+        BinauralDistance::ALL.into_iter().find(|m| m.id().eq_ignore_ascii_case(s.trim()))
+    }
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+pub const BINAURAL_CHANNELS: usize = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct AtmosSettings {
@@ -421,11 +459,18 @@ pub struct AtmosSettings {
     pub surround_trim_db: f32,
     pub height_trim_db: f32,
     pub binaural_gain_db: f32,
+    pub binaural_distance: [BinauralDistance; BINAURAL_CHANNELS],
 }
 
 impl Default for AtmosSettings {
     fn default() -> Self {
-        AtmosSettings { monitor: AtmosMonitor::Speakers, surround_trim_db: -3.0, height_trim_db: -3.0, binaural_gain_db: 0.0 }
+        AtmosSettings {
+            monitor: AtmosMonitor::Speakers,
+            surround_trim_db: -3.0,
+            height_trim_db: -3.0,
+            binaural_gain_db: 0.0,
+            binaural_distance: [BinauralDistance::Mid; BINAURAL_CHANNELS],
+        }
     }
 }
 
@@ -602,6 +647,8 @@ pub struct Mixer {
     pub vca_group: Option<GroupId>,
     #[serde(default)]
     pub surround: Option<SurroundPan>,
+    #[serde(default)]
+    pub binaural_distance: BinauralDistance,
 }
 
 impl Mixer {
@@ -632,6 +679,7 @@ impl Mixer {
             vca: None,
             vca_group: None,
             surround: None,
+            binaural_distance: BinauralDistance::Mid,
         }
     }
 

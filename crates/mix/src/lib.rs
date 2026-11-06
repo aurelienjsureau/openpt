@@ -1,6 +1,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod hrir_kemar;
+pub mod hrtf;
 pub mod monitor;
 mod multi_mono;
 
@@ -432,6 +433,10 @@ pub struct MixEngine {
     pdc: bool,
     arrive: HashMap<BusId, usize>,
     main_arrive: usize,
+    master_latency: usize,
+    pub split_objects: bool,
+    pub object_feeds: [Vec<Vec<f32>>; 4],
+    object_delay: [DelayLine; 4],
     aux_out: HashMap<TrackId, usize>,
     taps: Vec<TrackId>,
     pub input: Vec<Vec<f32>>,
@@ -521,6 +526,10 @@ impl MixEngine {
             pdc: false,
             arrive: HashMap::new(),
             main_arrive: 0,
+            master_latency: 0,
+            split_objects: false,
+            object_feeds: std::array::from_fn(|_| Vec::new()),
+            object_delay: Default::default(),
             aux_out: HashMap::new(),
             taps: Vec::new(),
             input: Vec::new(),
@@ -753,6 +762,17 @@ impl MixEngine {
         for c in &mut self.main {
             c.iter_mut().take(frames).for_each(|x| *x = 0.0);
         }
+        if self.split_objects {
+            let (ch, mb) = (self.main.len(), self.max_block);
+            for feed in &mut self.object_feeds {
+                if feed.len() != ch {
+                    *feed = vec![vec![0.0; mb]; ch];
+                }
+                for c in feed.iter_mut() {
+                    c.iter_mut().take(frames).for_each(|x| *x = 0.0);
+                }
+            }
+        }
         self.solo = match (any_solo(s), if self.metronome { s.edit.solo_listen() } else { "sip" }) {
             (false, _) => Solo::None,
             (true, "afl") => Solo::Afl,
@@ -912,6 +932,7 @@ impl MixEngine {
             }
         }
         self.main_arrive = main_at;
+        self.master_latency = lmax_m;
         self.latency = main_at + lmax_m;
         let align = |t: &Track, st: &mut Strip| {
             let ch = st.buf.len();
@@ -929,7 +950,7 @@ impl MixEngine {
         for (i, st) in work.iter_mut().take(n_free) {
             if let Some(t) = s.tracks.get(*i) {
                 align(t, st);
-                self.route_strip(t, st, pos, frames);
+                self.route_strip(s, t, st, pos, frames);
                 let d = extra_delay(t, st);
                 self.route_extras(t, st, d, frames);
             }
@@ -947,7 +968,7 @@ impl MixEngine {
             let law = self.pan_law;
             feed_keys(t, st, &mut self.keys, &self.key_latency, pos, frames, law);
             align(t, st);
-            self.route_strip(t, st, pos, frames);
+            self.route_strip(s, t, st, pos, frames);
             let d = extra_delay(t, st);
             self.route_extras(t, st, d, frames);
         }
@@ -993,7 +1014,7 @@ impl MixEngine {
                 let ch = st.buf.len();
                 st.align.set(0, ch);
                 st.align_pre.set(0, ch);
-                self.route_strip(t, &mut st, pos, frames);
+                self.route_strip(s, t, &mut st, pos, frames);
                 self.strips.insert(t.id, st);
             }
         }
@@ -1006,6 +1027,15 @@ impl MixEngine {
             if let Some(strip) = self.strips.get_mut(&t.id) {
                 let v0 = volume_db_at(t, pos);
                 let v1 = volume_db_at(t, pos + frames as i64);
+                if self.split_objects {
+                    for c in self.object_feeds.iter_mut().flatten() {
+                        if let Some(c) = c.get_mut(..frames) {
+                            for (i, x) in c.iter_mut().enumerate() {
+                                *x *= lerp_gain(v0, v1, i, frames);
+                            }
+                        }
+                    }
+                }
                 for (dst, src) in strip.buf.iter_mut().zip(self.main.iter()) {
                     if let (Some(d), Some(sr)) = (dst.get_mut(..frames), src.get(..frames)) {
                         for (i, (d, x)) in d.iter_mut().zip(sr).enumerate() {
@@ -1052,6 +1082,18 @@ impl MixEngine {
                 if let (Some(d), Some(x)) = (m.get_mut(..frames), b.get(..frames)) {
                     d.copy_from_slice(x);
                 }
+            }
+        }
+        if self.split_objects {
+            let (latency, ch, listening) = (self.master_latency, self.main.len(), self.solo.listens());
+            for (feed, line) in self.object_feeds.iter_mut().zip(self.object_delay.iter_mut()) {
+                if listening {
+                    for c in feed.iter_mut() {
+                        c.iter_mut().take(frames).for_each(|x| *x = 0.0);
+                    }
+                }
+                line.set(latency, ch);
+                line.process(feed, frames);
             }
         }
         if self.metronome && !self.monitor_only && s.edit.click && (!s.edit.flag("click.only_during_record") || self.recording) {
@@ -1192,7 +1234,7 @@ impl MixEngine {
         }
     }
 
-    fn route_strip(&mut self, t: &Track, strip: &mut Strip, pos: Samples, frames: usize) {
+    fn route_strip(&mut self, s: &Session, t: &Track, strip: &mut Strip, pos: Samples, frames: usize) {
         let out_wait = self.wait_for(t, &t.mixer.output);
         let m = self.meters.entry(t.id).or_default();
         m.measure(&strip.buf, frames, strip.gr);
@@ -1300,6 +1342,21 @@ impl MixEngine {
             let m = build_matrix(src_fmt, src.len(), dst_fmt, dst.len(), &spec, law);
             apply_matrix_span(src, start..end, dst, &m, 1.0);
             start = end;
+        }
+        if self.split_objects
+            && t.mixer.output == Route::Main
+            && s.edit.is_object(t.id)
+            && let Some(feed) = self.object_feeds.get_mut(t.mixer.binaural_distance.index())
+        {
+            let mut start = 0;
+            while start < frames {
+                let (at, end) = pan_segment(t, pos, start, frames);
+                let sp = surround_at(t, at);
+                let spec = PanSpec { stereo: [pan_at(t, 0, at), pan_at(t, 1, at)], surround: sp.as_ref() };
+                let m = build_matrix(src_fmt, src.len(), self.main_fmt, feed.len(), &spec, law);
+                apply_matrix_span(src, start..end, feed, &m, 1.0);
+                start = end;
+            }
         }
     }
 }
@@ -2385,25 +2442,25 @@ pub enum AraRequest {
 }
 
 pub fn ara_select_clips(clips: &[openpt_model::ClipId]) {
-    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     openpt_vst3_host::ara_select_clips(&clips.iter().map(|c| c.0).collect::<Vec<_>>());
-    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     let _ = clips;
 }
 
 pub fn ara_bindings() -> Vec<(TrackId, String)> {
-    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
         openpt_vst3_host::ara_bindings().into_iter().map(|(t, n)| (TrackId(t), n)).collect()
     }
-    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         Vec::new()
     }
 }
 
 pub fn ara_requests() -> Vec<AraRequest> {
-    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
         use openpt_vst3_host::PlaybackRequest as P;
         openpt_vst3_host::ara_playback_requests()
@@ -2417,14 +2474,14 @@ pub fn ara_requests() -> Vec<AraRequest> {
             })
             .collect()
     }
-    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         Vec::new()
     }
 }
 
 pub fn ara_follow(s: &Session, seen: &mut std::collections::HashMap<u64, u64>) {
-    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     for t in openpt_vst3_host::ara_bound_tracks() {
         let Some(at) = ara_track(s, TrackId(t)) else { continue };
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2436,9 +2493,9 @@ pub fn ara_follow(s: &Session, seen: &mut std::collections::HashMap<u64, u64>) {
             openpt_vst3_host::ara_sync_track(&at);
         }
     }
-    #[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     openpt_vst3_host::ara_finish_restores();
-    #[cfg(not(all(not(target_arch = "wasm32"), target_arch = "x86_64")))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     let _ = (s, seen);
 }
 

@@ -222,7 +222,99 @@ fn monitor_controls(app: &mut SoundApp, ui: &mut egui::Ui) {
         if ui.add(egui::Slider::new(&mut g, -24.0..=12.0).text("Headphone level").suffix(" dB")).changed() {
             set_atmos(app, json!({"binaural_gain_db": g}));
         }
+        binaural_controls(app, ui, a, fmt);
     }
+}
+
+fn distance_menu(ui: &mut egui::Ui, id: String, shown: &str) -> Option<openpt_model::BinauralDistance> {
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(id).width(70.0).selected_text(shown).show_ui(ui, |ui| {
+        for d in openpt_model::BinauralDistance::ALL {
+            if ui.selectable_label(shown == d.label(), d.label()).clicked() {
+                chosen = Some(d);
+            }
+        }
+    });
+    chosen
+}
+
+fn binaural_controls(app: &mut SoundApp, ui: &mut egui::Ui, a: openpt_model::AtmosSettings, fmt: openpt_model::ChannelFormat) {
+    let speakers = fmt.speakers();
+    let used: Vec<_> = speakers.iter().enumerate().filter(|(_, s)| !s.is_lfe()).filter_map(|(c, _)| a.binaural_distance.get(c).copied()).collect();
+    let shown = match used.first() {
+        Some(first) if used.iter().all(|d| d == first) => first.label(),
+        _ => "Mixed",
+    };
+    ui.horizontal(|ui| {
+        ui.label("Bed distance");
+        if let Some(d) = distance_menu(ui, "binaural_distance_all".to_string(), shown) {
+            set_atmos(app, json!({"binaural_distance": d.id()}));
+        }
+    });
+    let session = app.engine.session();
+    let objects: Vec<(u64, String, openpt_model::BinauralDistance, bool)> = session
+        .tracks
+        .iter()
+        .filter(|tr| tr.kind != TrackKind::Master && session.edit.is_object(tr.id))
+        .map(|tr| (tr.id.0, tr.name.clone(), tr.mixer.binaural_distance, tr.mixer.output == openpt_model::Route::Main))
+        .collect();
+    if !objects.is_empty() {
+        egui::CollapsingHeader::new("Distance per object").id_salt("binaural_distance_objects").default_open(true).show(ui, |ui| {
+            egui::Grid::new("binaural_distance_objects_grid").num_columns(2).spacing(vec2(6.0, 3.0)).show(ui, |ui| {
+                for (id, name, current, _) in &objects {
+                    ui.label(name);
+                    if let Some(d) = distance_menu(ui, format!("binaural_distance_object_{id}"), current.label()) {
+                        let _ = app.run("track.binaural_distance", json!({"tracks": [id], "distance": d.id()}));
+                    }
+                    ui.end_row();
+                }
+            });
+            if objects.iter().any(|(_, _, _, direct)| !direct) {
+                ui.weak("Objects routed through a bus are heard at the bed distance.");
+            }
+        });
+    }
+    ui.weak("Saved in ADM masters as metadata. The room is never in the exported audio.");
+    egui::CollapsingHeader::new("Distance per bed channel").id_salt("binaural_distance_channels").show(ui, |ui| {
+        egui::Grid::new("binaural_distance_grid").num_columns(4).spacing(vec2(6.0, 3.0)).show(ui, |ui| {
+            let mut column = 0;
+            for (c, sp) in speakers.iter().enumerate() {
+                if sp.is_lfe() {
+                    continue;
+                }
+                let current = a.binaural_distance.get(c).copied().unwrap_or_default();
+                ui.label(sp.label());
+                if let Some(d) = distance_menu(ui, format!("binaural_distance_{c}"), current.label()) {
+                    set_atmos(app, json!({"binaural_distance": d.id(), "channel": c}));
+                }
+                column += 1;
+                if column % 2 == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+    });
+    let profile = openpt_mix::hrtf::current().name.clone();
+    ui.horizontal(|ui| {
+        ui.label("Headphone profile");
+        ui.label(egui::RichText::new(profile).color(Tokens::current().text));
+        if ui.button("Load SOFA…").on_hover_text("Use your own HRTF measurement (AES69 .sofa file)").clicked()
+            && let Some(pick) = &app.services.pick_open
+            && let Some(path) = pick("renderer.hrtf", &["sofa"])
+        {
+            match openpt_mix::hrtf::load_sofa(std::path::Path::new(&path)) {
+                Ok(name) => {
+                    app.ui.hrtf_sofa = path;
+                    app.ui.status = format!("Headphone profile: {name}");
+                }
+                Err(e) => app.ui.status = format!("Could not read this SOFA file: {e}"),
+            }
+        }
+        if !app.ui.hrtf_sofa.is_empty() && ui.button("Use KEMAR").clicked() {
+            openpt_mix::hrtf::use_kemar();
+            app.ui.hrtf_sofa.clear();
+        }
+    });
 }
 
 fn export_adm(app: &mut SoundApp) {

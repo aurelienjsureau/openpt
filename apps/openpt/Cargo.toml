@@ -25,6 +25,7 @@ log.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd.workspace = true
 openpt-vst3-host.workspace = true
+openpt-mix.workspace = true
 
 [build-dependencies]
 winresource = "0.1"

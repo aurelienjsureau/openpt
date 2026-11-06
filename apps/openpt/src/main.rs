@@ -177,6 +177,7 @@ fn services() -> Services {
                     .add_filter("OpenPT Session", &["openpt"])
                     .add_filter("Pro Tools Session", &["ptx", "ptxt"]),
                 "file.import_midi" => d.add_filter("MIDI", &["mid", "midi", "smf"]),
+                "renderer.hrtf" => d.add_filter("SOFA HRTF", &["sofa"]),
                 _ => d.add_filter(
                     "Audio",
                     &["wav", "wave", "bwf", "aif", "aiff", "aifc", "flac", "mp3", "ogg", "oga", "m4a", "m4b", "aac", "mp4", "caf", "mkv", "webm"],
@@ -291,6 +292,11 @@ fn main() -> eframe::Result {
         openpt_vst3_host::set_search_dirs(prefs.vst3_folders.iter().map(std::path::PathBuf::from).collect());
         openpt_vst3_host::scan_in_background();
         openpt_vst3_host::presets::index_in_background();
+        if !prefs.hrtf_sofa.is_empty()
+            && let Err(e) = openpt_mix::hrtf::load_sofa(std::path::Path::new(&prefs.hrtf_sofa))
+        {
+            log::warn!("headphone profile {}: {e}", prefs.hrtf_sofa);
+        }
     }
     let engine = if demo { openpt_engine::demo::demo_engine() } else { Engine::default() };
     let mut options = eframe::NativeOptions {

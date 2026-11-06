@@ -17,7 +17,7 @@ pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use learn::{LearnSource, LearnTarget, MidiLearn};
 pub use markers::{Group, MarkerKind, MemoryLocation};
 pub use mixer::{
-    AtmosMonitor, AtmosSettings, Bus, ChannelFormat, HeatSettings, INSERT_SLOTS, InputPath, Insert, MULTI_MONO_PREFIX, MULTI_OUT_PREFIX, Mixer, OutputPath, Route, SEND_SLOTS,
+    AtmosMonitor, AtmosSettings, BINAURAL_CHANNELS, BinauralDistance, Bus,ChannelFormat, HeatSettings, INSERT_SLOTS, InputPath, Insert, MULTI_MONO_PREFIX, MULTI_OUT_PREFIX, Mixer, OutputPath, Route, SEND_SLOTS,
     SendSlot, Speaker, SurroundPan, default_inputs, fader_db_to_pos, fader_pos_to_db,
 };
 pub use session::{

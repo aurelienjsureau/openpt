@@ -36,7 +36,8 @@ pub const kARAChannelArrangementAAXStemFormat: _bindgen_ty_1 = 3;
 pub const kARAChannelArrangementCLAPChannelMap: _bindgen_ty_1 = 4;
 pub const kARAChannelArrangementCLAPAmbisonicInfo: _bindgen_ty_1 = 5;
 pub type _bindgen_ty_1 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAColor {
     pub r: f32,
@@ -61,7 +62,8 @@ pub type _bindgen_ty_3 = ::core::ffi::c_int;
 pub type ARAAssertFunction = ::core::option::Option<
     unsafe extern "C" fn(category: ARAAssertCategory, problematicArgument: *const ::core::ffi::c_void, diagnosis: *const ::core::ffi::c_char),
 >;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARADocumentProperties {
     pub structSize: ARASize,
@@ -81,7 +83,8 @@ pub struct ARAMusicalContextHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAMusicalContextHostRef = *mut ARAMusicalContextHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAMusicalContextProperties {
     pub structSize: ARASize,
@@ -103,7 +106,8 @@ pub struct ARARegionSequenceHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARARegionSequenceHostRef = *mut ARARegionSequenceHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARARegionSequenceProperties {
     pub structSize: ARASize,
@@ -126,7 +130,8 @@ pub struct ARAAudioSourceHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAAudioSourceHostRef = *mut ARAAudioSourceHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAAudioSourceProperties {
     pub structSize: ARASize,
@@ -153,7 +158,8 @@ pub struct ARAAudioModificationHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAAudioModificationHostRef = *mut ARAAudioModificationHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAAudioModificationProperties {
     pub structSize: ARASize,
@@ -182,7 +188,8 @@ pub const kARAPlaybackTransformationContentBasedFadeAtTail: _bindgen_ty_9 = 4;
 pub const kARAPlaybackTransformationContentBasedFadeAtHead: _bindgen_ty_9 = 8;
 pub const kARAPlaybackTransformationContentBasedFades: _bindgen_ty_9 = 12;
 pub type _bindgen_ty_9 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAPlaybackRegionProperties {
     pub structSize: ARASize,
@@ -226,7 +233,8 @@ pub const kARAContentTypeStaticTuning: _bindgen_ty_12 = 31;
 pub const kARAContentTypeKeySignatures: _bindgen_ty_12 = 42;
 pub const kARAContentTypeSheetChords: _bindgen_ty_12 = 45;
 pub type _bindgen_ty_12 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentTimeRange {
     pub start: ARATimePosition,
@@ -238,13 +246,15 @@ pub const kARAContentGradeDetected: _bindgen_ty_13 = 1;
 pub const kARAContentGradeAdjusted: _bindgen_ty_13 = 2;
 pub const kARAContentGradeApproved: _bindgen_ty_13 = 3;
 pub type _bindgen_ty_13 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentTempoEntry {
     pub timePosition: ARATimePosition,
     pub quarterPosition: ARAQuarterPosition,
 }
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentBarSignature {
     pub numerator: ARAInt32,
@@ -252,7 +262,8 @@ pub struct ARAContentBarSignature {
     pub position: ARAQuarterPosition,
 }
 pub type ARAPitchNumber = ARAInt32;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentNote {
     pub frequency: f32,
@@ -264,7 +275,8 @@ pub struct ARAContentNote {
     pub signalDuration: ARATimeDuration,
 }
 pub type ARACircleOfFifthsIndex = ARAInt32;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentTuning {
     pub concertPitchFrequency: f32,
@@ -273,7 +285,8 @@ pub struct ARAContentTuning {
     pub name: ARAUtf8String,
 }
 pub type ARAKeySignatureIntervalUsage = ARAByte;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentKeySignature {
     pub root: ARACircleOfFifthsIndex,
@@ -282,7 +295,8 @@ pub struct ARAContentKeySignature {
     pub position: ARAQuarterPosition,
 }
 pub type ARAChordIntervalUsage = ARAByte;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentChord {
     pub root: ARACircleOfFifthsIndex,
@@ -303,7 +317,8 @@ pub struct ARAAudioReaderHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAAudioReaderHostRef = *mut ARAAudioReaderHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAAudioAccessControllerInterface {
     pub structSize: ARASize,
@@ -346,7 +361,8 @@ pub struct ARAArchiveWriterHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAArchiveWriterHostRef = *mut ARAArchiveWriterHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAArchivingControllerInterface {
     pub structSize: ARASize,
@@ -385,7 +401,8 @@ pub struct ARAContentAccessControllerHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAContentAccessControllerHostRef = *mut ARAContentAccessControllerHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAContentAccessControllerInterface {
     pub structSize: ARASize,
@@ -460,7 +477,8 @@ pub const kARAAnalysisProgressStarted: _bindgen_ty_17 = 0;
 pub const kARAAnalysisProgressUpdated: _bindgen_ty_17 = 1;
 pub const kARAAnalysisProgressCompleted: _bindgen_ty_17 = 2;
 pub type _bindgen_ty_17 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAModelUpdateControllerInterface {
     pub structSize: ARASize,
@@ -506,7 +524,8 @@ pub struct ARAPlaybackControllerHostRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAPlaybackControllerHostRef = *mut ARAPlaybackControllerHostRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAPlaybackControllerInterface {
     pub structSize: ARASize,
@@ -521,7 +540,8 @@ pub struct ARAPlaybackControllerInterface {
 }
 pub const kARAPlaybackControllerInterfaceMinSize: _bindgen_ty_19 = 48;
 pub type _bindgen_ty_19 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARADocumentControllerHostInstance {
     pub structSize: ARASize,
@@ -538,7 +558,8 @@ pub struct ARADocumentControllerHostInstance {
 }
 pub const kARADocumentControllerHostInstanceMinSize: _bindgen_ty_20 = 88;
 pub type _bindgen_ty_20 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARARestoreObjectsFilter {
     pub structSize: ARASize,
@@ -552,7 +573,8 @@ pub struct ARARestoreObjectsFilter {
 }
 pub const kARARestoreObjectsFilterMinSize: _bindgen_ty_21 = 60;
 pub type _bindgen_ty_21 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAStoreObjectsFilter {
     pub structSize: ARASize,
@@ -564,7 +586,8 @@ pub struct ARAStoreObjectsFilter {
 }
 pub const kARAStoreObjectsFilterMinSize: _bindgen_ty_22 = 44;
 pub type _bindgen_ty_22 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAProcessingAlgorithmProperties {
     pub structSize: ARASize,
@@ -579,7 +602,8 @@ pub struct ARADocumentControllerRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARADocumentControllerRef = *mut ARADocumentControllerRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARADocumentControllerInterface {
     pub structSize: ARASize,
@@ -846,7 +870,8 @@ pub struct ARADocumentControllerInterface {
 }
 pub const kARADocumentControllerInterfaceMinSize: _bindgen_ty_24 = 336;
 pub type _bindgen_ty_24 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARADocumentControllerInstance {
     pub structSize: ARASize,
@@ -855,7 +880,8 @@ pub struct ARADocumentControllerInstance {
 }
 pub const kARADocumentControllerInstanceMinSize: _bindgen_ty_25 = 24;
 pub type _bindgen_ty_25 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAInterfaceConfiguration {
     pub structSize: ARASize,
@@ -864,7 +890,8 @@ pub struct ARAInterfaceConfiguration {
 }
 pub const kARAInterfaceConfigurationMinSize: _bindgen_ty_26 = 20;
 pub type _bindgen_ty_26 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAFactory {
     pub structSize: ARASize,
@@ -904,7 +931,8 @@ pub struct ARAPlaybackRendererRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAPlaybackRendererRef = *mut ARAPlaybackRendererRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAPlaybackRendererInterface {
     pub structSize: ARASize,
@@ -921,7 +949,8 @@ pub struct ARAEditorRendererRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAEditorRendererRef = *mut ARAEditorRendererRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAEditorRendererInterface {
     pub structSize: ARASize,
@@ -936,7 +965,8 @@ pub struct ARAEditorRendererInterface {
 }
 pub const kARAEditorRendererInterfaceMinSize: _bindgen_ty_30 = 40;
 pub type _bindgen_ty_30 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAViewSelection {
     pub structSize: ARASize,
@@ -954,7 +984,8 @@ pub struct ARAEditorViewRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAEditorViewRef = *mut ARAEditorViewRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAEditorViewInterface {
     pub structSize: ARASize,
@@ -971,7 +1002,8 @@ pub struct ARAPlugInExtensionRefMarkupType {
     _unused: [u8; 0],
 }
 pub type ARAPlugInExtensionRef = *mut ARAPlugInExtensionRefMarkupType;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAPlugInExtensionInterface {
     pub structSize: ARASize,
@@ -982,7 +1014,8 @@ pub struct ARAPlugInExtensionInterface {
 }
 pub const kARAPlugInExtensionInterfaceMinSize: _bindgen_ty_33 = 24;
 pub type _bindgen_ty_33 = ::core::ffi::c_int;
-#[repr(C, packed)]
+#[cfg_attr(target_arch = "x86_64", repr(C, packed))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(C, packed(8)))]
 #[derive(Debug, Copy, Clone)]
 pub struct ARAPlugInExtensionInstance {
     pub structSize: ARASize,

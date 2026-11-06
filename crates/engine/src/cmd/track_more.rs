@@ -36,6 +36,27 @@ pub fn specs() -> Vec<CommandSpec> {
             }
         ),
         cmd!(
+            "track.binaural_distance",
+            "Binaural Distance",
+            [],
+            None,
+            "{tracks?, distance: off|near|mid|far} — headphone distance of object tracks; heard in binaural monitoring and written to ADM masters as metadata",
+            has_selection,
+            |e, p| {
+                let id = "track.binaural_distance";
+                let tracks = tracks_required(e, id, p)?;
+                let name = p.get("distance").and_then(Value::as_str).ok_or_else(|| cmd::bad(id, "`distance` required"))?;
+                let distance = openpt_model::BinauralDistance::from_id(name).ok_or_else(|| cmd::bad(id, format!("unknown binaural distance `{name}`")))?;
+                let s = e.session_mut();
+                for t in &tracks {
+                    if let Some(track) = s.track_mut(*t) {
+                        track.mixer.binaural_distance = distance;
+                    }
+                }
+                Ok(json!({"tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "distance": distance.id()}))
+            }
+        ),
+        cmd!(
             "track.convert_aux_to_folder",
             "Convert Aux to Routing Folder",
             ["Track"],

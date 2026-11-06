@@ -397,6 +397,8 @@ impl AudioState {
         }
         self.mix.monitor_only = !self.playing;
         self.mix.recording = self.recording;
+        let objects = openpt_mix::monitor::split_modes(&self.session);
+        self.mix.split_objects = objects != 0;
         self.mix.render(&self.session, self.pos, n, &mut self.pending);
         if self.playing
             && let Some(c) = &self.capture
@@ -406,11 +408,15 @@ impl AudioState {
         let fmt = self.session.main_format();
         if openpt_mix::monitor::Monitor::wanted(&self.session.atmos, fmt) {
             let rate = self.session.sample_rate.hz();
-            if !self.monitor.as_ref().is_some_and(|m| m.matches(&self.session.atmos, fmt, rate)) {
-                self.monitor = Some(openpt_mix::monitor::Monitor::new(&self.session.atmos, fmt, rate));
+            if !self.monitor.as_ref().is_some_and(|m| m.matches(&self.session.atmos, fmt, rate, objects)) {
+                self.monitor = Some(openpt_mix::monitor::Monitor::with_objects(&self.session.atmos, fmt, rate, objects));
             }
             if let Some(m) = &mut self.monitor {
-                m.process(&mut self.pending, n);
+                if objects != 0 {
+                    m.process_objects(&mut self.pending, &self.mix.object_feeds, n);
+                } else {
+                    m.process(&mut self.pending, n);
+                }
             }
         } else {
             self.monitor = None;

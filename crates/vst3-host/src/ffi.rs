@@ -1492,7 +1492,7 @@ impl Instance {
         Ok(layout)
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     pub fn ara_bind(&self, track: &openpt_dsp::AraTrack) -> Option<crate::ara::Binding> {
         if self.active {
             log::info!("ARA: the instance is already active");

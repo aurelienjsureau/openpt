@@ -1,6 +1,6 @@
 use super::*;
 use crate::cmd;
-use openpt_model::{AtmosMonitor, AutoParam, ChannelFormat, Mixer, OutputPath, Route, SEND_SLOTS, Session, SurroundPan, TrackKind};
+use openpt_model::{AtmosMonitor, AutoParam, BINAURAL_CHANNELS, BinauralDistance, ChannelFormat, Mixer, OutputPath, Route, SEND_SLOTS, Session, SurroundPan, TrackKind};
 use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -28,7 +28,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Atmos Monitoring",
             [],
             None,
-            "{monitor?: speakers|binaural|5.1|stereo, surround_trim_db?: -24..6, height_trim_db?: -24..6, binaural_gain_db?: -24..12} — how the immersive mix is monitored (bounces and ADM exports keep the full mix)",
+            "{monitor?: speakers|binaural|5.1|stereo, surround_trim_db?: -24..6, height_trim_db?: -24..6, binaural_gain_db?: -24..12, binaural_distance?: off|near|mid|far, channel?: main output channel (all if absent)} — how the immersive mix is monitored (bounces and ADM audio stay free of it; ADM masters carry the binaural distances as metadata)",
             always,
             atmos
         ),
@@ -181,9 +181,17 @@ fn atmos(e: &mut Engine, p: &Value) -> Result<Value> {
     a.surround_trim_db = f32_or(p, "surround_trim_db", a.surround_trim_db);
     a.height_trim_db = f32_or(p, "height_trim_db", a.height_trim_db);
     a.binaural_gain_db = f32_or(p, "binaural_gain_db", a.binaural_gain_db);
+    if let Some(d) = str_param(p, "binaural_distance") {
+        let d = BinauralDistance::from_id(d).ok_or_else(|| bad(id, format!("unknown binaural distance `{d}`")))?;
+        match p.get("channel").and_then(Value::as_u64) {
+            Some(c) => *a.binaural_distance.get_mut(c as usize).ok_or_else(|| bad(id, format!("no channel {c}")))? = d,
+            None => a.binaural_distance = [d; BINAURAL_CHANNELS],
+        }
+    }
     a.sanitize();
     e.session_mut().atmos = a;
-    Ok(json!({"monitor": a.monitor.id(), "surround_trim_db": a.surround_trim_db, "height_trim_db": a.height_trim_db, "binaural_gain_db": a.binaural_gain_db}))
+    let distance: Vec<&str> = a.binaural_distance.iter().map(|d| d.id()).collect();
+    Ok(json!({"monitor": a.monitor.id(), "surround_trim_db": a.surround_trim_db, "height_trim_db": a.height_trim_db, "binaural_gain_db": a.binaural_gain_db, "binaural_distance": distance}))
 }
 
 fn copy_lane(e: &mut Engine, p: &Value, id: &str, from: AutoParam, to: AutoParam) -> Result<Value> {

@@ -10,10 +10,10 @@ mod isolated;
 #[cfg(not(target_arch = "wasm32"))]
 pub use isolated::{Scanner, scan_child, set_scanner};
 
-#[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 #[allow(unsafe_code)]
 mod ara;
-#[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 #[allow(unsafe_code)]
 mod ara_sys;
 #[cfg(not(target_arch = "wasm32"))]
@@ -21,7 +21,7 @@ mod ara_sys;
 mod ffi;
 #[allow(unsafe_code)]
 pub mod keyhook;
-#[cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub use ara::{
     PlaybackRequest, bindings as ara_bindings, bound_tracks as ara_bound_tracks, finish_restores as ara_finish_restores,
     select_clips as ara_select_clips, set_pending_archives as ara_set_pending_archives, store_documents as ara_store_documents, sync_track as ara_sync_track,

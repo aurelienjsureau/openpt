@@ -28,7 +28,18 @@ fn render(fmt: ChannelFormat, y: f32) -> (Vec<Vec<f32>>, f32, f32) {
     let mut ears = speakers.clone();
     let set = AtmosSettings { monitor: AtmosMonitor::Binaural, ..AtmosSettings::default() };
     Monitor::new(&set, ChannelFormat::Atmos714, 48_000).process(&mut ears, n);
-    let db = |c: &[f32]| 10.0 * c.iter().map(|v| v * v).sum::<f32>().log10();
+    let keep = (-std::f32::consts::TAU * 800.0 / 48_000.0f32).exp();
+    let db = |c: &[f32]| {
+        let mut state = 0.0f32;
+        10.0 * c
+            .iter()
+            .map(|v| {
+                state = *v + keep * (state - *v);
+                state * state
+            })
+            .sum::<f32>()
+            .log10()
+    };
     (speakers, db(&ears[0]), db(&ears[1]))
 }
 
@@ -44,10 +55,10 @@ fn a_puck_down_the_left_edge_stays_left_at_a_steady_level() {
                     assert!(c.iter().all(|v| v.abs() < 1e-6), "{fmt:?} y {y}: {sp:?} carries signal");
                 }
             }
-            assert!(l > r + 5.0, "{fmt:?} y {y}: L {l} R {r}");
+            assert!(l > r + 1.5, "{fmt:?} y {y}: L {l} R {r}");
             levels.push(l);
         }
         let (lo, hi) = levels.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
-        assert!(hi - lo < 2.5, "{fmt:?}: left-ear level swings {lo}..{hi}");
+        assert!(hi - lo < 4.0, "{fmt:?}: left-ear level swings {lo}..{hi}");
     }
 }

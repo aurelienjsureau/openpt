@@ -48,7 +48,7 @@ OpenPT $LABEL (alpha) pour Mac Apple Silicon
        xattr -cr /Applications/OpenPT.app
 3. Setup > Playback Engine : choisir l'interface audio (CoreAudio).
 
-ARA (Melodyne) n'est pas encore disponible sur Mac dans cette alpha.
+ARA (Melodyne) est activé sur Mac mais pas encore testé dans cette alpha.
 TXT
 rm -f "$DMG"
 for attempt in 1 2 3 4 5; do
