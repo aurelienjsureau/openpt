@@ -6,7 +6,14 @@ mod caf;
 mod field;
 pub use field::{FieldInfo, field_info};
 mod flac;
+#[cfg(not(target_arch = "wasm32"))]
 mod mp3;
+#[cfg(target_arch = "wasm32")]
+mod mp3 {
+    pub fn encode(_: &crate::AudioBuffer) -> crate::Result<Vec<u8>> {
+        Err(crate::AudioError::Encode("MP3 export is not available in the browser".into()))
+    }
+}
 mod mp4;
 mod pcm;
 pub mod peaks;
