@@ -381,6 +381,24 @@ impl Default for HeatSettings {
     }
 }
 
+impl HeatSettings {
+    pub fn drive_step(&self) -> i32 {
+        if self.drive.is_finite() { (self.drive.clamp(0.0, 1.0) * 10.0).round() as i32 - 5 } else { 0 }
+    }
+
+    pub fn tone_step(&self) -> i32 {
+        if self.tone.is_finite() { (self.tone.clamp(-1.0, 1.0) * 3.0).round() as i32 } else { 0 }
+    }
+
+    pub fn set_drive(&mut self, v: f32) {
+        self.drive = if v.is_finite() { (v.clamp(0.0, 1.0) * 10.0).round() / 10.0 } else { 0.5 };
+    }
+
+    pub fn set_tone(&mut self, v: f32) {
+        self.tone = if v.is_finite() { (v.clamp(-1.0, 1.0) * 3.0).round() / 3.0 } else { 0.0 };
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AtmosMonitor {

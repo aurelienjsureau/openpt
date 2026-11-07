@@ -274,6 +274,7 @@ pub struct MeterDisplay {
     pub clip: bool,
     pub clip_age: f32,
     pub gr: f32,
+    pub heat: f32,
     pub rms: [f32; 2],
     pub plugin_failures: u32,
 }
@@ -1575,6 +1576,7 @@ impl SoundApp {
             for (id, m) in &snap.tracks {
                 let d = self.meters.entry(*id).or_default();
                 feed_meter(d, m.peak, m.rms, m.gain_reduction_db, dt, &b);
+                d.heat = m.heat_peak.max(d.heat * 10f32.powf(-b.decay_db_s * dt / 20.0));
                 if m.plugin_failures.count != d.plugin_failures {
                     d.plugin_failures = m.plugin_failures.count;
                     if let Some(msg) = failed_plugin_status(self.engine.session(), *id, m.plugin_failures.last) {

@@ -52,7 +52,7 @@ pub(crate) fn content(app: &mut SoundApp, ui: &mut Ui) {
         ui.painter().rect_filled(col, 0.0, Tokens::current().strip_bg);
         if heat {
             heat_panel(app, ui, col);
-            col.min.y += 128.0;
+            col.min.y += 140.0;
         }
         if immersive {
             monitor_panel(app, ui, col);
@@ -90,10 +90,33 @@ fn monitor_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
     }
 }
 
+fn heat_glow(p: &egui::Painter, r: Rect, level: f32) {
+    let amber = |a: f32| egui::Color32::from_rgba_unmultiplied(255, 160, 20, (a.clamp(0.0, 1.0) * 255.0) as u8);
+    p.rect_filled(r, r.height() * 0.5, egui::Color32::BLACK);
+    let inner = r.shrink2(vec2(2.0, 1.5));
+    p.rect_filled(inner, inner.height() * 0.5, amber(0.08));
+    let frac = ((20.0 * level.max(1e-6).log10() + 60.0) / 60.0).clamp(0.0, 1.0);
+    if frac <= 0.0 {
+        return;
+    }
+    let half = inner.width() * 0.5 * frac;
+    let mut x = 0.0;
+    while x < half {
+        let fall = (1.0 - x / half).powf(1.5);
+        for (height, alpha) in [(inner.height(), 0.45), (inner.height() * 0.45, 1.0)] {
+            let y = inner.center().y;
+            let column = |cx: f32| Rect::from_min_max(pos2(cx, y - height * 0.5), pos2(cx + 1.0, y + height * 0.5));
+            p.rect_filled(column(inner.center().x + x), 0.0, amber(fall * alpha));
+            p.rect_filled(column(inner.center().x - x - 1.0), 0.0, amber(fall * alpha));
+        }
+        x += 1.0;
+    }
+}
+
 fn heat_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
     let t = Tokens::current();
     ui.painter().rect_filled(col, 0.0, t.strip_bg);
-    let sec = Rect::from_min_size(col.min + vec2(4.0, 4.0), vec2(col.width() - 8.0, 120.0));
+    let sec = Rect::from_min_size(col.min + vec2(4.0, 4.0), vec2(col.width() - 8.0, 132.0));
     inset(ui.painter(), sec, t.strip_section);
     section_label(ui, sec, "HEAT");
     let heat = app.engine.session().heat;
@@ -104,11 +127,20 @@ fn heat_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
     if text_toggle(&mut c, vec2(sec.width() - 8.0, 16.0), "BYPASS", heat.bypass, t.mode_on, "Bypass HEAT on every track").clicked() {
         let _ = app.run("mix.heat", json!({"bypass": !heat.bypass}));
     }
+    let (bar, _) = c.allocate_exact_size(vec2(sec.width() - 6.0, 8.0), egui::Sense::hover());
+    let level = app.meters.values().fold(0.0f32, |m, d| m.max(d.heat));
+    heat_glow(ui.painter(), bar, level);
     for (label, v0, range, default, key) in [("Drive", heat.drive, 0.0..=1.0, 0.5, "drive"), ("Tone", heat.tone, -1.0..=1.0, 0.0, "tone")] {
-        let mut v = v0;
-        let tip = if key == "tone" { "HEAT Tone: darker (left) to brighter (right)" } else { "HEAT Drive" };
-        if crate::widgets::knob(&mut c, 26.0, &mut v, range, default, tip).changed() {
+        let raw_id = c.id().with(("heat_raw", key));
+        let mut v = c.ctx().data(|d| d.get_temp::<f32>(raw_id)).unwrap_or(v0);
+        let tip = if key == "tone" { "HEAT Tone: darker (left) to brighter (right)" } else { "HEAT Drive: tape (left), off (centre), triode (right)" };
+        let resp = crate::widgets::knob(&mut c, 26.0, &mut v, range, default, tip);
+        if resp.changed() {
+            c.ctx().data_mut(|d| d.insert_temp(raw_id, v));
             let _ = app.engine.execute_merged("mix.heat", &json!({key: v}), &format!("heat_{key}"));
+        }
+        if !resp.dragged() {
+            c.ctx().data_mut(|d| d.remove::<f32>(raw_id));
         }
         c.label(egui::RichText::new(label).font(regular(9.0)).color(t.text_dim));
     }
@@ -330,6 +362,29 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     let views = app.ui.mix_views.clone();
     let has = |v: &str| views.iter().any(|x| x == v);
     let all = has("all");
+    if app.engine.session().heat.active && (all || has("heat")) {
+        let sec = Rect::from_min_size(pos2(x0, y), vec2(inner_w, 42.0));
+        if track.kind == TrackKind::Audio {
+            inset(ui.painter(), sec, t.strip_section);
+            section_label(ui, sec, "HEAT");
+            let mut row = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(Rect::from_min_size(pos2(x0 + 4.0, sec.min.y + 15.0), vec2(inner_w - 8.0, 18.0)))
+                    .layout(egui::Layout::left_to_right(egui::Align::Min)),
+            );
+            row.spacing_mut().item_spacing.x = 4.0;
+            let bw = (inner_w - 12.0) / 2.0;
+            if text_toggle(&mut row, vec2(bw, 16.0), "PRE", track.mixer.heat_pre, t.accent, "HEAT before the inserts (else after them)").clicked() {
+                let _ = run_scoped(app, &row, "mix.heat_track", json!({"track": id.0, "pre": !track.mixer.heat_pre}));
+            }
+            if text_toggle(&mut row, vec2(bw, 16.0), "BYP", track.mixer.heat_bypass, t.mode_on, "Bypass HEAT on this track").clicked() {
+                let _ = run_scoped(app, &row, "mix.heat_track", json!({"track": id.0, "bypass": !track.mixer.heat_bypass}));
+            }
+            let level = app.meters.get(&id).map_or(0.0, |d| d.heat);
+            heat_glow(ui.painter(), Rect::from_min_size(pos2(x0 + 3.0, sec.max.y - 9.0), vec2(inner_w - 6.0, 7.0)), level);
+        }
+        y = sec.max.y + 4.0;
+    }
     let has_input = matches!(track.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi);
     if all || has("mic_preamps") {
         let sec = Rect::from_min_size(pos2(x0, y), vec2(inner_w, 34.0));
@@ -455,26 +510,6 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         let hint = if narrow { "" } else { "comments" };
         if child.add(egui::TextEdit::multiline(&mut c).desired_width(inner_w).desired_rows(2).hint_text(hint).font(regular(10.0))).changed() {
             let _ = app.engine.execute_merged("track.comments", &json!({"track": id.0, "comments": c}), &format!("comments:{}", id.0));
-        }
-        y = sec.max.y + 4.0;
-    }
-    let heat = app.engine.session().heat;
-    if heat.active && (all || has("heat")) && matches!(track.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux | TrackKind::Master) {
-        let sec = Rect::from_min_size(pos2(x0, y), vec2(inner_w, 36.0));
-        inset(ui.painter(), sec, t.strip_section);
-        section_label(ui, sec, "HEAT");
-        let mut row = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(Rect::from_min_size(pos2(x0 + 4.0, sec.min.y + 15.0), vec2(inner_w - 8.0, 18.0)))
-                .layout(egui::Layout::left_to_right(egui::Align::Min)),
-        );
-        row.spacing_mut().item_spacing.x = 4.0;
-        let bw = (inner_w - 12.0) / 2.0;
-        if text_toggle(&mut row, vec2(bw, 16.0), "ON", !track.mixer.heat_bypass, t.mode_on, "HEAT on this track").clicked() {
-            let _ = run_scoped(app, &row, "mix.heat_track", json!({"track": id.0, "bypass": !track.mixer.heat_bypass}));
-        }
-        if text_toggle(&mut row, vec2(bw, 16.0), "PRE", track.mixer.heat_pre, t.accent, "HEAT before the inserts (else after them)").clicked() {
-            let _ = run_scoped(app, &row, "mix.heat_track", json!({"track": id.0, "pre": !track.mixer.heat_pre}));
         }
         y = sec.max.y + 4.0;
     }

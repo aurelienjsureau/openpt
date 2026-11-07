@@ -99,10 +99,10 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("mix.heat", "HEAT Drive and Tone", [], None, "{drive?: 0..1, tone?: -1..1, bypass?: bool}", always, |e, p| {
             let h = &mut e.session_mut().heat;
             if let Some(d) = p.get("drive").and_then(Value::as_f64) {
-                h.drive = (d as f32).clamp(0.0, 1.0);
+                h.set_drive(d as f32);
             }
             if let Some(t) = p.get("tone").and_then(Value::as_f64) {
-                h.tone = (t as f32).clamp(-1.0, 1.0);
+                h.set_tone(t as f32);
             }
             if let Some(b) = p.get("bypass").and_then(Value::as_bool) {
                 h.bypass = b;

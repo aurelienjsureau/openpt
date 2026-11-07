@@ -145,6 +145,7 @@ pub struct StripMeter {
     pub peaks: Vec<f32>,
     pub rms: [f32; 2],
     pub gain_reduction_db: f32,
+    pub heat_peak: f32,
     pub latency: u32,
     pub compensation: u32,
     pub plugin_failures: PluginFailures,
@@ -169,6 +170,7 @@ impl StripMeter {
         self.peaks.clone_from(&o.peaks);
         self.rms = o.rms;
         self.gain_reduction_db = o.gain_reduction_db;
+        self.heat_peak = o.heat_peak;
         self.latency = o.latency;
         self.compensation = o.compensation;
         self.plugin_failures = o.plugin_failures;
@@ -179,6 +181,7 @@ impl StripMeter {
         self.peaks.fill(0.0);
         self.rms = [0.0; 2];
         self.gain_reduction_db = 0.0;
+        self.heat_peak = 0.0;
     }
 
     fn measure(&mut self, bufs: &[Vec<f32>], frames: usize, gr: f32) {
@@ -293,6 +296,7 @@ struct Strip {
     chase: bool,
     muted: bool,
     gr: f32,
+    heat_peak: f32,
     clip_fx: HashMap<u64, ClipFx>,
     clipbuf: Vec<Vec<f32>>,
     latency: usize,
@@ -385,6 +389,7 @@ impl Strip {
             chase: true,
             muted: false,
             gr: 0.0,
+            heat_peak: 0.0,
             clip_fx: HashMap::new(),
             clipbuf: Vec::new(),
             latency: 0,
@@ -1238,6 +1243,7 @@ impl MixEngine {
         let out_wait = self.wait_for(t, &t.mixer.output);
         let m = self.meters.entry(t.id).or_default();
         m.measure(&strip.buf, frames, strip.gr);
+        m.heat_peak = strip.heat_peak;
         m.plugin_failures = strip.failures;
         m.latency = strip.latency as u32;
         m.compensation = u32::try_from(strip.align.len() + out_wait).unwrap_or(u32::MAX);
@@ -1557,10 +1563,11 @@ fn process_strip(
     let heat = s.heat.active
         && !s.heat.bypass
         && !t.mixer.heat_bypass
-        && matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux | TrackKind::Master);
+        && t.kind == TrackKind::Audio;
     let sr = s.sample_rate.as_f64() as f32;
+    strip.heat_peak = 0.0;
     if heat && t.mixer.heat_pre {
-        strip.heat.process(&mut strip.buf, frames, s.heat.drive, s.heat.tone, sr);
+        strip.heat_peak = strip.heat.process(&mut strip.buf, frames, s.heat.drive_step(), s.heat.tone_step(), sr);
     }
     let mut gr = 0.0f32;
     let mut latency = 0usize;
@@ -1637,7 +1644,7 @@ fn process_strip(
         }
     }
     if heat && !t.mixer.heat_pre {
-        strip.heat.process(&mut strip.buf, frames, s.heat.drive, s.heat.tone, sr);
+        strip.heat_peak = strip.heat.process(&mut strip.buf, frames, s.heat.drive_step(), s.heat.tone_step(), sr);
     }
     strip.gr = gr;
     strip.latency = latency.min(MAX_LATENCY);
