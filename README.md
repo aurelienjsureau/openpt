@@ -173,7 +173,16 @@ See [`docs/control-protocol.md`](docs/control-protocol.md) and [`docs/mcp.md`](d
 | `automation` | MCP server and control channel |
 | `ui-kit`, `ui-egui` | interface |
 
-## Get started
+## Download
+
+Installers for Windows x64 and Apple Silicon Macs are on the [releases page](https://github.com/aurelienjsureau/openpt/releases/latest):
+
+- [Windows installer](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.7.0-Setup.exe)
+- [macOS disk image](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.7.0-alpha-macos-arm64.dmg)
+
+They are not signed by a recognised publisher, so Windows SmartScreen and macOS Gatekeeper will warn on first launch.
+
+## Build from source
 
 ```sh
 git clone https://github.com/aurelienjsureau/openpt
@@ -197,6 +206,10 @@ OPENPT_NO_SYSTEM_PLUGINS=1 cargo test --workspace --exclude openpt-web
 
 > [!IMPORTANT]
 > **OpenPT is an alpha, and we want to be straight about where it stands: it is not yet a Pro Tools replacement for daily professional work.** The biggest gaps are audio interface channel routing and low-latency duplex, AAF/OMF interchange, saving back to `.ptx`, Mackie Control and EUCON, external sync, and an English-only interface. Plugins still run in-process, and Windows is the most exercised platform: the macOS build is Apple Silicon only and unsigned, and Linux has seen little testing. Expect rough edges, and please file issues.
+
+## Contributing
+
+Fixes and new features are welcome: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
