@@ -45,7 +45,7 @@ pub fn list() -> Vec<TrackPreset> {
             out.push(TrackPreset { category: DEFAULT_CATEGORY.into(), name: stem(&p), path: p });
         }
     }
-    out.sort_by(|a, b| (a.category.to_lowercase(), a.name.to_lowercase()).cmp(&(b.category.to_lowercase(), b.name.to_lowercase())));
+    out.sort_by_key(|a| (a.category.to_lowercase(), a.name.to_lowercase()));
     out
 }
 

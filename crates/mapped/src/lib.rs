@@ -92,7 +92,7 @@ impl MappedSamples {
         if map.len() != want || channels == 0 {
             return Err(bad("truncated"));
         }
-        if (map.as_ptr() as usize) % std::mem::align_of::<f32>() != 0 {
+        if !(map.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
             return Err(bad("unaligned map"));
         }
         Ok(MappedSamples { map, channels, frames, sample_rate: u32::from_le_bytes(sr) })

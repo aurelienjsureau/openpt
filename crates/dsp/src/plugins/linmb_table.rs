@@ -1,3 +1,5 @@
+#![allow(clippy::approx_constant)]
+
 pub const KNEES: usize = 11;
 pub const RANGES: usize = 8;
 pub const U: usize = 51;

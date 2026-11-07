@@ -60,7 +60,7 @@ fn give_back(app: &SoundApp, mut eng: Box<openpt_mix::MixEngine>) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_bounce(mut job: Bounce, progress: Arc<AtomicU32>, cancel: Arc<AtomicBool>) -> std::thread::JoinHandle<Rendered> {
+fn spawn_bounce(mut job: Bounce, progress: Arc<AtomicU32>, cancel: Arc<AtomicBool>) -> Option<std::thread::JoinHandle<Rendered>> {
     std::thread::Builder::new()
         .name("openpt-bounce".into())
         .spawn(move || {
@@ -73,7 +73,7 @@ fn spawn_bounce(mut job: Bounce, progress: Arc<AtomicU32>, cancel: Arc<AtomicBoo
                 }
             }
         })
-        .expect("bounce thread")
+        .ok()
 }
 
 pub fn start(app: &mut SoundApp, params: &Value) {
@@ -99,7 +99,7 @@ pub fn start(app: &mut SoundApp, params: &Value) {
         let progress = Arc::new(AtomicU32::new(0));
         let cancel = Arc::new(AtomicBool::new(false));
         let handle = spawn_bounce(job, Arc::clone(&progress), Arc::clone(&cancel));
-        app.bounce = Some(Job { path, range, run: Run::Worker { progress, cancel, handle: Some(handle) } });
+        app.bounce = Some(Job { path, range, run: Run::Worker { progress, cancel, handle } });
         return;
     }
     app.bounce = Some(Job { path, range, run: Run::Here(Box::new(job)) });
@@ -339,7 +339,7 @@ impl LiveCommit {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_commit(mut r: CommitRender, progress: Arc<AtomicU32>, cancel: Arc<AtomicBool>) -> std::thread::JoinHandle<CommitRender> {
+fn spawn_commit(mut r: CommitRender, progress: Arc<AtomicU32>, cancel: Arc<AtomicBool>) -> Option<std::thread::JoinHandle<CommitRender>> {
     std::thread::Builder::new()
         .name("openpt-commit".into())
         .spawn(move || {
@@ -348,7 +348,7 @@ fn spawn_commit(mut r: CommitRender, progress: Arc<AtomicU32>, cancel: Arc<Atomi
             }
             r
         })
-        .expect("commit thread")
+        .ok()
 }
 
 pub fn commits_live(s: &openpt_model::Session, t: openpt_model::TrackId) -> bool {
@@ -393,7 +393,7 @@ pub fn start_live_commit(app: &mut SoundApp, tracks: Vec<openpt_model::TrackId>,
         let progress = Arc::new(AtomicU32::new(0));
         let cancel = Arc::new(AtomicBool::new(false));
         let handle = spawn_commit(render, Arc::clone(&progress), Arc::clone(&cancel));
-        CommitRun::Worker { progress, cancel, handle: Some(handle) }
+        CommitRun::Worker { progress, cancel, handle }
     };
     #[cfg(target_arch = "wasm32")]
     let run = CommitRun::Here(Box::new(render));

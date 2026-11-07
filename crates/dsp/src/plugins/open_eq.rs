@@ -772,12 +772,11 @@ impl Linear {
             return;
         }
         s -= 2;
-        if self.job_fade {
-            if s < 2 {
+        if self.job_fade
+            && s < 2 {
                 self.convolve(true, s);
                 return;
             }
-        }
         let (h, m) = (self.h, self.m);
         let scale = 1.0 / m as f32;
         for c in 0..2 {
@@ -1300,8 +1299,8 @@ mod tests {
     fn run(eq: &mut OpenEq, f: f32) -> f32 {
         let sr = 48_000.0;
         let x = sine(f, sr, 49_152);
-        let io = vec![x.clone(), x];
-        let mut out = vec![Vec::new(), Vec::new()];
+        let io = [x.clone(), x];
+        let mut out = [Vec::new(), Vec::new()];
         for start in (0..49_152).step_by(512) {
             let mut blk = vec![io[0][start..start + 512].to_vec(), io[1][start..start + 512].to_vec()];
             eq.process(&mut blk, 512);

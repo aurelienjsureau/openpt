@@ -840,7 +840,7 @@ fn place_commit(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) 
         let same_pan = ntr.mixer.pan.len() == mixer.pan.len();
         if same_pan {
             ntr.mixer.pan = mixer.pan.clone();
-            ntr.mixer.surround = mixer.surround.clone();
+            ntr.mixer.surround = mixer.surround;
         }
         ntr.mixer.mute = mixer.mute;
         ntr.mixer.automation_mode = mixer.automation_mode;

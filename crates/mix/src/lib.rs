@@ -4192,7 +4192,7 @@ mod tests {
                 }
             }
             let mut eng = MixEngine::new(48_000.0, 512);
-            let mut all = vec![Vec::new(), Vec::new()];
+            let mut all = [Vec::new(), Vec::new()];
             let mut out = vec![vec![0.0f32; 512]; 2];
             for b in 0..(n / 512) {
                 eng.render(&s, (b * 512) as i64, 512, &mut out);
@@ -4241,7 +4241,7 @@ mod tests {
                     s.track_mut(o).unwrap().mixer.inserts[0] = Some(comp.clone());
                 }
                 let mut eng = MixEngine::new(48_000.0, 512);
-                let mut all = vec![Vec::new(), Vec::new()];
+                let mut all = [Vec::new(), Vec::new()];
                 let mut out = vec![vec![0.0f32; 512]; 2];
                 for b in 0..(n / 512) {
                     eng.render(&s, (b * 512) as i64, 512, &mut out);

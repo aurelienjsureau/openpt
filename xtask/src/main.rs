@@ -19,17 +19,21 @@ const LAYERS: &[(&str, u8)] = &[
     ("audio-io", 0),
     ("midi", 0),
     ("video", 0),
+    ("mapped", 0),
+    ("ptx", 0),
     ("dsp", 1),
     ("vst3-host", 1),
     ("au-host", 1),
+    ("transcribe", 2),
     ("model", 2),
     ("mix", 3),
     ("engine", 4),
     ("playback", 4),
     ("automation", 5),
+    ("ui-kit", 6),
     ("ui-egui", 6),
 ];
-const STANDALONE: &[&str] = &["time", "audio-io", "midi", "video", "dsp"];
+const STANDALONE: &[&str] = &["time", "audio-io", "midi", "video", "dsp", "mapped", "ptx"];
 const UI_CRATES: &[&str] = &["openpt-ui-kit", "egui", "eframe", "winit", "egui_kittest", "rfd", "egui-wgpu", "egui_glow"];
 const EXEMPT: &[&str] = &["openpt", "openpt-cli", "openpt-web", "xtask"];
 

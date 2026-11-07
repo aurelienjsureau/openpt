@@ -82,11 +82,10 @@ fn monitor_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
             openpt_model::AtmosMonitor::Surround51 => "5.1",
             openpt_model::AtmosMonitor::Stereo => "STEREO",
         };
-        if text_toggle(&mut c, vec2(sec.width() - 8.0, 16.0), short, current == m, t.mode_on, m.label()).clicked() && current != m {
-            if let Err(e) = app.run("setup.atmos", json!({"monitor": m.id()})) {
+        if text_toggle(&mut c, vec2(sec.width() - 8.0, 16.0), short, current == m, t.mode_on, m.label()).clicked() && current != m
+            && let Err(e) = app.run("setup.atmos", json!({"monitor": m.id()})) {
                 app.ui.status = e;
             }
-        }
     }
 }
 

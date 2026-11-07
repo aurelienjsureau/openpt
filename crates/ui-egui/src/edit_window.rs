@@ -809,11 +809,10 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                 }
             }
         }
-        if id == "min_secs" || id == "bars_beats" || id == "timecode" || id == "samples" || id == "feet_frames" {
-            if Some(s.edit.main_counter) == fmt {
+        if (id == "min_secs" || id == "bars_beats" || id == "timecode" || id == "samples" || id == "feet_frames")
+            && Some(s.edit.main_counter) == fmt {
                 ui.painter().rect_filled(Rect::from_min_size(pos2(lab.min.x + 6.0, lab.center().y - 3.0), vec2(6.0, 6.0)), 1.0, t.accent);
             }
-        }
     }
     if pressed.is_some() && !on_ruler {
         app.ruler_focus = None;
@@ -2973,7 +2972,7 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
                     .filter_map(|t| now.track(*t))
                     .flat_map(|t| t.clips().iter().filter(|c| c.start >= sel.start && c.end() <= sel.end).map(|c| c.id))
                     .collect();
-                (!clips.is_empty()).then(|| Gesture::MoveClips { clips, grab_at: at_origin, delta: 0, from_track: track.id, to_track: track.id })
+                (!clips.is_empty()).then_some(Gesture::MoveClips { clips, grab_at: at_origin, delta: 0, from_track: track.id, to_track: track.id })
             }
             Tool::Grabber => hit.as_ref().map(|c| {
                 let clips = if s.edit.selected_clips.contains(&c.id) { s.edit.selected_clips.clone() } else { vec![c.id] };

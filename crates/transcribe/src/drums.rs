@@ -159,6 +159,33 @@ pub fn drum_hits(mono: &[f32], rate: u32, o: &DrumOptions) -> Vec<DrumHit> {
     hits
 }
 
+fn classify(sub: f32, low: f32, mid: f32, high: f32, ring: f32) -> u8 {
+    if sub >= 0.3 && sub + low >= 0.8 {
+        KICK
+    } else if high >= 0.7 && sub + low < 0.1 {
+        if ring > 0.6 {
+            CRASH
+        } else if ring > 0.35 {
+            OPEN_HAT
+        } else {
+            HAT
+        }
+    } else if mid + high >= 0.45 {
+        SNARE
+    } else if low + sub > 0.0 {
+        let centroid = (sub * 80.0 + low * 250.0 + mid * 1000.0) / (sub + low + mid).max(1e-9);
+        if centroid < 160.0 {
+            LOW_TOM
+        } else if centroid < 260.0 {
+            MID_TOM
+        } else {
+            HIGH_TOM
+        }
+    } else {
+        SNARE
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,32 +234,5 @@ mod tests {
             assert_eq!(k, gk, "at {t}: {got:?}");
             assert!((t - gt).abs() < 0.012, "at {t}: detected at {gt}");
         }
-    }
-}
-
-fn classify(sub: f32, low: f32, mid: f32, high: f32, ring: f32) -> u8 {
-    if sub >= 0.3 && sub + low >= 0.8 {
-        KICK
-    } else if high >= 0.7 && sub + low < 0.1 {
-        if ring > 0.6 {
-            CRASH
-        } else if ring > 0.35 {
-            OPEN_HAT
-        } else {
-            HAT
-        }
-    } else if mid + high >= 0.45 {
-        SNARE
-    } else if low + sub > 0.0 {
-        let centroid = (sub * 80.0 + low * 250.0 + mid * 1000.0) / (sub + low + mid).max(1e-9);
-        if centroid < 160.0 {
-            LOW_TOM
-        } else if centroid < 260.0 {
-            MID_TOM
-        } else {
-            HIGH_TOM
-        }
-    } else {
-        SNARE
     }
 }

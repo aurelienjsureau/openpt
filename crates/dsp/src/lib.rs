@@ -1,4 +1,5 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![allow(clippy::needless_range_loop)]
 
 pub mod biquad;
 pub mod heat;
@@ -401,6 +402,13 @@ pub fn midi_to_hz(note: f64) -> f64 {
     440.0 * 2f64.powf((note - 69.0) / 12.0)
 }
 
+pub fn factory_presets(id: &str) -> Vec<(&'static str, Vec<(&'static str, f32)>)> {
+    match id {
+        "open_mb" => plugins::open_mb::presets(),
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod trait_default_tests {
     use super::*;
@@ -432,12 +440,5 @@ mod trait_default_tests {
         let s = SampleBuffer { sample_rate: 44_100.0, channels: vec![vec![0.0; 10], vec![0.0; 7]] };
         assert_eq!(s.frames(), 7);
         assert_eq!(SampleBuffer::default().frames(), 0);
-    }
-}
-
-pub fn factory_presets(id: &str) -> Vec<(&'static str, Vec<(&'static str, f32)>)> {
-    match id {
-        "open_mb" => plugins::open_mb::presets(),
-        _ => Vec::new(),
     }
 }

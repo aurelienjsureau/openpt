@@ -9,7 +9,7 @@ fn enabled() -> bool {
 }
 
 thread_local! {
-    static ACC: RefCell<(BTreeMap<&'static str, f64>, u32)> = RefCell::new((BTreeMap::new(), 0));
+    static ACC: RefCell<(BTreeMap<&'static str, f64>, u32)> = const { RefCell::new((BTreeMap::new(), 0)) };
     static LAST: RefCell<Vec<(&'static str, f64)>> = const { RefCell::new(Vec::new()) };
 }
 

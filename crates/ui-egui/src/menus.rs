@@ -757,6 +757,16 @@ pub fn parity() -> Value {
     catalog::parity_with(&extra)
 }
 
+fn solo_listen_id(label: &str) -> &'static str {
+    if label.starts_with("AFL") {
+        "afl"
+    } else if label.starts_with("PFL") {
+        "pfl"
+    } else {
+        "sip"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -806,15 +816,5 @@ mod tests {
         assert!(app.dialogs.open.is_none());
         assert!(!app.engine.is_dirty());
         let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
-fn solo_listen_id(label: &str) -> &'static str {
-    if label.starts_with("AFL") {
-        "afl"
-    } else if label.starts_with("PFL") {
-        "pfl"
-    } else {
-        "sip"
     }
 }

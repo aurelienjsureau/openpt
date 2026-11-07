@@ -677,13 +677,12 @@ struct Ramp {
 
 impl Ramp {
     fn set(&mut self, target: f32, len: u32) {
-        if (target - self.target).abs() > 0.0 || self.left > 0 {
-            if target != self.target {
+        if ((target - self.target).abs() > 0.0 || self.left > 0)
+            && target != self.target {
                 self.target = target;
                 self.left = len.max(1);
                 self.step = (target - self.cur) / self.left as f32;
             }
-        }
     }
     fn snap(&mut self, v: f32) {
         *self = Ramp { cur: v, target: v, step: 0.0, left: 0 };

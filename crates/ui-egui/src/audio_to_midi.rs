@@ -91,13 +91,13 @@ pub fn open(app: &mut SoundApp, track: Option<TrackId>) {
             _ => Range::new(t.clips().iter().map(|c| c.start).min().unwrap_or(0), t.clips().iter().map(|c| c.end()).max().unwrap_or(0)),
         }
     } else {
-        openpt_engine::io::bounded_to_track(&s, t.id, sel)
+        openpt_engine::io::bounded_to_track(s, t.id, sel)
     };
     if range.is_empty() {
         app.ui.status = "Audio to MIDI: nothing to convert on this track".into();
         return;
     }
-    let mono = Arc::new(openpt_engine::cmd::audio_midi::selected_mono(&s, t.id, range));
+    let mono = Arc::new(openpt_engine::cmd::audio_midi::selected_mono(s, t.id, range));
     let d = openpt_transcribe::NoteOptions::default();
     let mut c = Converter {
         track: t.id,

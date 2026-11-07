@@ -628,7 +628,7 @@ mod tests {
         let (mut e, clip, t) = warped_clip();
         let src = match e.session().find_clip(openpt_model::ClipId(clip)).unwrap().1.content {
             ClipContent::Audio { source, .. } => source.0,
-            _ => unreachable!(),
+            _ => panic!("audio clip expected"),
         };
         let t2 = e.execute("track.new", &json!({"format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
         let clip2 = e.execute("clip.place_source", &json!({"source": src, "track": t2, "at": 0})).unwrap()["clip"].as_u64().unwrap();

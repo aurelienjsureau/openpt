@@ -295,7 +295,7 @@ impl Dialogs {
             "event.quantize" => {
                 Dialog::Number { cmd: id.into(), title: "Quantize strength".into(), key: "strength".into(), value: 100.0, suffix: "%".into() }
             }
-            "edit.fades_create" => Dialog::Fades { shape: "equal power".into(), batch: BatchFades::wanted(&e.session()) },
+            "edit.fades_create" => Dialog::Fades { shape: "equal power".into(), batch: BatchFades::wanted(e.session()) },
             "edit.strip_silence" => Dialog::StripSilence { threshold: -48.0, min_ms: 50.0, pre_ms: 5.0, post_ms: 20.0 },
             "clip.warp_conform" => {
                 let s = e.session();

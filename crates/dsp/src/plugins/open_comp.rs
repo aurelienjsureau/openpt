@@ -270,6 +270,7 @@ impl OpenComp {
         let rel_slow = ms_coef(release_ms * 2.5, sr);
         let slow_att = ms_coef(release_ms, sr);
         let rms_c = if tr.rms_ms > 0.0 { ms_coef(tr.rms_ms, sr) } else { 1.0 };
+        #[allow(clippy::manual_clamp)]
         let lin_rel_db = range.max(6.0).min(24.0) * 1000.0 / (release_ms.max(10.0) * sr);
         let dlen = self.delay[0].len();
         let mut col_in = f32::NEG_INFINITY;

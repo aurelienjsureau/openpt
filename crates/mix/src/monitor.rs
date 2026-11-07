@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 use crate::hrtf::{self, HrirSet};
 use openpt_model::{AtmosMonitor, AtmosSettings, BinauralDistance, ChannelFormat, Route, Session, Speaker, TrackKind};
 

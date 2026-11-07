@@ -351,6 +351,11 @@ pub fn plugin_info(id: &str) -> Option<&'static PluginInfo> {
     api::plugin_info(id)
 }
 
+pub fn pump_editor_timers() {
+    #[cfg(not(target_arch = "wasm32"))]
+    ffi::pump_editor_timers();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,9 +431,4 @@ mod tests {
         assert!(e.to_string().contains("not a VST3 plugin"), "{e}");
         let _ = std::fs::remove_dir_all(&d);
     }
-}
-
-pub fn pump_editor_timers() {
-    #[cfg(not(target_arch = "wasm32"))]
-    ffi::pump_editor_timers();
 }
