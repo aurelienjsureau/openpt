@@ -46,13 +46,21 @@ fn fail(msg: impl std::fmt::Display) -> ExitCode {
 }
 
 fn help_text() -> String {
-    include_str!("main.rs")
-        .lines()
-        .skip(3)
-        .take_while(|l| l.trim_end() != "//! ```")
-        .map(|l| l.trim_start_matches("//! "))
-        .collect::<Vec<_>>()
-        .join("\n")
+    r#"openpt-cli info FILE                       audio file or .openpt summary
+openpt-cli run [--in S.openpt | --demo] [--cmd ID[=JSON]]… [--bounce OUT] [--start T --end T] [--save S.openpt] [--inspect]
+openpt-cli script FILE [--in S | --demo] [--save S] [--bounce OUT]   (one `ID JSON` per line)
+openpt-cli commands [FILTER]               list commands
+openpt-cli describe ID                     one command's details
+openpt-cli app [--port P] METHOD [JSON]     call a running app's control channel
+openpt-cli mcp [--connect PORT] [--demo] [--automation-read-root DIR] [--automation-write-root DIR]
+                                                MCP server on stdio. The two roots confine every file the
+                                                client's commands read (open, import, presets) and write
+                                                (save, bounce, export) to those folders, links followed;
+                                                a root left out grants none of its access. They run the
+                                                in-process server, so they conflict with --connect.
+openpt-cli parity [--write PATH]            parity report (markdown)
+openpt-cli plugins                          list built-in plugins"#
+        .to_string()
 }
 
 const VST3_SCAN_ARG: &str = "--vst3-scan-child";
