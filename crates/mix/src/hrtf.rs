@@ -157,6 +157,11 @@ pub fn load_sofa(path: &std::path::Path) -> Result<String, String> {
     Ok(name)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn load_sofa(_: &std::path::Path) -> Result<String, String> {
+    Err("SOFA files cannot be loaded in the browser".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

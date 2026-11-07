@@ -4,6 +4,24 @@ pub mod scan;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod presets;
+#[cfg(target_arch = "wasm32")]
+pub mod presets {
+    pub struct FactoryPreset {
+        pub name: String,
+        pub folder: String,
+        pub path: std::path::PathBuf,
+    }
+
+    impl FactoryPreset {
+        pub fn label(&self) -> String {
+            if self.folder.is_empty() { self.name.clone() } else { format!("{} › {}", self.folder, self.name) }
+        }
+    }
+
+    pub fn read_state(_: &std::path::Path) -> Option<Vec<u8>> {
+        None
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 mod isolated;
