@@ -133,34 +133,19 @@ pub enum CodecConfig {
     Hevc(HevcConfig),
     Av1(Av1Config),
     Vp9(VpcConfig),
-    ProRes {
-        fourcc: FourCc,
-    },
-    Jpeg {
-        fourcc: FourCc,
-    },
-    Dnx {
-        fourcc: FourCc,
-    },
+    ProRes { fourcc: FourCc },
+    Jpeg { fourcc: FourCc },
+    Dnx { fourcc: FourCc },
     Aac(AacConfig),
     Mp3,
     Pcm(PcmConfig),
-    Alac {
-        cookie: Vec<u8>,
-    },
+    Alac { cookie: Vec<u8> },
     Opus(OpusConfig),
     Flac(FlacConfig),
-    Ac3 {
-        dac3: Vec<u8>,
-    },
-    Eac3 {
-        dec3: Vec<u8>,
-    },
+    Ac3 { dac3: Vec<u8> },
+    Eac3 { dec3: Vec<u8> },
     Timecode(TimecodeConfig),
-    Unknown {
-        fourcc: FourCc,
-        raw: Vec<u8>,
-    },
+    Unknown { fourcc: FourCc, raw: Vec<u8> },
 }
 
 impl CodecConfig {

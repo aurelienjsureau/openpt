@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, regular};
+use crate::widgets::FitScreen;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use openpt_dsp::{PluginInfo, Unit};
 use openpt_model::{Insert, TrackId};
@@ -562,7 +562,8 @@ pub fn automation_dialog(app: &mut SoundApp, ctx: &egui::Context) {
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
-        .fit_screen(ctx).show(ctx, |ui| {
+        .fit_screen(ctx)
+        .show(ctx, |ui| {
             let list = |ui: &mut Ui, items: &[&(&str, &str)], chosen: &mut Vec<String>, salt: &str| {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_min_size(vec2(200.0, 260.0));

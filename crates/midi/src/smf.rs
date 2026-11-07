@@ -102,11 +102,7 @@ impl TickConv {
                 return Err(MidiError::Invalid { offset, reason: "invalid SMPTE division" });
             }
             let two_ppq = 2 * i128::from(PPQ);
-            if fps == 29 {
-                Ok(Self { num: two_ppq * 1001, den: 30000 * tpf })
-            } else {
-                Ok(Self { num: two_ppq, den: fps * tpf })
-            }
+            if fps == 29 { Ok(Self { num: two_ppq * 1001, den: 30000 * tpf }) } else { Ok(Self { num: two_ppq, den: fps * tpf }) }
         }
     }
 

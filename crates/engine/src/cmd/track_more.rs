@@ -46,7 +46,8 @@ pub fn specs() -> Vec<CommandSpec> {
                 let id = "track.binaural_distance";
                 let tracks = tracks_required(e, id, p)?;
                 let name = p.get("distance").and_then(Value::as_str).ok_or_else(|| cmd::bad(id, "`distance` required"))?;
-                let distance = openpt_model::BinauralDistance::from_id(name).ok_or_else(|| cmd::bad(id, format!("unknown binaural distance `{name}`")))?;
+                let distance =
+                    openpt_model::BinauralDistance::from_id(name).ok_or_else(|| cmd::bad(id, format!("unknown binaural distance `{name}`")))?;
                 let s = e.session_mut();
                 for t in &tracks {
                     if let Some(track) = s.track_mut(*t) {

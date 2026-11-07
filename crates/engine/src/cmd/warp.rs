@@ -6,8 +6,16 @@ use serde_json::json;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("clip.warp_add", "Add Warp Marker", [], None, "{clip: id, at: position}", always, add),
-        cmd!("clip.warp_range", "Range Warp", [], None, "{clip: id, at: position} — a marker at `at` and on the nearest event either side", always, range),
-        cmd!("clip.warp_move","Move Warp Marker", [], None, "{clip: id, index: n, to: position}", always, move_marker),
+        cmd!(
+            "clip.warp_range",
+            "Range Warp",
+            [],
+            None,
+            "{clip: id, at: position} — a marker at `at` and on the nearest event either side",
+            always,
+            range
+        ),
+        cmd!("clip.warp_move", "Move Warp Marker", [], None, "{clip: id, index: n, to: position}", always, move_marker),
         cmd!("clip.warp_remove", "Remove Warp Marker", [], None, "{clip: id, index: n}", always, remove),
         cmd!("clip.warp_at_events", "Add Warp Markers at Events", ["Clip"], None, "{clip: id, sensitivity?: 0..1}", always, warp_at_events),
         cmd!(
@@ -437,7 +445,9 @@ fn merged_events(s: &Session, id: &str, clips: &[ClipId]) -> Result<Vec<Samples>
         let from = usize::try_from(w.offset.max(0)).unwrap_or(0);
         let n = usize::try_from(w.length.max(0)).unwrap_or(0);
         let seg: Vec<Vec<f32>> = audio.channels().into_iter().map(|ch| ch.iter().skip(from).take(n).copied().collect()).collect();
-        all.extend(openpt_dsp::offline::detect_transients(&seg, sr.as_f64() as f32, 0.5).into_iter().map(|h| c.start + w.to_clip(c.length, h as Samples)));
+        all.extend(
+            openpt_dsp::offline::detect_transients(&seg, sr.as_f64() as f32, 0.5).into_iter().map(|h| c.start + w.to_clip(c.length, h as Samples)),
+        );
     }
     all.sort_unstable();
     let gap = sr.samples(0.02);
@@ -467,7 +477,9 @@ fn map_through(pairs: &[(Samples, Samples)], t: Samples) -> Samples {
 
 fn conform(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "clip.warp_conform";
-    let ids = |k: &str| -> Vec<ClipId> { p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(ClipId).collect()).unwrap_or_default() };
+    let ids = |k: &str| -> Vec<ClipId> {
+        p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(ClipId).collect()).unwrap_or_default()
+    };
     let (reference, clips) = (ids("reference"), ids("clips"));
     if reference.is_empty() || clips.is_empty() {
         return Err(bad(id, "`reference` and `clips` required"));
@@ -619,7 +631,8 @@ mod tests {
         let r = e.execute("event.quantize", &json!({"clips": [clip], "grid": "1/8"})).unwrap();
         assert!(r["audio_events"].as_u64().unwrap() >= 5, "{r}");
         let ev = e.execute("clip.warp_events", &json!({"clip": clip})).unwrap();
-        let off: Vec<i64> = ev["events"].as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).filter(|x| *x > 6000).map(|x| (x + 6000) % 12_000 - 6000).collect();
+        let off: Vec<i64> =
+            ev["events"].as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).filter(|x| *x > 6000).map(|x| (x + 6000) % 12_000 - 6000).collect();
         assert!(off.len() >= 5 && off.iter().all(|d| d.abs() < 300), "events off the 1/8 grid by {off:?}");
     }
 
@@ -637,7 +650,12 @@ mod tests {
         }
         e.execute("track.group", &json!({"name": "Drums", "tracks": [t, t2]})).unwrap();
         let markers = |e: &mut Engine, c: u64| -> Vec<i64> {
-            e.execute("clip.warp_events", &json!({"clip": c})).unwrap()["markers"].as_array().unwrap().iter().map(|m| m["at"].as_i64().unwrap()).collect()
+            e.execute("clip.warp_events", &json!({"clip": c})).unwrap()["markers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["at"].as_i64().unwrap())
+                .collect()
         };
         e.execute("clip.warp_add", &json!({"clip": clip, "at": 30_000})).unwrap();
         assert_eq!(markers(&mut e, clip2), vec![30_000], "the add reaches the other member");
@@ -684,7 +702,12 @@ mod tests {
         let ev = e.execute("clip.warp_events", &json!({"clip": clip})).unwrap();
         let events: Vec<i64> = ev["events"].as_array().unwrap().iter().filter_map(|v| v.as_i64()).collect();
         let markers = |e: &mut Engine, c: u64| -> Vec<i64> {
-            e.execute("clip.warp_events", &json!({"clip": c})).unwrap()["markers"].as_array().unwrap().iter().map(|m| m["at"].as_i64().unwrap()).collect()
+            e.execute("clip.warp_events", &json!({"clip": c})).unwrap()["markers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["at"].as_i64().unwrap())
+                .collect()
         };
         let (a, b) = (events[1], events[2]);
         let mid = (a + b) / 2;

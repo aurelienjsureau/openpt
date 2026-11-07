@@ -107,7 +107,9 @@ pub fn start(app: &mut SoundApp, params: &Value) {
 
 fn bounced_status(path: &std::path::Path, r: openpt_engine::Result<Option<Bounced>>) -> String {
     match r {
-        Ok(Some(done)) => format!("Bounced {} (peak {:.1} dBFS, {:.1} LUFS)", path.file_name().unwrap_or_default().to_string_lossy(), done.peak_db, done.lufs),
+        Ok(Some(done)) => {
+            format!("Bounced {} (peak {:.1} dBFS, {:.1} LUFS)", path.file_name().unwrap_or_default().to_string_lossy(), done.peak_db, done.lufs)
+        }
         Ok(None) => "Bounce cancelled".into(),
         Err(e) => e.to_string(),
     }
@@ -316,7 +318,11 @@ impl CommitRender {
 enum CommitRun {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     Here(Box<CommitRender>),
-    Worker { progress: Arc<AtomicU32>, cancel: Arc<AtomicBool>, handle: Option<std::thread::JoinHandle<CommitRender>> },
+    Worker {
+        progress: Arc<AtomicU32>,
+        cancel: Arc<AtomicBool>,
+        handle: Option<std::thread::JoinHandle<CommitRender>>,
+    },
 }
 
 pub struct LiveCommit {

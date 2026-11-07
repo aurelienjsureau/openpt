@@ -77,7 +77,8 @@ fn expand_channels(e: &mut Engine, p: &Value) -> Result<Value> {
         let mut at = s.track_index(t).unwrap_or(s.tracks.len());
         for ch in 0..usize::from(src.channels) {
             let mono = channel_source(s, id, source, ch)?;
-            let name = src.field.as_ref().and_then(|f| f.tracks.get(ch)).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| format!("{base} {}", ch + 1));
+            let name =
+                src.field.as_ref().and_then(|f| f.tracks.get(ch)).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| format!("{base} {}", ch + 1));
             let nt = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&name));
             if let Some(i) = s.track_index(nt) {
                 let tr = s.tracks.remove(i);
@@ -197,7 +198,12 @@ mod tests {
         for x in &mut s.sources {
             if x.id == poly {
                 x.time_reference = 10 * u64::from(rate);
-                x.field = Some(openpt_audio_io::FieldInfo { scene: "12".into(), take: "3".into(), tracks: vec!["Mix".into(), "Boom".into(), "Lav".into()], ..Default::default() });
+                x.field = Some(openpt_audio_io::FieldInfo {
+                    scene: "12".into(),
+                    take: "3".into(),
+                    tracks: vec!["Mix".into(), "Boom".into(), "Lav".into()],
+                    ..Default::default()
+                });
             } else {
                 x.time_reference = 9 * u64::from(rate);
             }

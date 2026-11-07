@@ -48,7 +48,12 @@ pub fn index_in_background() {
     let spawned = std::thread::Builder::new().name("openpt-presets".into()).spawn(|| {
         let t0 = std::time::Instant::now();
         let index = build(&roots());
-        log::info!("factory presets: {} plug-ins, {} presets indexed in {} ms", index.len(), index.values().map(Vec::len).sum::<usize>(), t0.elapsed().as_millis());
+        log::info!(
+            "factory presets: {} plug-ins, {} presets indexed in {} ms",
+            index.len(),
+            index.values().map(Vec::len).sum::<usize>(),
+            t0.elapsed().as_millis()
+        );
         let _ = INDEX.set(index);
     });
     if let Err(e) = spawned {

@@ -946,10 +946,10 @@ fn midi_learn(e: &mut Engine, p: &Value) -> Result<Value> {
     match str_param(p, "action").unwrap_or("list") {
         "list" => {}
         "add" => {
-            let source: openpt_model::LearnSource =
-                serde_json::from_value(parse("source")?.ok_or_else(|| bad(id, "`source` required"))?).map_err(|err| bad(id, format!("source: {err}")))?;
-            let target: openpt_model::LearnTarget =
-                serde_json::from_value(parse("target")?.ok_or_else(|| bad(id, "`target` required"))?).map_err(|err| bad(id, format!("target: {err}")))?;
+            let source: openpt_model::LearnSource = serde_json::from_value(parse("source")?.ok_or_else(|| bad(id, "`source` required"))?)
+                .map_err(|err| bad(id, format!("source: {err}")))?;
+            let target: openpt_model::LearnTarget = serde_json::from_value(parse("target")?.ok_or_else(|| bad(id, "`target` required"))?)
+                .map_err(|err| bad(id, format!("target: {err}")))?;
             s.midi_learn.retain(|m| m.source != source && m.target != target);
             s.midi_learn.push(openpt_model::MidiLearn { source, target });
         }
@@ -961,8 +961,9 @@ fn midi_learn(e: &mut Engine, p: &Value) -> Result<Value> {
                 }
                 s.midi_learn.remove(i);
             } else {
-                let target: openpt_model::LearnTarget = serde_json::from_value(parse("target")?.ok_or_else(|| bad(id, "`index` or `target` required"))?)
-                    .map_err(|err| bad(id, format!("target: {err}")))?;
+                let target: openpt_model::LearnTarget =
+                    serde_json::from_value(parse("target")?.ok_or_else(|| bad(id, "`index` or `target` required"))?)
+                        .map_err(|err| bad(id, format!("target: {err}")))?;
                 s.midi_learn.retain(|m| m.target != target);
             }
         }
@@ -987,8 +988,11 @@ mod learn_tests {
         e.execute("setup.midi_learn", &json!({"action": "add", "source": cc7, "target": vol})).unwrap();
         e.execute("setup.midi_learn", &json!({"action": "add", "source": {"cc": {"channel": 0, "number": 8}}, "target": vol})).unwrap();
         assert_eq!(e.session().midi_learn.len(), 1, "one source per target");
-        e.execute("setup.midi_learn", &json!({"action": "add", "source": {"cc": {"channel": 0, "number": 8}}, "target": {"kind": "mute", "track": t}}))
-            .unwrap();
+        e.execute(
+            "setup.midi_learn",
+            &json!({"action": "add", "source": {"cc": {"channel": 0, "number": 8}}, "target": {"kind": "mute", "track": t}}),
+        )
+        .unwrap();
         assert_eq!(e.session().midi_learn.len(), 1, "one target per source");
         let back: openpt_model::Session = serde_json::from_str(&serde_json::to_string(e.session()).unwrap()).unwrap();
         assert_eq!(back.midi_learn, e.session().midi_learn);

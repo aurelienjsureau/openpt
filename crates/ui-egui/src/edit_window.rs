@@ -656,7 +656,8 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                 if mresp.clicked()
                     && crate::mix_window::click_mods(ui).alt
                     && let Some(p) = mresp.interact_pointer_pos()
-                    && let Some(ev) = s.tempo.meters().iter().find(|e| e.tick > 0 && (x_of(&s, tl, s.tempo.tick_to_samples(e.tick, sr)) - p.x).abs() < 12.0)
+                    && let Some(ev) =
+                        s.tempo.meters().iter().find(|e| e.tick > 0 && (x_of(&s, tl, s.tempo.tick_to_samples(e.tick, sr)) - p.x).abs() < 12.0)
                 {
                     let _ = app.run("event.meter_remove", json!({"at": s.tempo.tick_to_samples(ev.tick, sr)}));
                 } else {
@@ -809,10 +810,10 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                 }
             }
         }
-        if (id == "min_secs" || id == "bars_beats" || id == "timecode" || id == "samples" || id == "feet_frames")
-            && Some(s.edit.main_counter) == fmt {
-                ui.painter().rect_filled(Rect::from_min_size(pos2(lab.min.x + 6.0, lab.center().y - 3.0), vec2(6.0, 6.0)), 1.0, t.accent);
-            }
+        if (id == "min_secs" || id == "bars_beats" || id == "timecode" || id == "samples" || id == "feet_frames") && Some(s.edit.main_counter) == fmt
+        {
+            ui.painter().rect_filled(Rect::from_min_size(pos2(lab.min.x + 6.0, lab.center().y - 3.0), vec2(6.0, 6.0)), 1.0, t.accent);
+        }
     }
     if pressed.is_some() && !on_ruler {
         app.ruler_focus = None;
@@ -1917,7 +1918,8 @@ pub(crate) fn track_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     ui.separator();
     if ui.button("Save Track Preset...").clicked() {
         let name = app.engine.session().track(id).map(|t| t.name.clone()).unwrap_or_default();
-        app.dialogs.open = Some(crate::dialogs::Dialog::SaveTrackPreset { track: tid, name, category: crate::track_presets::DEFAULT_CATEGORY.into() });
+        app.dialogs.open =
+            Some(crate::dialogs::Dialog::SaveTrackPreset { track: tid, name, category: crate::track_presets::DEFAULT_CATEGORY.into() });
         ui.close();
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -2555,7 +2557,8 @@ fn line_hit(s: &Session, track: &Track, lane: Rect, tl: Rect, q: Pos2, tool: Too
         let def = auto_default(track, &param);
         let lane_pts = track.lane(&param);
         let per_px = (range.1 - range.0) / (lane.height() - 8.0).max(1.0);
-        let point = lane_pts.and_then(|l| nearest_point(q, l.points.iter().map(|pt| (pt.at, pos2(x_of(s, tl, pt.at), auto_y(lane, range, pt.value))))));
+        let point =
+            lane_pts.and_then(|l| nearest_point(q, l.points.iter().map(|pt| (pt.at, pos2(x_of(s, tl, pt.at), auto_y(lane, range, pt.value))))));
         let line = lane_pts.map_or(def, |l| l.value_at(at, def));
         if let Some((pt, c)) = point {
             return Some(LineHit::Auto { param, point: Some(pt), at, value: line, per_px, grab: c - q, segment: None });

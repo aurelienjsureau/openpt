@@ -23,8 +23,8 @@ pub mod panels;
 pub mod peripherals;
 pub mod plugin_ui;
 pub mod preferences;
-pub mod progress;
 pub mod prof;
+pub mod progress;
 mod recent;
 pub mod recovery;
 pub mod sampler_window;
@@ -583,11 +583,9 @@ impl SoundApp {
         if (freezing || matches!(id, "track.commit" | "track.bounce")) && self.player.is_some() {
             let tracks = openpt_engine::cmd::tracks_param(&self.engine, id, &params).map_err(|e| e.to_string())?;
             let s = self.engine.session();
-            let (live, offline): (Vec<TrackId>, Vec<TrackId>) = tracks
-                .into_iter()
-                .partition(|t| {
-                    (bounce::commits_live(s, *t) || bounce::renders_live(s, *t)) && !(freezing && s.track(*t).is_some_and(openpt_model::Track::is_frozen))
-                });
+            let (live, offline): (Vec<TrackId>, Vec<TrackId>) = tracks.into_iter().partition(|t| {
+                (bounce::commits_live(s, *t) || bounce::renders_live(s, *t)) && !(freezing && s.track(*t).is_some_and(openpt_model::Track::is_frozen))
+            });
             if !live.is_empty() {
                 let out = json!({"live": live.iter().map(|t| t.0).collect::<Vec<_>>(), "then": offline.iter().map(|t| t.0).collect::<Vec<_>>()});
                 bounce::start_live_commit(self, live, id, offline);
@@ -847,7 +845,11 @@ impl SoundApp {
         let s = self.engine.session();
         let slowest = l.slowest.map_or_else(String::new, |(t, slot, us, name)| {
             let track = s.track(t).map_or_else(|| format!("track {}", t.0), |x| x.name.clone());
-            let place = if slot == openpt_mix::INSTRUMENT_SLOT { "instrument".to_string() } else { format!("insert {}", char::from(b'a'.saturating_add(slot as u8))) };
+            let place = if slot == openpt_mix::INSTRUMENT_SLOT {
+                "instrument".to_string()
+            } else {
+                format!("insert {}", char::from(b'a'.saturating_add(slot as u8)))
+            };
             format!("; slowest plugin then: {name} on {track} ({place}) {:.1} ms", f64::from(us) / 1000.0)
         });
         log::warn!(
@@ -864,7 +866,10 @@ impl SoundApp {
     pub(crate) fn automation_enabled(&self, t: TrackId, slot: usize, param: &str) -> bool {
         let Some(tr) = self.engine.session().track(t) else { return false };
         tr.mixer.inserts.get(slot).and_then(Option::as_ref).is_some_and(|i| i.is_automated(param))
-            || tr.automation.iter().any(|l| matches!(&l.param, openpt_model::AutoParam::Plugin { slot: s, param: p } if usize::from(*s) == slot && p == param) && !l.points.is_empty())
+            || tr.automation.iter().any(|l| {
+                matches!(&l.param, openpt_model::AutoParam::Plugin { slot: s, param: p } if usize::from(*s) == slot && p == param)
+                    && !l.points.is_empty()
+            })
     }
 
     fn touch_moved_sends(&mut self, may_write: bool) {
@@ -1721,7 +1726,11 @@ impl SoundApp {
         let Some(first) = self.synthetic.first().cloned() else { return };
         let take = match first {
             egui::Event::Key { pressed: true, .. } => {
-                if matches!(self.synthetic.get(1), Some(egui::Event::Key { pressed: false, .. })) { 2 } else { 1 }
+                if matches!(self.synthetic.get(1), Some(egui::Event::Key { pressed: false, .. })) {
+                    2
+                } else {
+                    1
+                }
             }
             _ => 1,
         };

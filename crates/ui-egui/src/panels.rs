@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, mono, regular, rgb};
+use crate::widgets::FitScreen;
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
 use openpt_model::{ClipContent, ClipId, SourceId};
 use serde_json::json;
@@ -868,7 +868,13 @@ fn apply_state(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info
     let _ = app.run("mix.insert_params", json!({"track": tid.0, "slot": slot, "params": params, "preset": name}));
 }
 
-fn recall_factory(app: &mut SoundApp, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, preset: &openpt_vst3_host::presets::FactoryPreset) {
+fn recall_factory(
+    app: &mut SoundApp,
+    tid: openpt_model::TrackId,
+    slot: usize,
+    info: &openpt_dsp::PluginInfo,
+    preset: &openpt_vst3_host::presets::FactoryPreset,
+) {
     let label = preset.label();
     match openpt_vst3_host::presets::read_state(&preset.path) {
         Some(bytes) => apply_state(app, tid, slot, info, &bytes, &label),

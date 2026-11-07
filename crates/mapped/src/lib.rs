@@ -17,7 +17,11 @@ pub struct MappedSamples {
 
 impl std::fmt::Debug for MappedSamples {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MappedSamples").field("channels", &self.channels).field("frames", &self.frames).field("sample_rate", &self.sample_rate).finish()
+        f.debug_struct("MappedSamples")
+            .field("channels", &self.channels)
+            .field("frames", &self.frames)
+            .field("sample_rate", &self.sample_rate)
+            .finish()
     }
 }
 
@@ -88,7 +92,8 @@ impl MappedSamples {
         let frames = usize::try_from(read_u64(&map, 16)).map_err(|_| bad("bad header"))?;
         let mut sr = [0u8; 4];
         sr.copy_from_slice(map.get(24..28).unwrap_or(&[0; 4]));
-        let want = channels.checked_mul(frames).and_then(|n| n.checked_mul(4)).and_then(|n| n.checked_add(HEADER)).ok_or_else(|| bad("bad header"))?;
+        let want =
+            channels.checked_mul(frames).and_then(|n| n.checked_mul(4)).and_then(|n| n.checked_add(HEADER)).ok_or_else(|| bad("bad header"))?;
         if map.len() != want || channels == 0 {
             return Err(bad("truncated"));
         }

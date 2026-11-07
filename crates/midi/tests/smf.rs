@@ -94,13 +94,9 @@ fn round_trip() {
 fn first_track_name_wins_and_ignored_meta_preserves_following_notes() {
     let meta = |kind, data: &[u8]| [vec![0, 0xFF, kind], vlq(data.len() as u32), data.to_vec()].concat();
     for first in [&b"First"[..], &b""[..], &[0xFF][..]] {
-        let body = [
-            meta(0x03, first),
-            meta(0x03, b"Second"),
-            meta(0x7F, &[0x03, 0xFF, 0x2F]),
-            vec![0, 0x90, 60, 100, 16, 0x80, 60, 64, 0, 0xFF, 0x2F, 0],
-        ]
-        .concat();
+        let body =
+            [meta(0x03, first), meta(0x03, b"Second"), meta(0x7F, &[0x03, 0xFF, 0x2F]), vec![0, 0x90, 60, 100, 16, 0x80, 60, 64, 0, 0xFF, 0x2F, 0]]
+                .concat();
         let smf = read_smf(&file(0, 960, &[body])).unwrap();
         assert_eq!(smf.tracks.len(), 1);
         assert_eq!(smf.tracks[0].name, String::from_utf8_lossy(first));
@@ -147,16 +143,9 @@ fn division_conversion_96_and_smpte() {
 
 #[test]
 fn running_status_and_velocity_zero_note_off() {
-    let body = [
-        vec![0x00, 0x91, 60, 100],
-        vec![0x00, 64, 90],
-        vlq(960),
-        vec![60, 0],
-        vec![0x00, 64, 0],
-        vec![0x00, 0xB1, 7, 100],
-        vec![0x10, 10, 64],
-    ]
-    .concat();
+    let body =
+        [vec![0x00, 0x91, 60, 100], vec![0x00, 64, 90], vlq(960), vec![60, 0], vec![0x00, 64, 0], vec![0x00, 0xB1, 7, 100], vec![0x10, 10, 64]]
+            .concat();
     let smf = read_smf(&file(0, 960, &[body])).unwrap();
     let seq = &smf.tracks[0].sequence;
     assert_eq!(
@@ -221,12 +210,8 @@ fn overlapping_same_pitch_fifo_and_zero_length() {
 
 #[test]
 fn format1_conductor_folded_and_unknown_chunks_skipped() {
-    let conductor = [
-        vec![0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20],
-        vec![0x00, 0xFF, 0x58, 0x04, 3, 2, 24, 8],
-        vec![0x00, 0xFF, 0x2F, 0x00],
-    ]
-    .concat();
+    let conductor =
+        [vec![0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20], vec![0x00, 0xFF, 0x58, 0x04, 3, 2, 24, 8], vec![0x00, 0xFF, 0x2F, 0x00]].concat();
     let t1 = [vec![0x00, 0xFF, 0x03, 0x03], b"Org".to_vec(), vec![0x00, 0x90, 60, 100, 0x60, 0x80, 60, 0]].concat();
     let mut bytes = header(1, 2, 960);
     bytes.extend(track(&conductor));

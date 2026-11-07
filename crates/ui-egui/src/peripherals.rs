@@ -1,5 +1,5 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
+use crate::widgets::FitScreen;
 use openpt_model::{TrackId, TrackKind};
 use serde_json::json;
 

@@ -844,7 +844,10 @@ fn place_commit(e: &mut Engine, t: TrackId, range: Range, audio: Vec<Vec<f32>>) 
         }
         ntr.mixer.mute = mixer.mute;
         ntr.mixer.automation_mode = mixer.automation_mode;
-        ntr.automation = lanes.into_iter().filter(|l| !matches!(l.param, AutoParam::Plugin { .. }) && (same_pan || !matches!(l.param, AutoParam::Pan(_)))).collect();
+        ntr.automation = lanes
+            .into_iter()
+            .filter(|l| !matches!(l.param, AutoParam::Plugin { .. }) && (same_pan || !matches!(l.param, AutoParam::Pan(_))))
+            .collect();
         if let Some(pl) = ntr.playlist_mut() {
             pl.clips.push(Clip::audio(cid, name, src, 0, 0, range.len()));
         }
@@ -866,10 +869,10 @@ pub fn freeze_track(e: &mut Engine, t: TrackId) -> Result<bool> {
     if let Some(ins) = tr.instrument.as_ref().filter(|i| i.multi_out)
         && s.tracks.iter().any(|a| matches!(a.mixer.input, openpt_model::Route::Bus(b) if ins.outputs.contains(&b)) && !a.is_frozen() && !a.inactive)
     {
-        return Err(EngineError::BadParams("track.freeze".into(), format!(
-            "{}: its multiple outputs feed Aux tracks; freeze those Aux tracks with it (or first)",
-            tr.name
-        )));
+        return Err(EngineError::BadParams(
+            "track.freeze".into(),
+            format!("{}: its multiple outputs feed Aux tracks; freeze those Aux tracks with it (or first)", tr.name),
+        ));
     }
     refuse_longer(s, "track.freeze", &tr.name, "freeze", range.len(), render_limit(tr.channels().max(2)))?;
     let audio = openpt_mix::render_track_pre_fader(s, t, range);

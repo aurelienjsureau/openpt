@@ -325,7 +325,8 @@ fn main() -> eframe::Result {
                     log::warn!("graphics adapter is a software renderer: drawing runs on the CPU and will be slow (update the graphics driver)");
                 }
             }
-            let player =if no_audio { None } else { Some(openpt_playback::Player::with_config_queued(Arc::new(engine.session().clone()), &prefs.audio)) };
+            let player =
+                if no_audio { None } else { Some(openpt_playback::Player::with_config_queued(Arc::new(engine.session().clone()), &prefs.audio)) };
             let mut app = SoundApp::new(engine, player, services());
             app.autosave_dir = prefs_path().and_then(|p| p.parent().map(|d| d.join("Autosave")));
             app.leftovers = app.autosave_dir.as_deref().map(openpt_engine::autosave::leftovers).unwrap_or_default();

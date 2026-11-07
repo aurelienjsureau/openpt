@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold};
+use crate::widgets::FitScreen;
 use egui::{Align2, vec2};
 use openpt_engine::io::PreparedAudio;
 use openpt_time::Samples;
@@ -100,7 +100,8 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -80.0))
-        .fit_screen(ctx).show(ctx, |ui| {
+        .fit_screen(ctx)
+        .show(ctx, |ui| {
             ui.set_width(380.0);
             ui.label(format!("{done} of {total} files"));
             ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).show_percentage());

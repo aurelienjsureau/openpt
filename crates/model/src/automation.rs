@@ -51,10 +51,7 @@ pub enum AutoParam {
     SendPan(u8),
     SendMute(u8),
     Surround(u8),
-    Plugin {
-        slot: u8,
-        param: String,
-    },
+    Plugin { slot: u8, param: String },
 }
 
 pub const BYPASS_PARAM: &str = "master_bypass";

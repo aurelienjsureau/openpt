@@ -772,11 +772,10 @@ impl Linear {
             return;
         }
         s -= 2;
-        if self.job_fade
-            && s < 2 {
-                self.convolve(true, s);
-                return;
-            }
+        if self.job_fade && s < 2 {
+            self.convolve(true, s);
+            return;
+        }
         let (h, m) = (self.h, self.m);
         let scale = 1.0 / m as f32;
         for c in 0..2 {

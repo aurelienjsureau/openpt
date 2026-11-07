@@ -9,7 +9,8 @@ const WALLS: [(usize, f32); 6] = [(0, -2.5), (0, 2.5), (1, -3.0), (1, 3.0), (2, 
 const SPEED_OF_SOUND: f32 = 343.0;
 const WALL_LOSS: f32 = 0.6;
 const WALL_CUTOFF_HZ: f32 = 7_000.0;
-const BUS_DIRECTIONS: [(f32, f32); 9] = [(0.0, 0.0), (0.0, 30.0), (0.0, -30.0), (0.0, 90.0), (0.0, -90.0), (0.0, 150.0), (0.0, -150.0), (45.0, 90.0), (45.0, -90.0)];
+const BUS_DIRECTIONS: [(f32, f32); 9] =
+    [(0.0, 0.0), (0.0, 30.0), (0.0, -30.0), (0.0, 90.0), (0.0, -90.0), (0.0, 150.0), (0.0, -150.0), (45.0, 90.0), (45.0, -90.0)];
 const LATE_LINES_MS: [f32; 4] = [23.1, 29.7, 37.3, 43.9];
 const LATE_T60_S: f32 = 0.35;
 const LATE_CUTOFF_HZ: f32 = 6_000.0;
@@ -115,7 +116,12 @@ pub fn split_modes(s: &Session) -> u8 {
         .iter()
         .filter(|t| t.kind != TrackKind::Master && !t.inactive && t.mixer.output == Route::Main && s.edit.is_object(t.id))
         .fold(0u8, |mask, t| mask | (1 << t.mixer.binaural_distance.index()));
-    let bed = fmt.speakers().iter().enumerate().filter(|(_, sp)| !sp.is_lfe()).fold(0u8, |mask, (c, _)| mask | (1 << s.atmos.binaural_distance.get(c).copied().unwrap_or_default().index()));
+    let bed = fmt
+        .speakers()
+        .iter()
+        .enumerate()
+        .filter(|(_, sp)| !sp.is_lfe())
+        .fold(0u8, |mask, (c, _)| mask | (1 << s.atmos.binaural_distance.get(c).copied().unwrap_or_default().index()));
     if objects == bed && bed.count_ones() == 1 { 0 } else { objects }
 }
 
@@ -139,7 +145,13 @@ fn ear_for(set: &HrirSet, elevation: f32, azimuth: f32, rate: u32, gain: f32, ma
             ir.to_vec()
         } else {
             let scale = rate as f32 / set.rate as f32;
-            openpt_dsp::offline::resample(&[ir.to_vec()], set.rate, rate).into_iter().next().unwrap_or_default().into_iter().map(|x| x / scale).collect()
+            openpt_dsp::offline::resample(&[ir.to_vec()], set.rate, rate)
+                .into_iter()
+                .next()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|x| x / scale)
+                .collect()
         };
         if let Some(m) = max_taps {
             out.truncate((m as f32 * rate.max(1) as f32 / set.rate.max(1) as f32) as usize);
@@ -279,7 +291,9 @@ impl Monitor {
         let mut channels = Vec::new();
         let mut buses = Vec::new();
         if binaural {
-            let delays_for = |sp: Speaker, d: BinauralDistance| profile(d).filter(|_| !sp.is_lfe()).map(|(distance, _, level, _)| reflections_for(sp, distance, level, rate));
+            let delays_for = |sp: Speaker, d: BinauralDistance| {
+                profile(d).filter(|_| !sp.is_lfe()).map(|(distance, _, level, _)| reflections_for(sp, distance, level, rate))
+            };
             let bed_of = |c: usize| settings.binaural_distance.get(c).copied().unwrap_or_default();
             let wanted = |c: usize, sp: Speaker, d: BinauralDistance| bed_of(c) == d || (!sp.is_lfe() && objects & (1 << d.index()) != 0);
             let longest = speakers
@@ -296,7 +310,18 @@ impl Monitor {
                     let channel = match profile(d).filter(|_| !lfe) {
                         None => {
                             let [l, r] = if lfe { [1.0, 1.0] } else { lr(1.0, side(*sp)) };
-                            Channel { source, slot, bed, lfe, plain: Some((l, r)), ear: None, history: Vec::new(), ring: Vec::new(), reflections: Vec::new(), late: 0.0 }
+                            Channel {
+                                source,
+                                slot,
+                                bed,
+                                lfe,
+                                plain: Some((l, r)),
+                                ear: None,
+                                history: Vec::new(),
+                                ring: Vec::new(),
+                                reflections: Vec::new(),
+                                late: 0.0,
+                            }
                         }
                         Some((distance, direct, level, late)) => {
                             let ear = ear_for(&set, sp.elevation(), sp.azimuth(), rate, direct, None);
@@ -596,7 +621,8 @@ mod tests {
             println!("{d:?}: direct/wet {:.1} dB, total {:.1} dB", 10.0 * (direct / wet.max(1e-12)).log10(), 10.0 * (direct + wet).log10());
             wet / direct
         };
-        let (off, near, mid, far) = (wet_ratio(BinauralDistance::Off), wet_ratio(BinauralDistance::Near), wet_ratio(BinauralDistance::Mid), wet_ratio(BinauralDistance::Far));
+        let (off, near, mid, far) =
+            (wet_ratio(BinauralDistance::Off), wet_ratio(BinauralDistance::Near), wet_ratio(BinauralDistance::Mid), wet_ratio(BinauralDistance::Far));
         assert_eq!(off, 0.0);
         assert!(near > 0.0 && near < mid && mid < far, "{near} {mid} {far}");
     }

@@ -477,8 +477,10 @@ fn paste_merge_midi(e: &mut Engine, p: &Value) -> Result<Value> {
             let mut hosted: Vec<(ClipId, openpt_midi::Sequence)> = Vec::new();
             let mut gaps: Vec<(Range, openpt_midi::Sequence)> = Vec::new();
             let mut grow: Vec<(ClipId, Samples)> = Vec::new();
-            let existing: Vec<(ClipId, Range, bool)> =
-                s.track(*t).map(|tr| tr.clips().iter().map(|x| (x.id, x.range(), matches!(x.content, ClipContent::Midi { .. }))).collect()).unwrap_or_default();
+            let existing: Vec<(ClipId, Range, bool)> = s
+                .track(*t)
+                .map(|tr| tr.clips().iter().map(|x| (x.id, x.range(), matches!(x.content, ClipContent::Midi { .. }))).collect())
+                .unwrap_or_default();
             let next_after = |x: Samples, me: ClipId| existing.iter().filter(|(id, r, _)| *id != me && r.start >= x).map(|(_, r, _)| r.start).min();
             let slot = |abs: Samples| -> std::result::Result<(ClipId, Samples), Range> {
                 if let Some((id, r, _)) = existing.iter().find(|(_, r, m)| *m && r.contains(abs)) {

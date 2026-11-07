@@ -193,10 +193,12 @@ impl StripMeter {
         }
         let last = self.peaks.len().saturating_sub(1);
         self.peak = [self.peaks.first().copied().unwrap_or(0.0), self.peaks.get(1.min(last)).copied().unwrap_or(0.0)];
-        let rms = |c: usize| bufs.get(c).map_or(0.0, |b| {
-            let b = b.get(..frames).unwrap_or(&[]);
-            if b.is_empty() { 0.0 } else { (b.iter().map(|x| x * x).sum::<f32>() / b.len() as f32).sqrt() }
-        });
+        let rms = |c: usize| {
+            bufs.get(c).map_or(0.0, |b| {
+                let b = b.get(..frames).unwrap_or(&[]);
+                if b.is_empty() { 0.0 } else { (b.iter().map(|x| x * x).sum::<f32>() / b.len() as f32).sqrt() }
+            })
+        };
         self.rms = [rms(0), rms(1.min(last))];
         self.gain_reduction_db = gr;
     }
@@ -1081,7 +1083,8 @@ impl MixEngine {
                 m.plugin_failures = strip.failures;
             }
         }
-        let solo_path = if self.solo.listens() { s.outputs.iter().find(|o| !s.edit.afl_pfl_path.is_empty() && o.name == s.edit.afl_pfl_path) } else { None };
+        let solo_path =
+            if self.solo.listens() { s.outputs.iter().find(|o| !s.edit.afl_pfl_path.is_empty() && o.name == s.edit.afl_pfl_path) } else { None };
         if self.solo.listens() && solo_path.is_none() {
             for (m, b) in self.main.iter_mut().zip(&self.solo_bus) {
                 if let (Some(d), Some(x)) = (m.get_mut(..frames), b.get(..frames)) {
@@ -1413,7 +1416,9 @@ fn process_strip(
     let transport = transport_at(s, pos, !live.monitor_only, live.recording);
     match t.kind {
         _ if t.is_frozen() => {
-            if !live.monitor_only && let Some(c) = &t.freeze {
+            if !live.monitor_only
+                && let Some(c) = &t.freeze
+            {
                 render_clip(s, c, pos, frames, &mut strip.buf, &mut strip.scratch);
             }
         }
@@ -1560,10 +1565,7 @@ fn process_strip(
             c.iter_mut().take(frames).for_each(|x| *x *= trim);
         }
     }
-    let heat = s.heat.active
-        && !s.heat.bypass
-        && !t.mixer.heat_bypass
-        && t.kind == TrackKind::Audio;
+    let heat = s.heat.active && !s.heat.bypass && !t.mixer.heat_bypass && t.kind == TrackKind::Audio;
     let sr = s.sample_rate.as_f64() as f32;
     strip.heat_peak = 0.0;
     if heat && t.mixer.heat_pre {
@@ -2041,7 +2043,8 @@ fn writes_bus(t: &Track, b: BusId) -> bool {
 
 fn aux_waves(s: &Session, order: &[usize]) -> Vec<(usize, usize)> {
     let live = |t: &Track| !(t.kind == TrackKind::Master || t.inactive || t.kind == TrackKind::Vca);
-    let auxes: Vec<(usize, &Track)> = order.iter().filter_map(|&i| s.tracks.get(i).map(|t| (i, t))).filter(|(_, t)| live(t) && reads_bus(t)).collect();
+    let auxes: Vec<(usize, &Track)> =
+        order.iter().filter_map(|&i| s.tracks.get(i).map(|t| (i, t))).filter(|(_, t)| live(t) && reads_bus(t)).collect();
     let reads = |t: &Track| -> Vec<BusId> {
         let mut v: Vec<BusId> = key_busses(t).collect();
         if let Route::Bus(b) = t.mixer.input {
@@ -2129,7 +2132,8 @@ pub fn solo_kept(s: &Session, out: &mut Vec<TrackId>) {
     let n = s.tracks.len();
     let live = |t: &Track| t.kind != TrackKind::Vca && !t.inactive;
     let into = |t: &Track, f: &Track| {
-        f.id != t.id && ((f.is_folder() && t.folder == Some(f.id)) || matches!((&t.mixer.output, &f.mixer.input), (Route::Bus(a), Route::Bus(b)) if a == b))
+        f.id != t.id
+            && ((f.is_folder() && t.folder == Some(f.id)) || matches!((&t.mixer.output, &f.mixer.input), (Route::Bus(a), Route::Bus(b)) if a == b))
     };
     let feeds = |t: &Track, f: &Track| {
         f.id != t.id
@@ -2717,7 +2721,8 @@ pub fn surround_at(t: &Track, pos: Samples) -> Option<SurroundPan> {
 const PAN_STEP: Samples = 64;
 
 fn pan_segment(t: &Track, pos: Samples, start: usize, frames: usize) -> (Samples, usize) {
-    let automated = t.mixer.automation_mode.reads() && t.automation.iter().any(|l| matches!(l.param, AutoParam::Pan(_) | AutoParam::Surround(_)) && !l.points.is_empty());
+    let automated = t.mixer.automation_mode.reads()
+        && t.automation.iter().any(|l| matches!(l.param, AutoParam::Pan(_) | AutoParam::Surround(_)) && !l.points.is_empty());
     if !automated {
         return (pos, frames);
     }
@@ -2807,7 +2812,13 @@ fn layout_of(fmt: ChannelFormat, out: &mut [SpeakerPos; MAX_CHANNELS]) -> usize 
 }
 
 fn surround_params(sp: &SurroundPan, dx: f32) -> SurroundParams {
-    SurroundParams { x: (sp.x + dx * (1.0 - sp.x.abs().min(1.0))).clamp(-1.0, 1.0), y: sp.y, z: sp.z, divergence: sp.divergence, center: sp.center / 100.0 }
+    SurroundParams {
+        x: (sp.x + dx * (1.0 - sp.x.abs().min(1.0))).clamp(-1.0, 1.0),
+        y: sp.y,
+        z: sp.z,
+        divergence: sp.divergence,
+        center: sp.center / 100.0,
+    }
 }
 
 fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: usize, pan: &PanSpec<'_>, law: PanLaw) -> Matrix {
@@ -3504,7 +3515,12 @@ mod tests {
         let all = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("All"));
         let other = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Bass"));
         let vca = s.add_track(TrackKind::Vca, ChannelFormat::Mono, Some("Vocals"));
-        for (t, input, output) in [(src, Route::None, Route::Bus(a)), (sub, Route::Bus(a), Route::Bus(f)), (folder, Route::Bus(f), Route::Bus(v)), (all, Route::Bus(v), Route::Main)] {
+        for (t, input, output) in [
+            (src, Route::None, Route::Bus(a)),
+            (sub, Route::Bus(a), Route::Bus(f)),
+            (folder, Route::Bus(f), Route::Bus(v)),
+            (all, Route::Bus(v), Route::Main),
+        ] {
             let tr = s.track_mut(t).unwrap();
             tr.mixer.input = input;
             tr.mixer.output = output;
@@ -3807,7 +3823,14 @@ mod tests {
         let ears = Ears { inner: openpt_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut eng = MixEngine::new(48_000.0, 512);
         eng.set_external_instances(true);
-        eng.adopt(vec![PreparedInstance { track: t, slot: INSTRUMENT_SLOT, id: "vst3:test.ears".into(), ch: 2, plugin: Box::new(ears), state_loaded: false }]);
+        eng.adopt(vec![PreparedInstance {
+            track: t,
+            slot: INSTRUMENT_SLOT,
+            id: "vst3:test.ears".into(),
+            ch: 2,
+            plugin: Box::new(ears),
+            state_loaded: false,
+        }]);
         render_block(&mut eng, &s, 0);
         assert_eq!(std::mem::take(&mut *heard.lock().unwrap()), vec![(0, [0xB0, 121, 0]), (100, [0xB0, 64, 127])]);
         render_block(&mut eng, &s, 36_000);
@@ -3860,7 +3883,14 @@ mod tests {
         let keys = Keys { inner: openpt_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut eng = MixEngine::new(48_000.0, 512);
         eng.set_external_instances(true);
-        eng.adopt(vec![PreparedInstance { track: t, slot: INSTRUMENT_SLOT, id: "vst3:test.keys".into(), ch: 2, plugin: Box::new(keys), state_loaded: false }]);
+        eng.adopt(vec![PreparedInstance {
+            track: t,
+            slot: INSTRUMENT_SLOT,
+            id: "vst3:test.keys".into(),
+            ch: 2,
+            plugin: Box::new(keys),
+            state_loaded: false,
+        }]);
         render_block(&mut eng, &s, 0);
         assert_eq!(*heard.lock().unwrap(), vec![(72, 80)]);
     }
@@ -3929,7 +3959,14 @@ mod tests {
         s.track_mut(t).unwrap().mixer.inserts[0] = None;
         render_block(&mut eng, &s, 20 * 512);
         assert_eq!(eng.take_retired().len(), 1);
-        eng.adopt(vec![PreparedInstance { track: t, slot: 3, id: "vst3:x".into(), ch: 1, plugin: openpt_dsp::create("gain").unwrap(), state_loaded: false }]);
+        eng.adopt(vec![PreparedInstance {
+            track: t,
+            slot: 3,
+            id: "vst3:x".into(),
+            ch: 1,
+            plugin: openpt_dsp::create("gain").unwrap(),
+            state_loaded: false,
+        }]);
         render_block(&mut eng, &s, 21 * 512);
         assert_eq!(eng.take_retired().len(), 1);
         assert!(eng.drain_plugins().is_empty());
@@ -3959,7 +3996,14 @@ mod tests {
     }
 
     fn nan(track: TrackId, slot: usize, ch: usize) -> Vec<PreparedInstance> {
-        vec![PreparedInstance { track, slot, id: "vst3:test.nan".into(), ch, plugin: Box::new(Nan(openpt_dsp::create("gain").unwrap())), state_loaded: false }]
+        vec![PreparedInstance {
+            track,
+            slot,
+            id: "vst3:test.nan".into(),
+            ch,
+            plugin: Box::new(Nan(openpt_dsp::create("gain").unwrap())),
+            state_loaded: false,
+        }]
     }
 
     #[test]
@@ -4036,7 +4080,14 @@ mod tests {
         eng.set_external_instances(true);
         let sets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let fake = Stateful { inner: openpt_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
-        eng.adopt(vec![PreparedInstance { track: t, slot: 0, id: "vst3:00000000000000000000000000000001".into(), ch: 1, plugin: Box::new(fake), state_loaded: true }]);
+        eng.adopt(vec![PreparedInstance {
+            track: t,
+            slot: 0,
+            id: "vst3:00000000000000000000000000000001".into(),
+            ch: 1,
+            plugin: Box::new(fake),
+            state_loaded: true,
+        }]);
         render_block(&mut eng, &s, 0);
         assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 0, "the state wins over stored values");
         render_block(&mut eng, &s, 512);
@@ -4160,7 +4211,9 @@ mod tests {
 
     #[test]
     fn aux_chains_of_different_depths_line_up() {
-        for (master_lookahead, verb_lookahead, verb_to_mix) in [(5.0, 0.0, false), (0.0, 5.0, false), (5.0, 2.0, false), (5.0, 2.0, true), (2.0, 5.0, true)] {
+        for (master_lookahead, verb_lookahead, verb_to_mix) in
+            [(5.0, 0.0, false), (0.0, 5.0, false), (5.0, 2.0, false), (5.0, 2.0, true), (2.0, 5.0, true)]
+        {
             let mut s = Session::default();
             s.edit.click = false;
             let n = 16_384;
@@ -4354,7 +4407,14 @@ mod tests {
             s.track_mut(track).unwrap().mixer.inserts[0] = Some(Insert::new("vst3:test.latent"));
             let mut gain = openpt_dsp::create("gain").unwrap();
             gain.prepare(48_000.0, 512, 1);
-            eng.adopt(vec![PreparedInstance { track, slot: 0, id: "vst3:test.latent".into(), ch: 1, plugin: Box::new(Latent(gain)), state_loaded: false }]);
+            eng.adopt(vec![PreparedInstance {
+                track,
+                slot: 0,
+                id: "vst3:test.latent".into(),
+                ch: 1,
+                plugin: Box::new(Latent(gain)),
+                state_loaded: false,
+            }]);
         }
         render_block(&mut eng, &s, 0);
         assert_eq!((eng.track_latency, eng.latency), (MAX_LATENCY, 2 * MAX_LATENCY));

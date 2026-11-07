@@ -71,11 +71,7 @@ enum Cmd {
     MidiInput(Arc<midi::MidiInputRing>),
     MidiRecord(Arc<midi::MidiRecordRing>),
     Recording(bool),
-    Play {
-        from: Samples,
-        end: Option<Samples>,
-        looped: Option<Range>,
-    },
+    Play { from: Samples, end: Option<Samples>, looped: Option<Range> },
     Stop,
     Locate(Samples),
 }
@@ -1140,7 +1136,8 @@ impl Side {
         for k in stale {
             self.forget(k);
         }
-        let (live, todo): (Vec<_>, Vec<_>) = specs.into_iter().partition(|spec| self.shadow.get(&(spec.track, spec.slot)).is_some_and(|(id, ch, _)| *id == spec.id && *ch == spec.ch));
+        let (live, todo): (Vec<_>, Vec<_>) =
+            specs.into_iter().partition(|spec| self.shadow.get(&(spec.track, spec.slot)).is_some_and(|(id, ch, _)| *id == spec.id && *ch == spec.ch));
         for spec in live {
             let key = (spec.track, spec.slot);
             let Some(c) = openpt_mix::channel_info(s, spec.track) else { continue };
@@ -1470,7 +1467,11 @@ mod tests {
         let (gtx, grx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(openpt_model::Session::default()), 48_000.0, gtx);
         let plugin = openpt_dsp::create("gain").unwrap();
-        tx.send(Cmd::Session(Arc::clone(&s), vec![PreparedInstance { track: t, slot: 1, id: "vst3:test.fake".into(), ch: 2, plugin, state_loaded: false }])).unwrap();
+        tx.send(Cmd::Session(
+            Arc::clone(&s),
+            vec![PreparedInstance { track: t, slot: 1, id: "vst3:test.fake".into(), ch: 2, plugin, state_loaded: false }],
+        ))
+        .unwrap();
         let mut out = vec![0.0f32; 256];
         st.fill(&mut out, 2);
         assert!(grx.try_recv().is_err(), "nothing retired yet");
@@ -1479,7 +1480,14 @@ mod tests {
         assert_eq!(grx.try_recv().unwrap().len(), 1);
         tx.send(Cmd::Session(
             Arc::clone(&s),
-            vec![PreparedInstance { track: t, slot: 1, id: "vst3:test.fake".into(), ch: 2, plugin: openpt_dsp::create("gain").unwrap(), state_loaded: false }],
+            vec![PreparedInstance {
+                track: t,
+                slot: 1,
+                id: "vst3:test.fake".into(),
+                ch: 2,
+                plugin: openpt_dsp::create("gain").unwrap(),
+                state_loaded: false,
+            }],
         ))
         .unwrap();
         st.fill(&mut out, 2);
@@ -1647,7 +1655,7 @@ mod tests {
                 playing: AtomicBool::new(false),
                 speed: AtomicU32::new(1000),
                 meters: Mutex::new(MeterSnapshot::default()),
-            late: Mutex::default(),
+                late: Mutex::default(),
             });
             let (tx, rx) = channel();
             let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);

@@ -395,7 +395,9 @@ mod tests {
         let mut offenders = vec![];
         for path in files {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if path.parent() == Some(src.as_path()) && matches!(name, "io.rs" | "file_access.rs" | "autosave.rs" | "audio_cache.rs") || name.starts_with("tests") {
+            if path.parent() == Some(src.as_path()) && matches!(name, "io.rs" | "file_access.rs" | "autosave.rs" | "audio_cache.rs")
+                || name.starts_with("tests")
+            {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();

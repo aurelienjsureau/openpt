@@ -195,11 +195,7 @@ fn tempo_clear(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let sr = s.sample_rate;
     let (a, b) = (s.tempo.samples_to_ticks(r.start, sr), s.tempo.samples_to_ticks(r.end, sr));
-    let ticks: Vec<i64> = if meter {
-        s.tempo.meters().iter().map(|m| m.tick).collect()
-    } else {
-        s.tempo.tempos().iter().map(|t| t.tick).collect()
-    };
+    let ticks: Vec<i64> = if meter { s.tempo.meters().iter().map(|m| m.tick).collect() } else { s.tempo.tempos().iter().map(|t| t.tick).collect() };
     let mut removed = 0;
     for t in ticks.into_iter().filter(|t| *t > 0 && *t >= a && *t < b) {
         removed += usize::from(if meter { s.tempo.remove_meter(t) } else { s.tempo.remove_tempo(t) });

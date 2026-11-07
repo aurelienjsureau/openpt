@@ -721,7 +721,9 @@ fn ara_command(app: &mut SoundApp, id: &str, p: &Value) -> Result<Value, String>
             v.dedup();
             v
         }
-        "track.ara" => p.get("track").and_then(Value::as_u64).map(|t| vec![openpt_model::TrackId(t)]).unwrap_or_else(|| s.edit.selected_tracks.clone()),
+        "track.ara" => {
+            p.get("track").and_then(Value::as_u64).map(|t| vec![openpt_model::TrackId(t)]).unwrap_or_else(|| s.edit.selected_tracks.clone())
+        }
         _ => Vec::new(),
     };
     if id == "window.ara" {

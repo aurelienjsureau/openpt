@@ -127,7 +127,11 @@ pub fn parse_midi_message(port_id: u32, timestamp_us: u64, bytes: &[u8]) -> Opti
             }
         }
         0xF0 => {
-            if status >= 0xF8 { Some(LiveMidiEvent { port_id, timestamp_us, len: 1, data: [status, 0, 0] }) } else { None }
+            if status >= 0xF8 {
+                Some(LiveMidiEvent { port_id, timestamp_us, len: 1, data: [status, 0, 0] })
+            } else {
+                None
+            }
         }
         _ => None,
     }

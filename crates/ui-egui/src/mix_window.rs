@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, mono, regular, rgb};
+use crate::widgets::FitScreen;
 use crate::widgets::{
     PannerEdit, PannerSpeaker, db_text, fader, fader_slot, groove, inset, meter, meter_scale, multi_meter, pan_knob, pan_text, raised_key,
     rec_toggle, selector_box, selector_box_with_tooltip, shade, surround_panner, text_toggle, vgradient,
@@ -82,10 +82,12 @@ fn monitor_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
             openpt_model::AtmosMonitor::Surround51 => "5.1",
             openpt_model::AtmosMonitor::Stereo => "STEREO",
         };
-        if text_toggle(&mut c, vec2(sec.width() - 8.0, 16.0), short, current == m, t.mode_on, m.label()).clicked() && current != m
-            && let Err(e) = app.run("setup.atmos", json!({"monitor": m.id()})) {
-                app.ui.status = e;
-            }
+        if text_toggle(&mut c, vec2(sec.width() - 8.0, 16.0), short, current == m, t.mode_on, m.label()).clicked()
+            && current != m
+            && let Err(e) = app.run("setup.atmos", json!({"monitor": m.id()}))
+        {
+            app.ui.status = e;
+        }
     }
 }
 
@@ -132,7 +134,8 @@ fn heat_panel(app: &mut SoundApp, ui: &mut Ui, col: Rect) {
     for (label, v0, range, default, key) in [("Drive", heat.drive, 0.0..=1.0, 0.5, "drive"), ("Tone", heat.tone, -1.0..=1.0, 0.0, "tone")] {
         let raw_id = c.id().with(("heat_raw", key));
         let mut v = c.ctx().data(|d| d.get_temp::<f32>(raw_id)).unwrap_or(v0);
-        let tip = if key == "tone" { "HEAT Tone: darker (left) to brighter (right)" } else { "HEAT Drive: tape (left), off (centre), triode (right)" };
+        let tip =
+            if key == "tone" { "HEAT Tone: darker (left) to brighter (right)" } else { "HEAT Drive: tape (left), off (centre), triode (right)" };
         let resp = crate::widgets::knob(&mut c, 26.0, &mut v, range, default, tip);
         if resp.changed() {
             c.ctx().data_mut(|d| d.insert_temp(raw_id, v));
@@ -1678,7 +1681,8 @@ fn send_window_contents(app: &mut SoundApp, ctx: &egui::Context) {
         .auto_sized()
         .collapsible(false)
         .default_pos(ctx.pointer_latest_pos().map_or(pos2(200.0, 200.0), |p| p + vec2(24.0, -160.0)))
-        .fit_screen(ctx).show(ctx, |ui| {
+        .fit_screen(ctx)
+        .show(ctx, |ui| {
             ui.set_width(150.0);
             ui.vertical_centered(|ui| {
                 ui.label(egui::RichText::new(route_name(app, &send.target)).color(t.counter_text));

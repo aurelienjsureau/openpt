@@ -53,7 +53,10 @@ fn angle_between(a: f32, b: f32) -> f32 {
 impl HrirSet {
     pub fn at(&self, elevation: f32, azimuth: f32) -> Option<&Hrir> {
         let high = elevation > 20.0;
-        self.irs.iter().filter(|h| (h.elevation > 20.0) == high).min_by(|a, b| angle_between(a.azimuth, azimuth).total_cmp(&angle_between(b.azimuth, azimuth)))
+        self.irs
+            .iter()
+            .filter(|h| (h.elevation > 20.0) == high)
+            .min_by(|a, b| angle_between(a.azimuth, azimuth).total_cmp(&angle_between(b.azimuth, azimuth)))
     }
 }
 
@@ -194,7 +197,13 @@ mod tests {
         let kem = kemar();
         for (el, az) in [(0.0f32, 0.0f32), (0.0, 30.0), (0.0, 150.0), (0.0, 180.0), (0.0, -150.0)] {
             let (a, b) = (set.at(el, az).unwrap(), kem.at(el, az).unwrap());
-            println!("az {az}: L {:.1} dB R {:.1} dB, KEMAR L {:.1} R {:.1}", 10.0 * e(&a.left).log10(), 10.0 * e(&a.right).log10(), 10.0 * e(&b.left).log10(), 10.0 * e(&b.right).log10());
+            println!(
+                "az {az}: L {:.1} dB R {:.1} dB, KEMAR L {:.1} R {:.1}",
+                10.0 * e(&a.left).log10(),
+                10.0 * e(&a.right).log10(),
+                10.0 * e(&b.left).log10(),
+                10.0 * e(&b.right).log10()
+            );
         }
     }
 }

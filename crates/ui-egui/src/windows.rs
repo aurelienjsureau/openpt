@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, mono, rgb};
+use crate::widgets::FitScreen;
 use egui::{Color32, Sense, vec2};
 use openpt_model::{AutomationMode, ClipContent};
 use openpt_playback::AudioConfig;

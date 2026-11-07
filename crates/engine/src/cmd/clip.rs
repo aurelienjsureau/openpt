@@ -344,11 +344,9 @@ fn place_sources(e: &mut Engine, p: &Value) -> Result<Value> {
         for (k, (name, _, audio)) in files.iter().enumerate() {
             let t = match audio_tracks.get(from + k) {
                 Some(t) => *t,
-                None => s.add_track(
-                    openpt_model::TrackKind::Audio,
-                    openpt_model::ChannelFormat::for_channels(audio.num_channels().min(2)),
-                    Some(name),
-                ),
+                None => {
+                    s.add_track(openpt_model::TrackKind::Audio, openpt_model::ChannelFormat::for_channels(audio.num_channels().min(2)), Some(name))
+                }
             };
             let src = ids[k];
             placed.push(place_on(s, t, src, name.clone(), i64::try_from(audio.frames()).unwrap_or(i64::MAX), at)?);

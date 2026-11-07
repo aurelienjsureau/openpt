@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold};
+use crate::widgets::FitScreen;
 use egui::{Align2, Color32, vec2};
 use openpt_engine::Engine;
 use openpt_model::{ClipId, Session, SourceId, TrackId};
@@ -24,110 +24,28 @@ impl Default for NewTrackRow {
 
 #[derive(Debug, Clone)]
 pub enum Dialog {
-    NewTracks {
-        rows: Vec<NewTrackRow>,
-    },
-    Bounce {
-        path: String,
-        format: String,
-        bit_depth: String,
-        normalize: bool,
-        dither: bool,
-        realtime: bool,
-    },
-    RenameTrack {
-        id: TrackId,
-        name: String,
-    },
-    RenameClip {
-        id: ClipId,
-        name: String,
-    },
-    RenameMarker {
-        id: openpt_model::MarkerId,
-        name: String,
-    },
-    ClearClips {
-        clips: Vec<ClipId>,
-        sources: Vec<SourceId>,
-        message: String,
-    },
-    PathPrompt {
-        cmd: String,
-        title: String,
-        path: String,
-        key: String,
-    },
-    Number {
-        cmd: String,
-        title: String,
-        key: String,
-        value: f64,
-        suffix: String,
-    },
-    TempoChange {
-        loc: String,
-        bpm: f64,
-        from_tick: Option<i64>,
-        snap_bar: bool,
-    },
+    NewTracks { rows: Vec<NewTrackRow> },
+    Bounce { path: String, format: String, bit_depth: String, normalize: bool, dither: bool, realtime: bool },
+    RenameTrack { id: TrackId, name: String },
+    RenameClip { id: ClipId, name: String },
+    RenameMarker { id: openpt_model::MarkerId, name: String },
+    ClearClips { clips: Vec<ClipId>, sources: Vec<SourceId>, message: String },
+    PathPrompt { cmd: String, title: String, path: String, key: String },
+    Number { cmd: String, title: String, key: String, value: f64, suffix: String },
+    TempoChange { loc: String, bpm: f64, from_tick: Option<i64>, snap_bar: bool },
     Spot(crate::spot::Spot),
-    Fades {
-        shape: String,
-        batch: Option<BatchFades>,
-    },
+    Fades { shape: String, batch: Option<BatchFades> },
     ImportSessionData(Box<ImportSessionData>),
-    LinkedChanged {
-        path: String,
-        tracks: Vec<String>,
-    },
-    NewFolder {
-        name: String,
-        routing: bool,
-        route: bool,
-        tracks: Vec<u64>,
-    },
-    StripSilence {
-        threshold: f64,
-        min_ms: f64,
-        pre_ms: f64,
-        post_ms: f64,
-    },
-    Group {
-        name: String,
-        edit: bool,
-        mix: bool,
-        members: Vec<(u64, String, bool)>,
-        modify: Option<u64>,
-    },
-    Conform {
-        bpm: String,
-        bar: i64,
-        grid: String,
-        refs: Vec<(u64, String, bool)>,
-        all_tracks: bool,
-    },
-    Session {
-        frame_rate: String,
-        bit_depth: String,
-    },
-    ScoreSetup {
-        title: String,
-        composer: String,
-        bars_per_system: u32,
-        show_track_names: bool,
-    },
-    MidiInputDevices {
-        devices: Vec<(String, bool)>,
-    },
-    SaveTrackPreset {
-        track: u64,
-        name: String,
-        category: String,
-    },
-    SaveChanges {
-        then: (String, Value),
-    },
+    LinkedChanged { path: String, tracks: Vec<String> },
+    NewFolder { name: String, routing: bool, route: bool, tracks: Vec<u64> },
+    StripSilence { threshold: f64, min_ms: f64, pre_ms: f64, post_ms: f64 },
+    Group { name: String, edit: bool, mix: bool, members: Vec<(u64, String, bool)>, modify: Option<u64> },
+    Conform { bpm: String, bar: i64, grid: String, refs: Vec<(u64, String, bool)>, all_tracks: bool },
+    Session { frame_rate: String, bit_depth: String },
+    ScoreSetup { title: String, composer: String, bars_per_system: u32, show_track_names: bool },
+    MidiInputDevices { devices: Vec<(String, bool)> },
+    SaveTrackPreset { track: u64, name: String, category: String },
+    SaveChanges { then: (String, Value) },
 }
 
 #[derive(Default)]

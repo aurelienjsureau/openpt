@@ -157,7 +157,15 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"tracks": tracks.len()}))
             }
         ),
-        cmd!("track.freeze", "Freeze", ["Track"], None, "{tracks?, value?: bool} — renders each track through its inserts and plays that instead (Unfreeze when they all are)", has_selection, freeze),
+        cmd!(
+            "track.freeze",
+            "Freeze",
+            ["Track"],
+            None,
+            "{tracks?, value?: bool} — renders each track through its inserts and plays that instead (Unfreeze when they all are)",
+            has_selection,
+            freeze
+        ),
         cmd!("track.commit", "Commit...", ["Track"], Some("Alt+Shift+C"), "{tracks?}", has_selection, commit),
         cmd!("track.bounce", "Bounce...", ["Track"], Some("Cmd+Alt+Shift+B"), "{tracks?}", has_selection, commit),
         cmd!("track.bypass_inserts", "All", ["Track", "Bypass Inserts"], None, "{tracks?, bypass?: bool}", has_selection, bypass_inserts),
@@ -524,7 +532,9 @@ fn toggle_group(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn group_modify(e: &mut Engine, p: &Value) -> Result<Value> {
     let g = find_group(e, p, "track.group_modify")?;
-    let list = |k: &str| -> Vec<openpt_model::TrackId> { p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(openpt_model::TrackId).collect()).unwrap_or_default() };
+    let list = |k: &str| -> Vec<openpt_model::TrackId> {
+        p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(openpt_model::TrackId).collect()).unwrap_or_default()
+    };
     let (add, remove) = (list("add"), list("remove"));
     let s = e.session_mut();
     let order: Vec<openpt_model::TrackId> = s.tracks.iter().map(|t| t.id).collect();

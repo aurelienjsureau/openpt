@@ -119,14 +119,8 @@ pub enum VelocityOp {
     Set(u8),
     Add(i32),
     Scale(f32),
-    Limit {
-        min: u8,
-        max: u8,
-    },
-    Ramp {
-        from: u8,
-        to: u8,
-    },
+    Limit { min: u8, max: u8 },
+    Ramp { from: u8, to: u8 },
     Humanize(u8),
 }
 
@@ -176,9 +170,7 @@ pub enum DurationOp {
     Set(i64),
     Add(i64),
     Scale(f32),
-    Legato {
-        gap: i64,
-    },
+    Legato { gap: i64 },
     RemoveOverlap,
 }
 

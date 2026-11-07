@@ -34,14 +34,17 @@ pub fn show(ui: &mut Ui, cx: &mut Ctx) {
         let band = cx.idx("band");
         p.text(pos2(col.min.x, col.min.y + 72.0), Align2::LEFT_TOP, "PROCESSING", regular(9.0), DIM);
         for (i, m) in BANDS.iter().enumerate() {
-            let b = Rect::from_min_size(pos2(col.min.x + i as f32 * (col.width() / 2.0 + 2.0), col.min.y + 86.0), vec2(col.width() / 2.0 - 2.0, 22.0));
+            let b =
+                Rect::from_min_size(pos2(col.min.x + i as f32 * (col.width() / 2.0 + 2.0), col.min.y + 86.0), vec2(col.width() / 2.0 - 2.0, 22.0));
             if button(ui, b, m, i == band, ACCENT).clicked() {
                 cx.set("band", i as f32);
             }
         }
         let cell = vec2(78.0, 100.0);
         let mut x = col.max.x + 14.0;
-        for (id, label) in [("threshold", "Threshold"), ("range", "Range"), ("freq_lo", "Low"), ("freq_hi", "High"), ("lookahead", "Lookahead"), ("link", "Link")] {
+        for (id, label) in
+            [("threshold", "Threshold"), ("range", "Range"), ("freq_lo", "Low"), ("freq_hi", "High"), ("lookahead", "Lookahead"), ("link", "Link")]
+        {
             knob(ui, cx, Rect::from_min_size(pos2(x, strip.min.y + 12.0), cell), id, label, if id.starts_with("freq") { READOUT } else { ACCENT });
             x += cell.x;
         }

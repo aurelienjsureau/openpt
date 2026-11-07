@@ -33,11 +33,7 @@ impl Matrix {
     #[inline]
     pub fn rgb(&self, y: u8, cb: u8, cr: u8) -> [u8; 3] {
         let (y, cb, cr) = (i32::from(y), i32::from(cb) - 128, i32::from(cr) - 128);
-        let (y, cb, cr) = if self.full_range {
-            (y << 16, cb, cr)
-        } else {
-            ((y - 16) * 76309, (cb * 74_606) >> 16, (cr * 74_606) >> 16)
-        };
+        let (y, cb, cr) = if self.full_range { (y << 16, cb, cr) } else { ((y - 16) * 76309, (cb * 74_606) >> 16, (cr * 74_606) >> 16) };
         let y = y + (1 << 15);
         let r = (y + self.cr_r * cr) >> 16;
         let g = (y - self.cb_g * cb - self.cr_g * cr) >> 16;

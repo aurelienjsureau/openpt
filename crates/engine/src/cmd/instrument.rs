@@ -32,12 +32,20 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             set_instrument_param
         ),
-        cmd!("mix.instrument_remove", "Remove Instrument", [], None, "{tracks?} — the instrument of each instrument track", has_selection, |e, p| {
-            let tracks = tracks_required(e, "mix.instrument_remove", p)?;
-            let s = e.session_mut();
-            let removed = tracks.into_iter().filter(|&t| s.track_mut(t).and_then(|tr| tr.instrument.take()).is_some()).count();
-            Ok(json!({"removed": removed}))
-        }),
+        cmd!(
+            "mix.instrument_remove",
+            "Remove Instrument",
+            [],
+            None,
+            "{tracks?} — the instrument of each instrument track",
+            has_selection,
+            |e, p| {
+                let tracks = tracks_required(e, "mix.instrument_remove", p)?;
+                let s = e.session_mut();
+                let removed = tracks.into_iter().filter(|&t| s.track_mut(t).and_then(|tr| tr.instrument.take()).is_some()).count();
+                Ok(json!({"removed": removed}))
+            }
+        ),
     ]
 }
 

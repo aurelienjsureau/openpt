@@ -177,9 +177,15 @@ pub fn specs() -> Vec<CommandSpec> {
             send
         ),
         cmd!("mix.send_remove", "Remove Send", [], None, "{tracks?, slot}", has_selection, |e, p| remove_sends(e, p, "mix.send_remove", true)),
-        cmd!("mix.sends_remove_all", "Remove All Sends", ["Track"], None, "{tracks?, slot?} — every send, or `slot`, of each track", has_selection, |e, p| {
-            remove_sends(e, p, "mix.sends_remove_all", false)
-        }),
+        cmd!(
+            "mix.sends_remove_all",
+            "Remove All Sends",
+            ["Track"],
+            None,
+            "{tracks?, slot?} — every send, or `slot`, of each track",
+            has_selection,
+            |e, p| { remove_sends(e, p, "mix.sends_remove_all", false) }
+        ),
         cmd!("mix.send_level", "Send Level", [], None, "{track?, slot, db?, pan?, mute?, pre_fader?}", has_selection, send_level),
         cmd!("mix.new_bus", "New Bus", [], None, "{name, format?: stereo}", always, |e, p| {
             let name = str_param(p, "name").filter(|n| !n.trim().is_empty()).ok_or_else(|| bad("mix.new_bus", "`name` required"))?.to_string();
@@ -508,7 +514,8 @@ fn insert_automation(e: &mut Engine, p: &Value) -> Result<Value> {
     let ids: Vec<String> =
         p.get("params").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     let enable = bool_or(p, "enable", true);
-    let ins = e.session_mut().track_mut(t).and_then(|tr| tr.mixer.inserts.get_mut(slot)).and_then(Option::as_mut).ok_or_else(|| bad(id, "empty slot"))?;
+    let ins =
+        e.session_mut().track_mut(t).and_then(|tr| tr.mixer.inserts.get_mut(slot)).and_then(Option::as_mut).ok_or_else(|| bad(id, "empty slot"))?;
     let info = super::vst3::plugin_info(&ins.plugin).ok_or_else(|| bad(id, "unknown plugin"))?;
     if let Some(x) = ids.iter().find(|x| x.as_str() != openpt_model::BYPASS_PARAM && info.param(x).is_none()) {
         return Err(bad(id, format!("`{}` has no parameter `{x}`", info.id)));
@@ -790,9 +797,13 @@ pub(crate) fn current_value(tr: &openpt_model::Track, param: &AutoParam) -> f32 
             let sp = tr.mixer.surround.unwrap_or_else(|| openpt_model::SurroundPan::from_stereo(tr.mixer.pan.first().copied().unwrap_or(0.0)));
             [sp.x, sp.y, sp.z, sp.divergence].get(usize::from(*a)).copied().unwrap_or(0.0)
         }
-        AutoParam::Plugin { slot, param } => {
-            tr.mixer.inserts.get(usize::from(*slot)).and_then(Option::as_ref).and_then(|i| if param == openpt_model::BYPASS_PARAM { Some(f32::from(u8::from(i.bypass))) } else { i.params.get(param).copied() }).unwrap_or(0.0)
-        }
+        AutoParam::Plugin { slot, param } => tr
+            .mixer
+            .inserts
+            .get(usize::from(*slot))
+            .and_then(Option::as_ref)
+            .and_then(|i| if param == openpt_model::BYPASS_PARAM { Some(f32::from(u8::from(i.bypass))) } else { i.params.get(param).copied() })
+            .unwrap_or(0.0),
     }
 }
 

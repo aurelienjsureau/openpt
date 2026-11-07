@@ -83,7 +83,11 @@ fn apply(app: &mut SoundApp, target: &LearnTarget, v: f32, rising: bool) {
                         pl.editor_set_param(*track, *slot, param, x);
                     }
                     app.engine
-                        .execute_merged("mix.insert_param", &json!({"track": track.0, "slot": slot, "param": param, "value": x}), &merge(track, param))
+                        .execute_merged(
+                            "mix.insert_param",
+                            &json!({"track": track.0, "slot": slot, "param": param, "value": x}),
+                            &merge(track, param),
+                        )
                         .map(|_| ())
                         .map_err(|e| e.to_string())
                 }

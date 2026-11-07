@@ -196,12 +196,8 @@ fn open_library(bundle: &Path, exe: &Path) -> Result<(libloading::Library, Optio
         #[cfg(target_os = "macos")]
         {
             type BundleEntry = unsafe extern "C" fn(*mut c_void) -> bool;
-            let entry = unsafe { lib.get::<BundleEntry>(b"bundleEntry\0") }
-                .or_else(|_| {
-                    unsafe { lib.get::<BundleEntry>(b"BundleEntry\0") }
-                })
-                .ok()
-                .map(|s| *s);
+            let entry =
+                unsafe { lib.get::<BundleEntry>(b"bundleEntry\0") }.or_else(|_| unsafe { lib.get::<BundleEntry>(b"BundleEntry\0") }).ok().map(|s| *s);
             if let Some(f) = entry
                 && bundle.is_dir()
             {
@@ -220,12 +216,8 @@ fn open_library(bundle: &Path, exe: &Path) -> Result<(libloading::Library, Optio
                 if !unsafe { f(cfbundle) } {
                     return Err("bundleEntry failed".into());
                 }
-                exit = unsafe { lib.get::<ModuleExit>(b"bundleExit\0") }
-                    .or_else(|_| {
-                        unsafe { lib.get::<ModuleExit>(b"BundleExit\0") }
-                    })
-                    .ok()
-                    .map(|s| *s);
+                exit =
+                    unsafe { lib.get::<ModuleExit>(b"bundleExit\0") }.or_else(|_| unsafe { lib.get::<ModuleExit>(b"BundleExit\0") }).ok().map(|s| *s);
             }
         }
         Ok((lib, exit))
@@ -460,7 +452,6 @@ impl Bundle {
     }
 }
 
-
 struct GainReduction(*mut sb::FUnknown);
 
 #[repr(C)]
@@ -692,11 +683,7 @@ impl sv::IAttributeListTrait for HostAttributes {
         if n > MAX_ATTR_BYTES {
             return sb::kOutOfMemory;
         }
-        let v = if data.is_null() || n == 0 {
-            Vec::new()
-        } else {
-            unsafe { std::slice::from_raw_parts(data.cast::<u8>(), n) }.to_vec()
-        };
+        let v = if data.is_null() || n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(data.cast::<u8>(), n) }.to_vec() };
         self.set(id, Attr::Bin(v))
     }
 
@@ -731,11 +718,7 @@ impl sv::IMessageTrait for HostMessage {
     }
 
     unsafe fn setMessageID(&self, id: sb::FIDString) {
-        let v = if id.is_null() {
-            None
-        } else {
-            Some(unsafe { std::ffi::CStr::from_ptr(id) }.to_owned())
-        };
+        let v = if id.is_null() { None } else { Some(unsafe { std::ffi::CStr::from_ptr(id) }.to_owned()) };
         *self.id.lock().unwrap_or_else(PoisonError::into_inner) = v;
     }
 
@@ -1467,12 +1450,8 @@ impl Instance {
             return Err(Vst3Error::Process("plugin cannot process 32-bit float".into()));
         }
         let max = i32::try_from(max_frames).unwrap_or(i32::MAX);
-        let mut setup = sv::ProcessSetup {
-            processMode: self.process_mode(),
-            symbolicSampleSize: sample32,
-            maxSamplesPerBlock: max,
-            sampleRate: sample_rate,
-        };
+        let mut setup =
+            sv::ProcessSetup { processMode: self.process_mode(), symbolicSampleSize: sample32, maxSamplesPerBlock: max, sampleRate: sample_rate };
         if !ok(unsafe { p.setupProcessing(&mut setup) }) {
             return Err(Vst3Error::Process("setupProcessing failed".into()));
         }
@@ -2016,7 +1995,6 @@ pub(crate) fn pump_editor_timers() {
     window::pump_timers();
 }
 
-
 #[cfg(target_os = "macos")]
 mod window {
     use objc2::rc::Retained;
@@ -2129,17 +2107,17 @@ mod window {
         PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumThreadWindows, GA_ROOT, GW_OWNER, GetAncestor, GetForegroundWindow, GetWindow, GetWindowRect, SWP_NOSIZE,
         AdjustWindowRectEx, AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-        DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW,
-        MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu,
-        WM_CLOSE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT,
-        WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+        DestroyWindow, EnumThreadWindows, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetAncestor, GetClientRect, GetForegroundWindow,
+        GetWindow, GetWindowLongPtrW, GetWindowRect, IDC_ARROW, IsWindow, IsWindowVisible, LoadCursorW, MF_CHECKED, MF_POPUP, MF_SEPARATOR,
+        MF_STRING, MoveWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+        SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu, WM_CLOSE,
+        WM_ERASEBKGND, WM_LBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SIZING, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT, WNDCLASSEXW,
+        WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
     };
 
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeHWND);
@@ -2673,9 +2651,7 @@ mod window {
             let title = wide(title);
             let (ow, oh) = outer_size(STYLE, 0, w, h + HEADER);
             let owner = match app_window() {
-                h if h.is_null() => {
-                    unsafe { GetActiveWindow() }
-                }
+                h if h.is_null() => unsafe { GetActiveWindow() },
                 h => h,
             };
             let hwnd = unsafe {

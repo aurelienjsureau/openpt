@@ -354,7 +354,10 @@ fn shown_lane(s: &Session, t: TrackId) -> Option<openpt_model::AutoParam> {
 
 fn clear_shown_lane(s: &mut Session, t: TrackId, r: openpt_time::Range) -> (usize, bool) {
     let Some(param) = shown_lane(s, t) else { return (0, false) };
-    let n = s.track_mut(t).and_then(|tr| tr.automation.iter_mut().find(|l| l.param == param)).map_or(0, |l| l.clear_range(r.start, r.end.saturating_add(1)));
+    let n = s
+        .track_mut(t)
+        .and_then(|tr| tr.automation.iter_mut().find(|l| l.param == param))
+        .map_or(0, |l| l.clear_range(r.start, r.end.saturating_add(1)));
     (n, true)
 }
 
@@ -401,7 +404,9 @@ fn paste(e: &mut Engine, p: &Value) -> Result<Value> {
             cut_track(s, *t, r, true, follow);
         }
         pasted += ops::paste(s, *t, at, clips, cb.length, sh).map_err(|why| bad("edit.paste", why))?.len();
-        if (follow || cb.automation_only) && let (Some(lanes), Some(tr)) = (cb.automation.get(i % cb.automation.len().max(1)), s.track_mut(*t)) {
+        if (follow || cb.automation_only)
+            && let (Some(lanes), Some(tr)) = (cb.automation.get(i % cb.automation.len().max(1)), s.track_mut(*t))
+        {
             for l in lanes {
                 let dst = tr.lane_mut(&l.param);
                 if !l.points.is_empty() {
@@ -562,7 +567,8 @@ fn select(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     if let Some(mut c) = clips {
         if !exact {
-            let picked: Vec<(openpt_model::TrackId, openpt_time::Range)> = c.iter().filter_map(|id| s.find_clip(*id).map(|(t, cl)| (t, cl.range()))).collect();
+            let picked: Vec<(openpt_model::TrackId, openpt_time::Range)> =
+                c.iter().filter_map(|id| s.find_clip(*id).map(|(t, cl)| (t, cl.range()))).collect();
             for (t, r) in picked {
                 for g in s.groups.iter().filter(|g| g.active && g.edit && g.members.contains(&t)) {
                     for m in g.members.iter().filter(|m| **m != t) {
@@ -959,7 +965,8 @@ fn fades_create(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn batch_fades(e: &mut Engine, p: &Value, tracks: &[openpt_model::TrackId], r: openpt_time::Range) -> Result<Value> {
     let id = "edit.fades_create";
-    let shape = |key: &str| str_param(p, key).map_or(Some(FadeShape::EqualPower), FadeShape::from_id).ok_or_else(|| bad(id, format!("unknown `{key}`")));
+    let shape =
+        |key: &str| str_param(p, key).map_or(Some(FadeShape::EqualPower), FadeShape::from_id).ok_or_else(|| bad(id, format!("unknown `{key}`")));
     let (in_shape, out_shape, x_shape) = (shape("in_shape")?, shape("out_shape")?, shape("xfade_shape")?);
     let len = position_param(e, id, p, "length")?.filter(|l| *l > 0).ok_or_else(|| bad(id, "`length` must be positive"))?;
     let placement = str_param(p, "placement").unwrap_or("centered");

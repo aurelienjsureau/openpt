@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::Tokens;
+use crate::widgets::FitScreen;
 use egui::vec2;
 use serde_json::{Value, json};
 

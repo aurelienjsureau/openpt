@@ -1,6 +1,9 @@
 use super::*;
 use crate::cmd;
-use openpt_model::{AtmosMonitor, AutoParam, BINAURAL_CHANNELS, BinauralDistance, ChannelFormat, Mixer, OutputPath, Route, SEND_SLOTS, Session, SurroundPan, TrackKind};
+use openpt_model::{
+    AtmosMonitor, AutoParam, BINAURAL_CHANNELS, BinauralDistance, ChannelFormat, Mixer, OutputPath, Route, SEND_SLOTS, Session, SurroundPan,
+    TrackKind,
+};
 use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -191,7 +194,9 @@ fn atmos(e: &mut Engine, p: &Value) -> Result<Value> {
     a.sanitize();
     e.session_mut().atmos = a;
     let distance: Vec<&str> = a.binaural_distance.iter().map(|d| d.id()).collect();
-    Ok(json!({"monitor": a.monitor.id(), "surround_trim_db": a.surround_trim_db, "height_trim_db": a.height_trim_db, "binaural_gain_db": a.binaural_gain_db, "binaural_distance": distance}))
+    Ok(
+        json!({"monitor": a.monitor.id(), "surround_trim_db": a.surround_trim_db, "height_trim_db": a.height_trim_db, "binaural_gain_db": a.binaural_gain_db, "binaural_distance": distance}),
+    )
 }
 
 fn copy_lane(e: &mut Engine, p: &Value, id: &str, from: AutoParam, to: AutoParam) -> Result<Value> {

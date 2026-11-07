@@ -52,7 +52,8 @@ fn simple(ui: &mut Ui, cx: &mut Ctx, body: Rect) {
     let mut x = strip.center().x - n * cell.x * 0.5;
     let y = strip.min.y + 6.0;
     let (tl, tr) = times(cx);
-    let ids: &[(&str, &str, &str, f32)] = if mode == DUAL { &[("time", "note", "Time L", tl), ("time_r", "note_r", "Time R", tr)] } else { &[("time", "note", "Time", tl)] };
+    let ids: &[(&str, &str, &str, f32)] =
+        if mode == DUAL { &[("time", "note", "Time L", tl), ("time_r", "note_r", "Time R", tr)] } else { &[("time", "note", "Time", tl)] };
     for &(t_id, n_id, name, ms) in ids {
         time_knob(ui, cx, Rect::from_min_size(pos2(x, y), cell), t_id, n_id, name, ms);
         x += cell.x;

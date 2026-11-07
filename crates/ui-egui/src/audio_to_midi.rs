@@ -260,9 +260,7 @@ impl Converter {
         let r = f64::from(self.rate.max(1));
         let from = ((at - 0.05) * r).max(0.0) as usize;
         let to = (((at + 0.3) * r) as usize).min(self.mono.len());
-        let near = self.mono.get(from..to).map_or_else(Vec::new, |w| {
-            openpt_engine::cmd::audio_midi::drt_hits(w, self.rate, 100.0, 5.0)
-        });
+        let near = self.mono.get(from..to).map_or_else(Vec::new, |w| openpt_engine::cmd::audio_midi::drt_hits(w, self.rate, 100.0, 5.0));
         let found = near.iter().map(|h| (from as f64 / r + h.at, h.note)).min_by(|a, b| (a.0 - at).abs().total_cmp(&(b.0 - at).abs()));
         let (at, note) = match found {
             Some((t, n)) if (t - at).abs() < 0.03 => (t, n),
@@ -289,7 +287,8 @@ fn piano_roll(ui: &mut egui::Ui, c: &mut Converter) {
     p.rect_filled(r, 3.0, t.counter_bg);
     let dur = c.range.len() as f64 / f64::from(c.rate.max(1));
     if c.notes.is_empty() {
-        let text = if c.job.is_some() || (c.analysis.is_none() && c.mode != Mode::Drums) { "Analysing…" } else { "No notes found: lower the thresholds" };
+        let text =
+            if c.job.is_some() || (c.analysis.is_none() && c.mode != Mode::Drums) { "Analysing…" } else { "No notes found: lower the thresholds" };
         p.text(r.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(13.0), t.text_dim);
         return;
     }
@@ -404,7 +403,11 @@ fn drum_view(ui: &mut egui::Ui, c: &mut Converter) {
             (false, _) => t.text_dim.gamma_multiply(0.35),
         };
         p.line_segment([pos2(x, r.min.y + 10.0), pos2(x, r.max.y - 2.0)], Stroke::new(if on { 1.5 } else { 1.0 }, col));
-        p.add(egui::Shape::convex_polygon(vec![pos2(x - 4.0, r.min.y + 2.0), pos2(x + 4.0, r.min.y + 2.0), pos2(x, r.min.y + 9.0)], col, Stroke::NONE));
+        p.add(egui::Shape::convex_polygon(
+            vec![pos2(x - 4.0, r.min.y + 2.0), pos2(x + 4.0, r.min.y + 2.0), pos2(x, r.min.y + 9.0)],
+            col,
+            Stroke::NONE,
+        ));
         if resp.hover_pos().is_some_and(|m| (m.x - x).abs() <= 3.0) {
             hovered = Some(i);
         }
@@ -444,7 +447,14 @@ fn drum_view(ui: &mut egui::Ui, c: &mut Converter) {
         }
     }
     let bar = Rect::from_min_max(pos2(r.min.x, r.max.y - 4.0), r.max);
-    p.rect_filled(Rect::from_min_max(pos2(r.min.x + (v0 / dur) as f32 * r.width(), bar.min.y), pos2(r.min.x + ((v0 + vlen) / dur) as f32 * r.width(), bar.max.y)), 2.0, t.text_dim.gamma_multiply(0.6));
+    p.rect_filled(
+        Rect::from_min_max(
+            pos2(r.min.x + (v0 / dur) as f32 * r.width(), bar.min.y),
+            pos2(r.min.x + ((v0 + vlen) / dur) as f32 * r.width(), bar.max.y),
+        ),
+        2.0,
+        t.text_dim.gamma_multiply(0.6),
+    );
     let tip = match hovered.and_then(|i| c.hits.as_ref().and_then(|v| v.get(i))) {
         Some(h) => {
             let pitch = if c.drum_note == 0 { h.auto_note } else { c.drum_note };
@@ -551,7 +561,10 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
         let kept = c.kept().len();
         ui.horizontal(|ui| {
             if c.mode == Mode::Drums {
-                ui.label(format!("{kept} of {} hits kept · drag: threshold · click a hit: keep/drop · Alt+click: add or delete", c.hits.as_ref().map_or(0, Vec::len)));
+                ui.label(format!(
+                    "{kept} of {} hits kept · drag: threshold · click a hit: keep/drop · Alt+click: add or delete",
+                    c.hits.as_ref().map_or(0, Vec::len)
+                ));
             } else {
                 ui.label(format!("{kept} of {} notes kept · click a note to drop it or bring it back", c.notes.len()));
             }
@@ -650,7 +663,7 @@ mod tests {
             retrigger: 40.0,
             view: (0.0, 0.0),
             threshold: 0.0,
-            }
+        }
     }
 
     fn hits_at(times: &[(f64, f32)]) -> Vec<f32> {

@@ -1,6 +1,6 @@
-use crate::widgets::FitScreen;
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, regular};
+use crate::widgets::FitScreen;
 use egui::{Align2, Color32, Sense, Stroke, pos2, vec2};
 use openpt_model::{Speaker, TrackKind};
 use serde_json::{Value, json};
@@ -100,9 +100,12 @@ fn renderer(app: &mut SoundApp, ctx: &egui::Context) {
             (tr.name.clone(), sp.x, sp.y, sp.z)
         })
         .collect();
-    egui::Window::new(egui::RichText::new("Renderer").font(bold(13.0))).open(&mut open).default_size(vec2(380.0, 440.0)).resizable(true).fit_screen(ctx).show(
-        ctx,
-        |ui| {
+    egui::Window::new(egui::RichText::new("Renderer").font(bold(13.0)))
+        .open(&mut open)
+        .default_size(vec2(380.0, 440.0))
+        .resizable(true)
+        .fit_screen(ctx)
+        .show(ctx, |ui| {
             ui.label(egui::RichText::new(format!("Main output: {}", fmt.label())).font(regular(11.0)).color(t.text));
             let side = ui.available_width().min(360.0);
             let (r, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
@@ -148,8 +151,7 @@ fn renderer(app: &mut SoundApp, ctx: &egui::Context) {
                     export_adm(app);
                 }
             });
-        },
-    );
+        });
     app.extra.show_renderer = open;
 }
 
@@ -158,9 +160,12 @@ fn ui_customization(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new(egui::RichText::new("Appearance").font(bold(13.0))).open(&mut open).default_size(vec2(320.0, 180.0)).resizable(false).fit_screen(ctx).show(
-        ctx,
-        |ui| {
+    egui::Window::new(egui::RichText::new("Appearance").font(bold(13.0)))
+        .open(&mut open)
+        .default_size(vec2(320.0, 180.0))
+        .resizable(false)
+        .fit_screen(ctx)
+        .show(ctx, |ui| {
             egui::Grid::new("ui_custom").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
                 ui.label("Interface scale");
                 ui.add(egui::Slider::new(&mut app.extra.ui_scale, 0.75..=1.5).step_by(0.05).custom_formatter(|v, _| format!("{:.0} %", v * 100.0)));
@@ -190,8 +195,7 @@ fn ui_customization(app: &mut SoundApp, ctx: &egui::Context) {
                 app.extra.reduce_motion = false;
                 let _ = app.run("ui.theme", json!({"mode": crate::theme::ThemeMode::default().id()}));
             }
-        },
-    );
+        });
     app.extra.show_ui_customization = open;
 }
 
@@ -335,7 +339,8 @@ fn export_adm(app: &mut SoundApp) {
     }
     app.ui.status = match app.run("file.export_adm", p) {
         Ok(v) => {
-            let mut msg = format!("ADM BWF written: {} bed + {} object(s), {} channels", v["bed"].as_str().unwrap_or(""), v["objects"], v["channels"]);
+            let mut msg =
+                format!("ADM BWF written: {} bed + {} object(s), {} channels", v["bed"].as_str().unwrap_or(""), v["objects"], v["channels"]);
             if let Some(w) = v["warning"].as_str() {
                 msg.push_str(" · ");
                 msg.push_str(w);

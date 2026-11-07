@@ -24,7 +24,17 @@ fn check(outside: bool) {
         s.tracks.iter_mut().filter(|t| t.folder == Some(folder)).for_each(|t| t.folder = None);
     }
     let g = GroupId(s.alloc());
-    s.groups.push(Group { id: g, name: "Drums".into(), letter: 'a', members: vec![folder], edit: true, mix: true, active: true, color: [0; 3], attributes: Vec::new() });
+    s.groups.push(Group {
+        id: g,
+        name: "Drums".into(),
+        letter: 'a',
+        members: vec![folder],
+        edit: true,
+        mix: true,
+        active: true,
+        color: [0; 3],
+        attributes: Vec::new(),
+    });
     let vca = s.add_track(TrackKind::Vca, ChannelFormat::Mono, Some("VCA Drums"));
     s.track_mut(vca).unwrap().mixer.vca_group = Some(g);
     let rms = |e: &openpt_engine::Engine| {

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::f32::consts::TAU;
 
-use openpt_dsp::{Plugin, Unit, create, db_to_gain, gain_to_db, is_generator, all_plugins, plugin_info};
+use openpt_dsp::{Plugin, Unit, all_plugins, create, db_to_gain, gain_to_db, is_generator, plugin_info};
 
 const SR: f32 = 48_000.0;
 const BLOCK: usize = 512;

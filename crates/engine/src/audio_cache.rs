@@ -128,7 +128,8 @@ mod tests {
         std::fs::write(&src, b"stand-in for the original file").unwrap();
         set_dir(Some(root.join("cache")));
         let frames = MIN_BYTES / 4 + 10;
-        let owned = Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![(0..frames).map(|i| (i % 100) as f32 / 100.0).collect()] }));
+        let owned =
+            Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![(0..frames).map(|i| (i % 100) as f32 / 100.0).collect()] }));
         let mapped = store(&src, 48_000, Arc::clone(&owned));
         assert!(mapped.is_mapped());
         assert_eq!(mapped.channel(0), owned.channel(0));

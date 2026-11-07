@@ -434,11 +434,8 @@ fn document<'d>(docs: &'d mut Vec<(String, Doc)>, factory: &a::ARAFactory) -> Op
         };
         let _ = &mut host;
         let restore = take_pending(&key);
-        let pname = if factory.plugInName.is_null() {
-            key.clone()
-        } else {
-            unsafe { CStr::from_ptr(factory.plugInName) }.to_string_lossy().into_owned()
-        };
+        let pname =
+            if factory.plugInName.is_null() { key.clone() } else { unsafe { CStr::from_ptr(factory.plugInName) }.to_string_lossy().into_owned() };
         docs.push((
             key.clone(),
             Doc {
@@ -640,8 +637,7 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
         return None;
     };
     log::info!("ARA: bound to track {}", track.track);
-    let rd =
-        Renderer {
+    let rd = Renderer {
         playback: (ext.playbackRendererRef, ext.playbackRendererInterface),
         editor: (ext.editorRendererRef, ext.editorRendererInterface),
         view: (ext.editorViewRef, ext.editorViewInterface),

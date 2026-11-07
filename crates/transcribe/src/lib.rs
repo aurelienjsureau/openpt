@@ -121,7 +121,8 @@ mod tests {
             .map(|i| {
                 let t = i as f32 / rate as f32;
                 let env = (t * 40.0).min(1.0) * (-(t % secs) * 0.5).exp();
-                notes.iter().map(|m| (t * 440.0 * 2f32.powf((m - 69.0) / 12.0) * std::f32::consts::TAU).sin()).sum::<f32>() * 0.3 * env / notes.len() as f32
+                notes.iter().map(|m| (t * 440.0 * 2f32.powf((m - 69.0) / 12.0) * std::f32::consts::TAU).sin()).sum::<f32>() * 0.3 * env
+                    / notes.len() as f32
             })
             .collect()
     }

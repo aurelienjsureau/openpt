@@ -29,7 +29,8 @@ pub(crate) fn watch(session: Arc<Session>, shared: &Arc<crate::Shared>) {
 fn run() {
     loop {
         std::thread::sleep(std::time::Duration::from_millis(40));
-        let snapshot = WATCHED.lock().unwrap_or_else(PoisonError::into_inner).as_ref().and_then(|w| Some((Arc::clone(&w.session), w.shared.upgrade()?)));
+        let snapshot =
+            WATCHED.lock().unwrap_or_else(PoisonError::into_inner).as_ref().and_then(|w| Some((Arc::clone(&w.session), w.shared.upgrade()?)));
         let Some((s, shared)) = snapshot else { continue };
         let n = warm(&s, shared.position.load(Ordering::Relaxed));
         TOUCHED.fetch_add(n, Ordering::Relaxed);

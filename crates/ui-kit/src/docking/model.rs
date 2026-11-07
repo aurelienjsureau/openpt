@@ -20,19 +20,9 @@ pub enum Zone {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Node<P> {
-    Split {
-        axis: SplitAxis,
-        size: SplitSize,
-        first: Box<Node<P>>,
-        second: Box<Node<P>>,
-    },
-    Tabs {
-        panels: Vec<P>,
-        active: usize,
-    },
-    Stack {
-        entries: Vec<StackEntry<P>>,
-    },
+    Split { axis: SplitAxis, size: SplitSize, first: Box<Node<P>>, second: Box<Node<P>> },
+    Tabs { panels: Vec<P>, active: usize },
+    Stack { entries: Vec<StackEntry<P>> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,46 +77,16 @@ pub struct Location<P> {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Action<P> {
-    Move {
-        panel: P,
-        anchor: P,
-        placement: Placement<P>,
-    },
-    Float {
-        panel: P,
-        rect: [f32; 4],
-    },
-    Close {
-        panel: P,
-    },
-    Activate {
-        panel: P,
-    },
-    Open {
-        panel: P,
-        anchor: Option<P>,
-    },
-    OpenAt {
-        panel: P,
-        anchor: P,
-        placement: Placement<P>,
-    },
-    MoveFloating {
-        panel: P,
-        rect: [f32; 4],
-    },
-    ResizeSplit {
-        path: Vec<bool>,
-        size: SplitSize,
-    },
-    SetStackOpen {
-        panel: P,
-        open: bool,
-    },
-    ResizeStack {
-        panel: P,
-        height: Option<f32>,
-    },
+    Move { panel: P, anchor: P, placement: Placement<P> },
+    Float { panel: P, rect: [f32; 4] },
+    Close { panel: P },
+    Activate { panel: P },
+    Open { panel: P, anchor: Option<P> },
+    OpenAt { panel: P, anchor: P, placement: Placement<P> },
+    MoveFloating { panel: P, rect: [f32; 4] },
+    ResizeSplit { path: Vec<bool>, size: SplitSize },
+    SetStackOpen { panel: P, open: bool },
+    ResizeStack { panel: P, height: Option<f32> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -5,7 +5,10 @@ use openpt_mix::{
     MixEngine,
     monitor::{Monitor, split_modes},
 };
-use openpt_model::{AtmosMonitor, BINAURAL_CHANNELS, BinauralDistance, ChannelFormat, Clip, Insert, Route, Session, SourceAudio, SourceId, SurroundPan, TrackId, TrackKind};
+use openpt_model::{
+    AtmosMonitor, BINAURAL_CHANNELS, BinauralDistance, ChannelFormat, Clip, Insert, Route, Session, SourceAudio, SourceId, SurroundPan, TrackId,
+    TrackKind,
+};
 use std::sync::Arc;
 
 const BLOCK: usize = 512;

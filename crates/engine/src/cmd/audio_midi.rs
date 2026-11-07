@@ -135,7 +135,13 @@ pub fn notes_from(a: &openpt_transcribe::Analysis, o: &openpt_transcribe::NoteOp
 pub fn detect(mono: &[f32], rate: u32, _: &Value) -> std::result::Result<Vec<MidiNote>, String> {
     Ok(openpt_dsp::pitch_detect::audio_to_notes(mono, rate as f32)
         .into_iter()
-        .map(|d| MidiNote { start: d.start as f64 / f64::from(rate), end: d.end as f64 / f64::from(rate), pitch: d.pitch, velocity: d.velocity, bends: Vec::new() })
+        .map(|d| MidiNote {
+            start: d.start as f64 / f64::from(rate),
+            end: d.end as f64 / f64::from(rate),
+            pitch: d.pitch,
+            velocity: d.velocity,
+            bends: Vec::new(),
+        })
         .collect())
 }
 
@@ -303,7 +309,10 @@ mod tests {
         let mut e = Engine::default();
         let (t, frames) = melody(&mut e);
         let r = e
-            .execute("event.audio_to_midi", &json!({"track": t.0, "start": 48_000, "end": 48_000 + frames, "notes": [[0.0, 0.4, 60, 90], [0.4, 0.8, 67, 80]]}))
+            .execute(
+                "event.audio_to_midi",
+                &json!({"track": t.0, "start": 48_000, "end": 48_000 + frames, "notes": [[0.0, 0.4, 60, 90], [0.4, 0.8, 67, 80]]}),
+            )
             .unwrap();
         let m = TrackId(r["track"].as_u64().unwrap());
         assert_eq!(pitches(&e.session().track(m).unwrap().clips()[0].content), vec![60, 67]);

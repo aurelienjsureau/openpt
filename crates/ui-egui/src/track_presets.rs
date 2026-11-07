@@ -17,7 +17,8 @@ pub fn dir() -> Option<PathBuf> {
     if let Some(a) = env("APPDATA") {
         return Some(a.join("OpenPT").join("Track Presets"));
     }
-    env("HOME").map(|h| h.join(if cfg!(target_os = "macos") { "Library/Application Support/OpenPT/Track Presets" } else { ".config/OpenPT/Track Presets" }))
+    env("HOME")
+        .map(|h| h.join(if cfg!(target_os = "macos") { "Library/Application Support/OpenPT/Track Presets" } else { ".config/OpenPT/Track Presets" }))
 }
 
 fn is_preset(p: &Path) -> bool {

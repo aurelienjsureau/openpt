@@ -271,7 +271,8 @@ mod tests {
     #[test]
     fn a_preset_from_the_editor_reaches_the_other_instances() {
         let loaded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let editor = |reload: Option<&[u8]>| -> Box<dyn PluginEditor> { Box::new(FakeEditor { reload: reload.map(<[u8]>::to_vec), loaded: loaded.clone() }) };
+        let editor =
+            |reload: Option<&[u8]>| -> Box<dyn PluginEditor> { Box::new(FakeEditor { reload: reload.map(<[u8]>::to_vec), loaded: loaded.clone() }) };
         let mut multi = MultiEditor { first: editor(Some(b"preset")), others: vec![editor(None)] };
         multi.idle();
         multi.idle();
