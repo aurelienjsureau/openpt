@@ -31,7 +31,7 @@
   <a href="#everything-in-the-box">Everything in the box</a> ·
   <a href="#built-to-be-scripted">Scripting</a> ·
   <a href="#under-the-hood">Under the hood</a> ·
-  <a href="#get-started">Get started</a> ·
+  <a href="#download">Get started</a> ·
   <a href="#status">Status</a>
 </p>
 
