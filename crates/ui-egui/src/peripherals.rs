@@ -21,17 +21,28 @@ impl Default for Controller {
 }
 
 impl Controller {
+    fn protocol(&self) -> Option<openpt_playback::surface::Protocol> {
+        openpt_playback::surface::Protocol::from_kind(&self.kind)
+    }
+
     fn active(&self) -> bool {
-        self.kind == "HUI" && !self.input.is_empty() && !self.output.is_empty()
+        self.protocol().is_some() && !self.input.is_empty() && !self.output.is_empty()
+    }
+
+    fn width(&self) -> usize {
+        match self.protocol() {
+            Some(openpt_playback::surface::Protocol::Hui) => usize::from(self.channels.max(8) / 8 * 8),
+            _ => 8,
+        }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct Live {
     cfg: Controller,
-    port: openpt_playback::surface::HuiPort,
-    bank: usize,
+    port: openpt_playback::surface::SurfacePort,
     last_ping: f64,
+    last_meter: f64,
     touched: [bool; 8],
     sent: std::collections::HashMap<(u8, &'static str), String>,
 }
@@ -41,15 +52,26 @@ pub struct Surfaces {
     #[cfg(not(target_arch = "wasm32"))]
     live: Vec<Option<Live>>,
     failed: Vec<Option<(Controller, f64, String)>>,
+    bank: usize,
 }
 
 fn strips(app: &SoundApp) -> Vec<TrackId> {
     app.engine.session().tracks.iter().filter(|t| t.kind != TrackKind::Video && !t.hidden).map(|t| t.id).collect()
 }
 
+fn db_text(db: f32) -> String {
+    if db <= -144.0 { "-inf".into() } else { format!("{db:.1}") }
+}
+
+fn counter_digits(app: &SoundApp) -> String {
+    let s = app.engine.session();
+    let tc = openpt_time::Timecode::from_samples(app.position().saturating_add(s.timecode_start), s.frame_rate, s.sample_rate);
+    format!("{:>3}{:02}{:02}{:>3}", tc.hours, tc.minutes, tc.seconds, tc.frames)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
-    use openpt_playback::surface::{self as hui, BankButton, StripButton, SurfaceEvent, TransportButton};
+    use openpt_playback::surface::{BankButton, StripButton, SurfaceEvent, SurfacePort, TransportButton};
     let now = ctx.input(|i| i.time);
     let cfgs = app.ui.peripherals.clone();
     if app.surfaces.live.len() < CONTROLLER_ROWS {
@@ -66,12 +88,23 @@ pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
         }
         let connected = app.surfaces.live.get(row).is_some_and(Option::is_some);
         let retry = app.surfaces.failed.get(row).cloned().flatten().is_none_or(|(c, at, _)| c != cfg || now - at > 5.0);
-        if cfg.active() && !connected && retry {
+        if cfg.active()
+            && !connected
+            && retry
+            && let Some(protocol) = cfg.protocol()
+        {
             app.sync_midi_devices();
-            match hui::HuiPort::open(&cfg.input, &cfg.output) {
+            match SurfacePort::open(protocol, &cfg.input, &cfg.output) {
                 Ok(port) => {
                     if let Some(slot) = app.surfaces.live.get_mut(row) {
-                        *slot = Some(Live { cfg: cfg.clone(), port, bank: 0, last_ping: f64::MIN, touched: [false; 8], sent: Default::default() });
+                        *slot = Some(Live {
+                            cfg: cfg.clone(),
+                            port,
+                            last_ping: f64::MIN,
+                            last_meter: f64::MIN,
+                            touched: [false; 8],
+                            sent: Default::default(),
+                        });
                     }
                     if let Some(f) = app.surfaces.failed.get_mut(row) {
                         *f = None;
@@ -86,18 +119,22 @@ pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
         }
     }
     let tracks = strips(app);
+    let total_width: usize = cfgs.iter().take(CONTROLLER_ROWS).filter(|c| c.active()).map(Controller::width).sum::<usize>().max(8);
+    app.surfaces.bank = app.surfaces.bank.min(tracks.len().saturating_sub(1));
     let mut any = false;
     for row in 0..CONTROLLER_ROWS {
         let Some(mut live) = app.surfaces.live.get_mut(row).and_then(Option::take) else { continue };
         any = true;
-        let offset: usize = cfgs.iter().take(row).filter(|c| c.active()).map(|c| usize::from(c.channels.max(8) / 8 * 8)).sum();
-        let track_at = |live: &Live, n: u8| tracks.get(live.bank + offset + usize::from(n)).copied();
+        let protocol = live.port.protocol;
+        let offset: usize = cfgs.iter().take(row).filter(|c| c.active()).map(Controller::width).sum();
         for ev in live.port.poll() {
+            let bank = app.surfaces.bank;
+            let track_at = |n: u8| tracks.get(bank + offset + usize::from(n)).copied();
             match ev {
                 SurfaceEvent::Fader(n, pos) => {
-                    if let Some(t) = track_at(&live, n) {
+                    if let Some(t) = track_at(n) {
                         let db = openpt_model::fader_pos_to_db(pos).clamp(-144.0, 12.0);
-                        let _ = app.engine.execute_merged("mix.volume", &json!({"track": t.0, "db": db}), &format!("hui_fader:{}", t.0));
+                        let _ = app.engine.execute_merged("mix.volume", &json!({"track": t.0, "db": db}), &format!("surface_fader:{}", t.0));
                     }
                 }
                 SurfaceEvent::Touch(n, down) => {
@@ -109,21 +146,25 @@ pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
                     }
                 }
                 SurfaceEvent::Strip(n, b) => {
-                    let Some(t) = track_at(&live, n) else { continue };
+                    let Some(t) = track_at(n) else { continue };
                     let _ = match b {
                         StripButton::Select => app.run("edit.select", json!({"tracks": [t.0]})),
                         StripButton::Mute => app.run("mix.mute", json!({"tracks": [t.0]})),
                         StripButton::Solo => app.run("mix.solo", json!({"tracks": [t.0]})),
                         StripButton::RecReady => app.run("mix.record_arm", json!({"tracks": [t.0]})),
+                        StripButton::VSelect if protocol != openpt_playback::surface::Protocol::Hui => {
+                            app.run("mix.pan", json!({"tracks": [t.0], "pan": 0.0, "index": 0}))
+                        }
                         _ => Ok(json!({})),
                     };
                 }
                 SurfaceEvent::Pot(n, steps) => {
-                    if let Some(t) = track_at(&live, n)
+                    if let Some(t) = track_at(n)
                         && let Some(p) = app.engine.session().track(t).and_then(|tr| tr.mixer.pan.first().copied())
                     {
                         let pan = (p + f32::from(steps) * 0.02).clamp(-1.0, 1.0);
-                        let _ = app.engine.execute_merged("mix.pan", &json!({"tracks": [t.0], "pan": pan, "index": 0}), &format!("hui_pan:{}", t.0));
+                        let _ =
+                            app.engine.execute_merged("mix.pan", &json!({"tracks": [t.0], "pan": pan, "index": 0}), &format!("surface_pan:{}", t.0));
                     }
                 }
                 SurfaceEvent::Transport(b) => {
@@ -140,27 +181,34 @@ pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
                     let _ = app.run(cmd, json!({}));
                 }
                 SurfaceEvent::Bank(b) => {
-                    let width = usize::from(live.cfg.channels.max(8));
                     let last = tracks.len().saturating_sub(1);
-                    live.bank = match b {
-                        BankButton::ChannelLeft => live.bank.saturating_sub(1),
-                        BankButton::BankLeft => live.bank.saturating_sub(width),
-                        BankButton::ChannelRight => (live.bank + 1).min(last),
-                        BankButton::BankRight => (live.bank + width).min(last),
+                    let bank = app.surfaces.bank;
+                    app.surfaces.bank = match b {
+                        BankButton::ChannelLeft => bank.saturating_sub(1),
+                        BankButton::BankLeft => bank.saturating_sub(total_width),
+                        BankButton::ChannelRight => (bank + 1).min(last),
+                        BankButton::BankRight => (bank + total_width).min(last),
                     };
                 }
                 SurfaceEvent::Alive => {}
             }
         }
         if now - live.last_ping >= 1.0 {
-            live.port.send(&hui::ping());
+            if let Some(p) = protocol.ping() {
+                live.port.send(&p);
+            }
             live.last_ping = now;
         }
+        let bank = app.surfaces.bank;
+        let track_at = |n: u8| tracks.get(bank + offset + usize::from(n)).copied();
+        let meters = (protocol != openpt_playback::surface::Protocol::Hui && now - live.last_meter >= 0.1)
+            .then(|| app.player.as_ref().filter(|_| app.meters_live()).map(|p| p.meters()))
+            .flatten();
         let s = app.engine.session();
         let sel = s.edit.selected_tracks.clone();
         let mut out: Vec<Vec<u8>> = Vec::new();
         for n in 0..8u8 {
-            let tr = track_at(&live, n).and_then(|t| s.track(t));
+            let tr = track_at(n).and_then(|t| s.track(t));
             let mut set = |key: &'static str, value: String, msgs: Vec<Vec<u8>>| {
                 if live.sent.get(&(n, key)) != Some(&value) {
                     live.sent.insert((n, key), value);
@@ -168,10 +216,14 @@ pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
                 }
             };
             let name = tr.map_or(String::new(), |t| t.name.clone());
-            set("name", name.clone(), vec![hui::strip_name(n, &name)]);
+            set("name", name.clone(), protocol.strip_name(n, &name));
+            let volume = tr.map_or(String::new(), |t| db_text(t.mixer.volume_db));
+            set("value", volume.clone(), protocol.strip_value(n, &volume));
+            let pan = tr.and_then(|t| t.mixer.pan.first().copied());
+            set("pan", pan.map_or(String::new(), |p| format!("{p:.2}")), pan.map(|p| protocol.pan(n, p)).unwrap_or_default());
             if !live.touched.get(usize::from(n)).copied().unwrap_or(false) {
                 let pos = tr.map_or(0.0, |t| openpt_model::fader_db_to_pos(t.mixer.volume_db));
-                set("fader", format!("{pos:.4}"), hui::fader(n, pos).iter().map(|m| m.to_vec()).collect());
+                set("fader", format!("{pos:.4}"), protocol.fader(n, pos));
             }
             for (key, b, on) in [
                 ("mute", StripButton::Mute, tr.is_some_and(|t| t.mixer.mute)),
@@ -179,16 +231,40 @@ pub fn run(app: &mut SoundApp, ctx: &egui::Context) {
                 ("rec", StripButton::RecReady, tr.is_some_and(|t| t.mixer.record_arm)),
                 ("select", StripButton::Select, tr.is_some_and(|t| sel.contains(&t.id))),
             ] {
-                set(key, on.to_string(), hui::strip_led(n, b, on).iter().map(|m| m.to_vec()).collect());
+                set(key, on.to_string(), protocol.strip_led(n, b, on));
+            }
+            if let Some(m) = &meters {
+                let peak = tr.and_then(|t| m.tracks.get(&t.id)).map_or(0.0, |v| v.peak[0].max(v.peak[1]));
+                out.extend(protocol.meter(n, peak));
             }
         }
-        let (playing, recording) = (app.engine.transport.playing, app.engine.transport.recording);
-        for (key, b, on) in
-            [("play", TransportButton::Play, playing), ("stop", TransportButton::Stop, !playing), ("record", TransportButton::Record, recording)]
-        {
-            if live.sent.get(&(0xFF, key)) != Some(&on.to_string()) {
-                live.sent.insert((0xFF, key), on.to_string());
-                out.extend(hui::transport_led(b, on).iter().map(|m| m.to_vec()));
+        if meters.is_some() {
+            live.last_meter = now;
+        }
+        if protocol.has_transport() {
+            let (playing, recording) = (app.engine.transport.playing, app.engine.transport.recording);
+            let looping = s.edit.loop_playback;
+            for (key, b, on) in [
+                ("play", TransportButton::Play, playing),
+                ("stop", TransportButton::Stop, !playing),
+                ("record", TransportButton::Record, recording),
+                ("loop", TransportButton::Loop, looping),
+            ] {
+                if live.sent.get(&(0xFF, key)) != Some(&on.to_string()) {
+                    live.sent.insert((0xFF, key), on.to_string());
+                    out.extend(protocol.transport_led(b, on));
+                }
+            }
+            if protocol == openpt_playback::surface::Protocol::Mcu {
+                let digits = counter_digits(app);
+                if live.sent.get(&(0xFF, "counter")) != Some(&digits) {
+                    out.extend(protocol.timecode(&digits));
+                    if !live.sent.contains_key(&(0xFF, "counter")) {
+                        out.push(vec![0x90, 0x71, 0x7F]);
+                        out.push(vec![0x90, 0x72, 0x00]);
+                    }
+                    live.sent.insert((0xFF, "counter"), digits);
+                }
             }
         }
         for m in out {
@@ -239,7 +315,7 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
                 for (row, c) in app.ui.peripherals.iter_mut().enumerate().take(CONTROLLER_ROWS) {
                     ui.label(format!("#{}", row + 1));
                     egui::ComboBox::from_id_salt(("pc_type", row)).width(90.0).selected_text(c.kind.as_str()).show_ui(ui, |ui| {
-                        for k in ["none", "HUI", crate::midi_learn::KIND] {
+                        for k in std::iter::once("none").chain(openpt_playback::surface::Protocol::KINDS).chain([crate::midi_learn::KIND]) {
                             ui.selectable_value(&mut c.kind, k.to_string(), k);
                         }
                     });
