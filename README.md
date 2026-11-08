@@ -204,7 +204,7 @@ OPENPT_NO_SYSTEM_PLUGINS=1 cargo test --workspace --exclude openpt-web
 
 ## Status
 
-OpenPT 0.7 is stable and ready for real sessions. Not there yet: AAF/OMF interchange, saving back to `.ptx`, EUCON, and interface languages other than English and French. Plugins run in-process. Windows is the most exercised platform; the macOS build is Apple Silicon only and unsigned, and Linux has seen little testing.
+OpenPT 0.8 is stable and ready for real sessions. Not there yet: AAF/OMF interchange, saving back to `.ptx`, EUCON, and interface languages other than English and French. Plugins run in-process. Windows is the most exercised platform; the macOS build is Apple Silicon only and unsigned, and Linux has seen little testing.
 
 Bug reports and feature requests are welcome in the [issues](https://github.com/aurelienjsureau/openpt/issues).
 
