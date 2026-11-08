@@ -128,6 +128,7 @@ pub struct UiState {
     pub show_preferences: bool,
     pub show_peripherals: bool,
     pub peripherals: Vec<peripherals::Controller>,
+    pub record_offset: i32,
     pub plugin_native_editor: bool,
     pub vst3_folders: Vec<String>,
     pub hrtf_sofa: String,
@@ -212,6 +213,7 @@ impl Default for UiState {
             show_preferences: false,
             show_peripherals: false,
             peripherals: Vec::new(),
+            record_offset: 0,
             plugin_native_editor: true,
             vst3_folders: Vec::new(),
             hrtf_sofa: String::new(),
@@ -771,7 +773,7 @@ impl SoundApp {
 
     fn plan_recording(&mut self, takes: Vec<openpt_engine::io::Take>, pass: Option<Samples>) {
         let rate = self.recorder.as_ref().map_or(0, |r| r.sample_rate);
-        self.take_plan = Some(openpt_engine::io::Recording { start: self.record_start, pass, punch: self.punch, rate, takes });
+        self.take_plan = Some(openpt_engine::io::Recording { start: self.record_start, pass, punch: self.punch, rate, takes, skip: 0 });
         if let Some(root) = self.autosave_dir.clone() {
             self.queue_autosave(root);
         }
@@ -1288,6 +1290,9 @@ impl SoundApp {
         }
         let pos = self.position();
         let plan = self.take_plan.take();
+        let first_capture = self.recorder.as_ref().and_then(openpt_playback::record::Recorder::first_capture_us);
+        let anchor = self.player.as_ref().and_then(openpt_playback::Player::take_record_anchor);
+        let aligned = !self.half_speed_take;
         let (audio_takes, mut problem) = self.recorder.as_mut().map(|r| r.finish()).unwrap_or_default();
         if std::mem::take(&mut self.half_speed_take) {
             for (_, path) in &audio_takes {
@@ -1309,12 +1314,21 @@ impl SoundApp {
             punch: self.punch,
             rate: 0,
             takes: Vec::new(),
+            skip: 0,
         });
         let punch = self.punch;
         self.punch = None;
         self.autosaved_rev = 0;
         let mut audio_ids = Vec::new();
         if !audio_takes.is_empty() {
+            let mut plan = plan.clone();
+            let rate = self.engine.session().sample_rate.hz();
+            let offset = self.ui.record_offset;
+            (plan.start, plan.skip) = if aligned {
+                openpt_engine::io::align_take(plan.start, anchor, first_capture, rate, offset)
+            } else {
+                openpt_engine::io::align_take(plan.start, None, None, rate, offset)
+            };
             audio_ids = openpt_engine::io::place_recording(&mut self.engine, &plan, audio_takes);
         }
         let mut midi_ids = Vec::new();

@@ -151,6 +151,7 @@ struct App {
     numeric_keypad: String,
     meter_type: String,
     vst3_folders: Vec<String>,
+    record_offset: i32,
 }
 
 impl App {
@@ -174,6 +175,7 @@ impl App {
             numeric_keypad: u.numeric_keypad.clone(),
             meter_type: u.meter_type.clone(),
             vst3_folders: u.vst3_folders.clone(),
+            record_offset: u.record_offset,
         }
     }
 
@@ -194,6 +196,7 @@ impl App {
         u.note_names = self.note_names;
         u.numeric_keypad = self.numeric_keypad;
         u.meter_type = self.meter_type;
+        u.record_offset = self.record_offset.clamp(-48_000, 48_000);
         if u.vst3_folders != self.vst3_folders {
             u.vst3_folders = self.vst3_folders;
             openpt_vst3_host::set_search_dirs(u.vst3_folders.iter().map(std::path::PathBuf::from).collect());
@@ -443,8 +446,12 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                     check(ui, q, &mut a.autosave_enabled, "Enable Session File Auto Backup");
                     row(ui, q, "Backup every", |ui| number(ui, &mut a.autosave_minutes, 1..=120, 0.1, "minutes"));
                 });
-                group(right, q, "Audio", &["Playback Engine", "I/O Setup", "audio interface", "sound card", "buffer"], |ui| {
+                group(right, q, "Audio", &["Playback Engine", "I/O Setup", "audio interface", "sound card", "buffer", "Recording offset", "latency"], |ui| {
                     ui.label(egui::RichText::new("Audio interface, sample rate and buffer size.").color(Tokens::current().text_dim));
+                    row(ui, q, "Recording offset", |ui| number(ui, &mut a.record_offset, -48_000..=48_000, 1.0, "samples"));
+                    if hit(q, "Recording offset") {
+                        ui.label(egui::RichText::new("Takes are already lined up with the latency the audio driver reports. Add samples here if a loopback test still shows a gap: a positive value moves recorded audio earlier.").small().color(Tokens::current().text_dim));
+                    }
                     ui.horizontal(|ui| {
                         if ui.button("Playback Engine…").clicked() {
                             *open_window = Some("window.playback_engine");

@@ -1377,6 +1377,8 @@ pub struct Recording {
     pub punch: Option<Range>,
     pub rate: u32,
     pub takes: Vec<Take>,
+    #[serde(default)]
+    pub skip: Samples,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1424,7 +1426,7 @@ pub fn halve_take(path: &Path) -> std::result::Result<(), String> {
 }
 
 pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>) -> Vec<openpt_model::ClipId> {
-    let ids = add_recording(e, plan.start, takes, plan.pass);
+    let ids = add_recording_skipping(e, plan.start, takes, plan.pass, plan.skip);
     if let Some(p) = plan.punch {
         let clips: Vec<u64> = ids.iter().map(|c| c.0).collect();
         let _ = e.execute_merged("edit.trim_to_fill_selection", &json!({"clips": clips, "start": p.start, "end": p.end}), "record");
@@ -1561,6 +1563,16 @@ pub fn place_midi_takes(e: &mut Engine, takes: Vec<MidiTake>, punch: Option<Rang
 }
 
 pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBuf)>, pass: Option<Samples>) -> Vec<openpt_model::ClipId> {
+    add_recording_skipping(e, start, takes, pass, 0)
+}
+
+pub fn add_recording_skipping(
+    e: &mut Engine,
+    start: Samples,
+    takes: Vec<(TrackId, PathBuf)>,
+    pass: Option<Samples>,
+    skip: Samples,
+) -> Vec<openpt_model::ClipId> {
     let before = e.session_arc();
     let mut out = Vec::new();
     for (tid, path) in takes {
@@ -1577,13 +1589,14 @@ pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBu
         let Some(x) = s.sources.last_mut() else { continue };
         x.unsaved = resampled;
         let len = i64::try_from(x.frames).unwrap_or(0);
-        let pass = pass.unwrap_or(len).max(1);
-        for offset in (0..len).step_by(usize::try_from(pass).unwrap_or(usize::MAX)).take(1_000) {
+        let skip = skip.clamp(0, len.saturating_sub(1).max(0));
+        let pass = pass.unwrap_or(len - skip).max(1);
+        for offset in (skip..len).step_by(usize::try_from(pass).unwrap_or(usize::MAX)).take(1_000) {
             let n = pass.min(len - offset);
-            if offset > 0 && n < pass / 8 {
+            if offset > skip && n < pass / 8 {
                 break;
             }
-            if offset > 0
+            if offset > skip
                 && let Some(t) = s.track_mut(tid)
             {
                 t.playlists.push(openpt_model::Playlist::new(format!("{}.{:02}", t.name, t.playlists.len() + 1)));
@@ -1598,6 +1611,18 @@ pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBu
         e.push_undo("Record", before);
     }
     out
+}
+
+pub fn align_take(start: Samples, anchor: Option<(Samples, u64)>, first_us: Option<u64>, rate: u32, offset: i32) -> (Samples, Samples) {
+    let late = match (anchor, first_us) {
+        (Some((pos, heard_us)), Some(first)) => {
+            let dt = (first as f64 - heard_us as f64) / 1_000_000.0;
+            (start - pos) as f64 - dt * f64::from(rate)
+        }
+        _ => 0.0,
+    };
+    let skip = late.round() as Samples + Samples::from(offset);
+    if skip >= 0 { (start, skip) } else { (start - skip, 0) }
 }
 
 pub fn live_span(start: Samples, pass: Option<Samples>, punch: Option<Range>, len: Samples) -> Option<(Samples, Range)> {
@@ -1623,6 +1648,30 @@ mod record_tests {
         bytes.extend((0..frames).flat_map(|i| (i as f32 / frames as f32 - 0.5).to_le_bytes()));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn takes_line_up_with_what_was_heard() {
+        let anchor = Some((48_000, 1_000_000));
+        assert_eq!(align_take(48_000, anchor, Some(900_000), 48_000, 0), (48_000, 4_800), "captured before playback was heard");
+        assert_eq!(align_take(48_000, anchor, Some(1_050_000), 48_000, 0), (50_400, 0), "captured after it");
+        assert_eq!(align_take(48_000, anchor, Some(1_000_000), 48_000, 32), (48_000, 32), "the manual offset adds");
+        assert_eq!(align_take(96_000, anchor, Some(2_000_000), 48_000, 0), (96_000, 0), "punched in on the fly");
+        assert_eq!(align_take(48_000, None, Some(900_000), 48_000, -5), (48_005, 0));
+    }
+
+    #[test]
+    fn a_skipped_lead_in_is_left_out_of_the_clip() {
+        let dir = std::env::temp_dir().join(format!("openpt-skip-take-{}", std::process::id()));
+        let path = dir.join("Audio Files/Vox_01.wav");
+        write_take(&path, 10_000);
+        let mut e = Engine::default();
+        let vox = armed(&mut e, "Vox", "mono", "In 1");
+        let clips = add_recording_skipping(&mut e, 48_000, vec![(vox, path)], None, 1_000);
+        let clip = e.session().find_clip(clips[0]).unwrap().1.clone();
+        assert_eq!((clip.start, clip.length), (48_000, 9_000));
+        assert!(matches!(clip.content, openpt_model::ClipContent::Audio { offset: 1_000, .. }));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

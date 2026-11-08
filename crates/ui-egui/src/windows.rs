@@ -780,13 +780,15 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
                 let dev = if inputs { in_dev.as_ref() } else { out_dev.as_ref() };
                 let paths = if inputs { s.inputs.clone() } else { s.outputs.clone() };
                 let used = paths.iter().map(|p| usize::from(p.first_channel) + p.format.channels()).max().unwrap_or(0);
+                let used = if inputs { used } else { used.max(usize::from(s.main_first_channel) + s.main_format().channels()) };
                 let n = dev.map_or(8, |d| usize::from(d.max_channels)).max(used).clamp(1, 64);
                 let interface = dev.map_or_else(
                     || "No audio device".to_string(),
                     |d| format!("{} — {} {}", d.name, d.max_channels, if inputs { "inputs" } else { "outputs" }),
                 );
                 ui.label(egui::RichText::new(interface).color(t.text_dim));
-                io_grid(ui, &paths, n, dev.map_or(n, |d| usize::from(d.max_channels)), inputs, &mut runs);
+                let main = (!inputs).then(|| (s.main_format(), s.main_first_channel));
+                io_grid(ui, &paths, main, n, dev.map_or(n, |d| usize::from(d.max_channels)), inputs, &mut runs);
                 ui.horizontal(|ui| {
                     if let Some((count, fmt)) = new_paths(ui, if inputs { "io_new_in" } else { "io_new_out" }, if inputs { "input" } else { "output" }) {
                         let prefix = if inputs { "In" } else { "Out" };
@@ -861,7 +863,15 @@ fn name_field(ui: &mut egui::Ui, key: impl std::hash::Hash + std::fmt::Debug, na
     done.then(|| edit.trim().to_string())
 }
 
-fn io_grid(ui: &mut egui::Ui, paths: &[openpt_model::OutputPath], n: usize, real: usize, inputs: bool, runs: &mut Vec<Value>) {
+fn io_grid(
+    ui: &mut egui::Ui,
+    paths: &[openpt_model::OutputPath],
+    main: Option<(openpt_model::ChannelFormat, u16)>,
+    n: usize,
+    real: usize,
+    inputs: bool,
+    runs: &mut Vec<Value>,
+) {
     let t = Tokens::current();
     let (set, rename, delete) = if inputs { ("set_input", "rename_input", "delete_input") } else { ("set_output", "rename_output", "delete_output") };
     let cell = 22.0;
@@ -881,6 +891,17 @@ fn io_grid(ui: &mut egui::Ui, paths: &[openpt_model::OutputPath], n: usize, real
                 );
             }
             ui.end_row();
+            if let Some((fmt, first)) = main {
+                ui.label(egui::RichText::new("Main output").strong());
+                ui.label(fmt.label());
+                if let Some(c) = channel_cells(ui, cell, n, real, usize::from(first), fmt, t.accent_dark)
+                    && c != usize::from(first)
+                {
+                    runs.push(json!({"action": "set_main", "name": "Main", "first_channel": c}));
+                }
+                ui.label("");
+                ui.end_row();
+            }
             for p in paths {
                 if let Some(to) = name_field(ui, ("io_name", inputs, &p.name), &p.name) {
                     runs.push(json!({"action": rename, "name": p.name, "new_name": to}));
@@ -892,42 +913,11 @@ fn io_grid(ui: &mut egui::Ui, paths: &[openpt_model::OutputPath], n: usize, real
                         }
                     }
                 });
-                let (r, resp) = ui.allocate_exact_size(vec2(cell * n as f32, 18.0), egui::Sense::click());
                 let first = usize::from(p.first_channel);
-                let width = p.format.channels();
-                for c in 0..n {
-                    let cr = egui::Rect::from_min_size(egui::pos2(r.min.x + cell * c as f32, r.min.y), vec2(cell - 2.0, r.height()));
-                    let lit = (first..first + width).contains(&c);
-                    ui.painter().rect(
-                        cr,
-                        1.5,
-                        if lit {
-                            t.accent
-                        } else if c < real {
-                            t.field_bg
-                        } else {
-                            t.group_header
-                        },
-                        egui::Stroke::new(1.0, t.border_light),
-                        egui::StrokeKind::Inside,
-                    );
-                    if lit && width > 1 {
-                        ui.painter().text(
-                            cr.center(),
-                            egui::Align2::CENTER_CENTER,
-                            p.format.channel_label(c - first),
-                            bold(9.5),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                }
-                if resp.clicked()
-                    && let Some(pos) = resp.interact_pointer_pos()
+                if let Some(c) = channel_cells(ui, cell, n, real, first, p.format, t.accent)
+                    && c != first
                 {
-                    let c = (((pos.x - r.min.x) / cell).floor().max(0.0) as usize).min(n.saturating_sub(width.max(1)));
-                    if c != first {
-                        runs.push(json!({"action": set, "name": p.name, "first_channel": c}));
-                    }
+                    runs.push(json!({"action": set, "name": p.name, "first_channel": c}));
                 }
                 if ui.small_button("Delete").clicked() {
                     runs.push(json!({"action": delete, "name": p.name}));
@@ -936,6 +926,37 @@ fn io_grid(ui: &mut egui::Ui, paths: &[openpt_model::OutputPath], n: usize, real
             }
         });
     });
+}
+
+fn channel_cells(
+    ui: &mut egui::Ui,
+    cell: f32,
+    n: usize,
+    real: usize,
+    first: usize,
+    format: openpt_model::ChannelFormat,
+    lit_fill: egui::Color32,
+) -> Option<usize> {
+    let t = Tokens::current();
+    let (r, resp) = ui.allocate_exact_size(vec2(cell * n as f32, 18.0), egui::Sense::click());
+    let width = format.channels();
+    for c in 0..n {
+        let cr = egui::Rect::from_min_size(egui::pos2(r.min.x + cell * c as f32, r.min.y), vec2(cell - 2.0, r.height()));
+        let lit = (first..first + width).contains(&c);
+        let fill = if lit {
+            lit_fill
+        } else if c < real {
+            t.field_bg
+        } else {
+            t.group_header
+        };
+        ui.painter().rect(cr, 1.5, fill, egui::Stroke::new(1.0, t.border_light), egui::StrokeKind::Inside);
+        if lit && width > 1 {
+            ui.painter().text(cr.center(), egui::Align2::CENTER_CENTER, format.channel_label(c - first), bold(9.5), egui::Color32::WHITE);
+        }
+    }
+    let pos = resp.clicked().then(|| resp.interact_pointer_pos()).flatten()?;
+    Some((((pos.x - r.min.x) / cell).floor().max(0.0) as usize).min(n.saturating_sub(width.max(1))))
 }
 
 pub fn shortcuts_window(app: &mut SoundApp, ctx: &egui::Context) {

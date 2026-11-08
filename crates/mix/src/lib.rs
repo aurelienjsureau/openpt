@@ -25,7 +25,11 @@ pub fn main_channels(s: &Session) -> usize {
 }
 
 pub fn output_channels(s: &Session) -> usize {
-    s.outputs.iter().map(|o| usize::from(o.first_channel) + o.format.channels()).fold(main_channels(s), usize::max).min(64)
+    s.outputs
+        .iter()
+        .map(|o| usize::from(o.first_channel) + o.format.channels())
+        .fold(usize::from(s.main_first_channel) + main_channels(s), usize::max)
+        .min(64)
 }
 
 pub const INSTRUMENT_SLOT: usize = usize::MAX;
@@ -441,6 +445,7 @@ pub struct MixEngine {
     arrive: HashMap<BusId, usize>,
     main_arrive: usize,
     master_latency: usize,
+    pub main_offset: usize,
     pub split_objects: bool,
     pub object_feeds: [Vec<Vec<f32>>; 4],
     object_delay: [DelayLine; 4],
@@ -516,6 +521,7 @@ impl MixEngine {
             strips: HashMap::new(),
             busses: HashMap::new(),
             main: vec![vec![0.0; max_block]; MAIN_CHANNELS],
+            main_offset: 0,
             main_fmt: ChannelFormat::Stereo,
             solo_bus: vec![vec![0.0; max_block]; MAIN_CHANNELS],
             solo: Solo::None,
@@ -1107,8 +1113,9 @@ impl MixEngine {
         if self.metronome && !self.monitor_only && s.edit.click && (!s.edit.flag("click.only_during_record") || self.recording) {
             click::render(s, pos, frames, &mut self.main);
         }
+        let main_offset = self.main_offset;
         for (c, o) in out.iter_mut().enumerate() {
-            let src = self.main.get(c);
+            let src = c.checked_sub(main_offset).and_then(|k| self.main.get(k));
             for i in 0..frames {
                 let v = src.and_then(|m| m.get(i)).copied().unwrap_or(0.0);
                 if let Some(d) = o.get_mut(i) {
@@ -4471,6 +4478,23 @@ mod tests {
         eng.render(&s, 0, 512, &mut out);
         assert!((out[4][100] - 0.5 * CENTER).abs() < 1e-3, "the send on Out 5: {}", out[4][100]);
         assert!((out[0][100] - 0.75 * CENTER).abs() < 1e-3, "the track and its return on the main mix: {}", out[0][100]);
+    }
+
+    #[test]
+    fn the_main_output_can_start_on_any_interface_channel() {
+        let (mut s, _) = session_with_dc(0.5, 4800);
+        s.main_first_channel = 4;
+        assert_eq!(output_channels(&s), 6);
+        let mut eng = MixEngine::new(48_000.0, 512);
+        eng.main_offset = 4;
+        let mut out = vec![vec![0.0; 512]; 6];
+        eng.render(&s, 0, 512, &mut out);
+        assert!(out[0][100].abs() < 1e-6 && out[1][100].abs() < 1e-6, "nothing left on 1-2");
+        assert!((out[4][100] - 0.5 * CENTER).abs() < 1e-3 && (out[5][100] - 0.5 * CENTER).abs() < 1e-3, "the mix on 5-6: {}", out[4][100]);
+        let mut eng = MixEngine::new(48_000.0, 512);
+        let mut bounce = vec![vec![0.0; 512]; 2];
+        eng.render(&s, 0, 512, &mut bounce);
+        assert!((bounce[0][100] - 0.5 * CENTER).abs() < 1e-3, "a bounce still gets the mix on its first channels");
     }
 
     #[test]

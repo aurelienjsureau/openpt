@@ -66,6 +66,7 @@ fn finite(x: f32) -> f32 {
 
 struct Shared {
     armed: AtomicBool,
+    first_us: AtomicU64,
     ring: CaptureRing,
     dropped: AtomicUsize,
     beats: AtomicU64,
@@ -76,7 +77,7 @@ struct Shared {
 impl Shared {
     fn new(ring: CaptureRing) -> Shared {
         let (beats, fault, failed) = (AtomicU64::new(0), AtomicU8::new(0), Mutex::new(None));
-        Shared { armed: AtomicBool::new(false), ring, dropped: AtomicUsize::new(0), beats, fault, failed }
+        Shared { armed: AtomicBool::new(false), first_us: AtomicU64::new(0), ring, dropped: AtomicUsize::new(0), beats, fault, failed }
     }
 
     fn guarded(&self, work: impl FnOnce()) {
@@ -124,11 +125,18 @@ where
     let mut scratch = vec![0.0f32; 8192 * usize::from(config.channels).max(1)];
     let chunk = scratch.len();
     let mut owed = 0;
+    let frame = usize::from(config.channels).max(1);
+    let rate = u64::from(config.sample_rate.0.max(1));
     device.build_input_stream(
         config,
-        move |data: &[T], _: &cpal::InputCallbackInfo| {
+        move |data: &[T], info: &cpal::InputCallbackInfo| {
             crate::mark_audio_thread();
+            let now = crate::midi::monotonic_now_us();
+            let ts = info.timestamp();
+            let latency = ts.callback.duration_since(&ts.capture).map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(0));
+            let captured = now.saturating_sub(latency);
             sh.guarded(|| {
+                let mut done = 0usize;
                 for part in data.chunks(chunk) {
                     let Some(s) = scratch.get_mut(..part.len()) else { return };
                     for (o, x) in s.iter_mut().zip(part) {
@@ -136,10 +144,15 @@ where
                     }
                     mon.push(s);
                     if sh.armed.load(Ordering::Acquire) {
+                        if sh.first_us.load(Ordering::Relaxed) == 0 {
+                            let at = captured + (done / frame) as u64 * 1_000_000 / rate;
+                            sh.first_us.store(at.max(1), Ordering::Relaxed);
+                        }
                         sh.capture(s, &mut owed);
                     } else {
                         owed = 0;
                     }
+                    done += part.len();
                 }
             });
         },
@@ -223,6 +236,7 @@ impl Recorder {
         let live = takes.iter().map(|t| (t.id, Arc::clone(&t.live))).collect();
         let ring = &self.shared.ring;
         ring.tail.store(ring.head.load(Ordering::Acquire), Ordering::Release);
+        self.shared.first_us.store(0, Ordering::Relaxed);
         *self.shared.failed.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.shared.armed.store(true, Ordering::Release);
         let (shared, channels) = (Arc::clone(&self.shared), self.channels);
@@ -256,6 +270,10 @@ impl Recorder {
             self.seen = (beats, Instant::now());
         }
         (self.seen.1.elapsed() >= STALL).then(|| Trouble::Device(format!("“{name}” stopped sending audio")))
+    }
+
+    pub fn first_capture_us(&self) -> Option<u64> {
+        Some(self.shared.first_us.load(Ordering::Relaxed)).filter(|v| *v != 0)
     }
 
     pub fn lost_ms(&self) -> u64 {
@@ -515,37 +533,58 @@ mod tests {
     }
 }
 
-struct RingState {
-    data: std::collections::VecDeque<f32>,
-    phase: f64,
-}
+const MONITOR_MARGIN: usize = 16;
 
 pub struct InputRing {
-    state: Mutex<RingState>,
+    slots: Box<[AtomicU32]>,
+    mask: usize,
+    head: AtomicUsize,
+    tail: AtomicUsize,
     pub channels: std::sync::atomic::AtomicUsize,
     rate: u32,
-    cap: usize,
+    chunk: AtomicUsize,
+    phase: AtomicU64,
+    trimmed: AtomicU64,
 }
 
 impl InputRing {
     pub fn new(channels: usize, rate: u32) -> Arc<InputRing> {
         let ch = channels.max(1);
         let frames = if rate == 0 { 24_000 } else { rate as usize / 2 };
+        let n = (frames * ch).max(2).next_power_of_two();
         Arc::new(InputRing {
-            state: Mutex::new(RingState { data: std::collections::VecDeque::with_capacity(rate.max(48_000) as usize * ch), phase: 0.0 }),
+            slots: (0..n).map(|_| AtomicU32::new(0)).collect(),
+            mask: n - 1,
+            head: AtomicUsize::new(0),
+            tail: AtomicUsize::new(0),
             channels: std::sync::atomic::AtomicUsize::new(ch),
             rate,
-            cap: frames * ch,
+            chunk: AtomicUsize::new(0),
+            phase: AtomicU64::new(0f64.to_bits()),
+            trimmed: AtomicU64::new(0),
         })
     }
 
     pub fn push(&self, samples: &[f32]) {
-        if let Ok(mut s) = self.state.try_lock() {
-            s.data.extend(samples.iter().copied().map(finite));
-            while s.data.len() > self.cap {
-                s.data.pop_front();
+        let ch = self.channels.load(Ordering::Relaxed).max(1);
+        let head = self.head.load(Ordering::Relaxed);
+        let free = self.slots.len().saturating_sub(head.wrapping_sub(self.tail.load(Ordering::Acquire)));
+        let n = samples.len().min(free) / ch * ch;
+        for (i, x) in samples.iter().take(n).enumerate() {
+            if let Some(slot) = self.slots.get(head.wrapping_add(i) & self.mask) {
+                slot.store(finite(*x).to_bits(), Ordering::Relaxed);
             }
         }
+        self.head.store(head.wrapping_add(n), Ordering::Release);
+        self.chunk.store(samples.len() / ch, Ordering::Relaxed);
+    }
+
+    pub fn trimmed_frames(&self) -> u64 {
+        self.trimmed.load(Ordering::Relaxed)
+    }
+
+    fn sample(&self, at: usize) -> f32 {
+        self.slots.get(at & self.mask).map_or(0.0, |s| f32::from_bits(s.load(Ordering::Relaxed)))
     }
 
     pub fn pop_into(&self, out: &mut [Vec<f32>], frames: usize, session_rate: u32) {
@@ -553,26 +592,42 @@ impl InputRing {
         for c in out.iter_mut() {
             c.iter_mut().take(frames).for_each(|x| *x = 0.0);
         }
-        let Ok(mut s) = self.state.try_lock() else { return };
         let step = if self.rate == 0 || session_rate == 0 { 1.0 } else { f64::from(self.rate) / f64::from(session_rate) };
+        let mut tail = self.tail.load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Acquire);
+        let mut avail = head.wrapping_sub(tail) / ch;
+        let mut phase = f64::from_bits(self.phase.load(Ordering::Relaxed));
+        let chunk = self.chunk.load(Ordering::Relaxed);
+        let need = (frames as f64 * step).ceil() as usize + 1;
+        let target = chunk + need + MONITOR_MARGIN;
+        if avail > target + chunk + MONITOR_MARGIN {
+            let drop = avail - target;
+            tail = tail.wrapping_add(drop * ch);
+            avail = target;
+            phase = 0.0;
+            self.trimmed.fetch_add(drop as u64, Ordering::Relaxed);
+        }
         for f in 0..frames {
-            while s.phase >= 1.0 && s.data.len() >= 2 * ch {
-                s.data.drain(..ch);
-                s.phase -= 1.0;
+            while phase >= 1.0 && avail >= 2 {
+                tail = tail.wrapping_add(ch);
+                avail -= 1;
+                phase -= 1.0;
             }
-            if s.phase >= 1.0 || s.data.len() < 2 * ch {
+            if phase >= 1.0 || avail < 2 {
                 break;
             }
-            let fr = s.phase as f32;
+            let fr = phase as f32;
             for c in 0..ch {
-                let a = s.data.get(c).copied().unwrap_or(0.0);
-                let b = s.data.get(ch + c).copied().unwrap_or(a);
+                let a = self.sample(tail.wrapping_add(c));
+                let b = self.sample(tail.wrapping_add(ch + c));
                 if let Some(x) = out.get_mut(c).and_then(|o| o.get_mut(f)) {
                     *x = a + (b - a) * fr;
                 }
             }
-            s.phase += step;
+            phase += step;
         }
+        self.phase.store(phase.to_bits(), Ordering::Relaxed);
+        self.tail.store(tail, Ordering::Release);
     }
 }
 
@@ -619,6 +674,28 @@ mod ring_tests {
         assert_eq!(out[0][0], 0.0);
         assert_eq!(out[1][0], 1.0);
         assert_eq!(out[0][49], 98.0);
+    }
+
+    #[test]
+    fn monitoring_latency_stays_near_one_buffer() {
+        let ring = InputRing::new(1, 48_000);
+        for k in 0..100 {
+            let block: Vec<f32> = (0..128).map(|i| (k * 128 + i) as f32).collect();
+            ring.push(&block);
+        }
+        let mut out = vec![vec![0.0f32; 128]];
+        ring.pop_into(&mut out, 128, 48_000);
+        let newest = (100 * 128 - 1) as f32;
+        assert!(newest - out[0][0] <= (128 + 129 + 16) as f32, "behind by {} samples", newest - out[0][0]);
+        assert!(ring.trimmed_frames() > 0);
+        let trimmed = ring.trimmed_frames();
+        for k in 100..400 {
+            let block: Vec<f32> = (0..128).map(|i| (k * 128 + i) as f32).collect();
+            ring.push(&block);
+            ring.pop_into(&mut out, 128, 48_000);
+            assert!(out[0].windows(2).all(|w| w[1] - w[0] == 1.0), "a gap in block {k}");
+        }
+        assert_eq!(ring.trimmed_frames(), trimmed, "steady input is never trimmed");
     }
 
     #[test]

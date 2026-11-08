@@ -233,6 +233,10 @@ fn yes() -> bool {
     true
 }
 
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
+}
+
 impl Default for EditState {
     fn default() -> Self {
         EditState {
@@ -327,6 +331,8 @@ pub struct Session {
     pub videos: Vec<VideoSource>,
     pub busses: Vec<Bus>,
     pub outputs: Vec<OutputPath>,
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub main_first_channel: u16,
     #[serde(default = "crate::default_inputs")]
     pub inputs: Vec<crate::InputPath>,
     #[serde(default)]
@@ -381,6 +387,7 @@ impl Session {
             videos: Vec::new(),
             busses: Vec::new(),
             outputs: vec![OutputPath { name: "Out 1-2".into(), first_channel: 0, format: ChannelFormat::Stereo }],
+            main_first_channel: 0,
             inputs: crate::default_inputs(),
             heat: crate::HeatSettings::default(),
             atmos: crate::AtmosSettings::default(),
