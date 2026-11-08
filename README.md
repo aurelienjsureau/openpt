@@ -41,7 +41,7 @@
   <tr>
     <td width="25%" valign="top">
       <h3>🎛️ Familiar by design</h3>
-      The windows, menus, modes and track layout are where your hands expect them. If you know Pro Tools, you already know your way around.
+      The windows, menus, modes and track layout are where your hands expect them. If you know Pro Tools, you already know your way around. In English or French.
     </td>
     <td width="25%" valign="top">
       <h3>🔌 Your plugins</h3>
@@ -116,11 +116,11 @@ Every screenshot here is the real app, rendered offscreen through its control ch
   <tr>
     <td width="33%" valign="top">
       <h4>🎚️ Mixing</h4>
-      Inserts A–J · Sends A–J · Busses and aux tracks · VCAs · Mix and edit groups · Folder tracks · Multi-mono inserts · Plugin delay compensation · Sidechain · Automation modes · HUI · MIDI Learn
+      Inserts A–J · Sends A–J · Busses and aux tracks · VCAs · Mix and edit groups · Folder tracks · Multi-mono inserts · Plugin delay compensation · Sidechain · Automation modes · HUI and Mackie Control · MIDI Learn · Main output on any interface channels
     </td>
     <td width="33%" valign="top">
       <h4>🎼 Audio and MIDI</h4>
-      Take recording · Playlists · Clip gain · Fades · Clip groups · Elastic warping · Beat Detective · Audio to MIDI · Piano roll · Virtual keyboard · Quantize · Templates and track presets · Memory locations · AudioSuite
+      Take recording lined up with the driver latency · Playlists · Clip gain · Fades · Clip groups · Elastic warping · Beat Detective · Audio to MIDI · Piano roll · Virtual keyboard · Quantize · Templates and track presets · Memory locations · AudioSuite · MTC, MIDI Beat Clock and LTC, generated and chased
     </td>
     <td width="33%" valign="top">
       <h4>🗂️ Formats</h4>
@@ -204,7 +204,7 @@ OPENPT_NO_SYSTEM_PLUGINS=1 cargo test --workspace --exclude openpt-web
 
 ## Status
 
-OpenPT 0.7 is stable and ready for real sessions. Not there yet: audio interface channel routing and low-latency duplex, AAF/OMF interchange, saving back to `.ptx`, Mackie Control and EUCON, external sync, and interface languages other than English. Plugins run in-process. Windows is the most exercised platform; the macOS build is Apple Silicon only and unsigned, and Linux has seen little testing.
+OpenPT 0.7 is stable and ready for real sessions. Not there yet: AAF/OMF interchange, saving back to `.ptx`, EUCON, and interface languages other than English and French. Plugins run in-process. Windows is the most exercised platform; the macOS build is Apple Silicon only and unsigned, and Linux has seen little testing.
 
 Bug reports and feature requests are welcome in the [issues](https://github.com/aurelienjsureau/openpt/issues).
 
