@@ -31,6 +31,7 @@ pub mod sampler_window;
 pub mod score_editor;
 pub mod shortcuts;
 pub mod spot;
+pub mod sync;
 pub mod theme;
 pub mod toolbar;
 pub mod track_presets;
@@ -129,6 +130,7 @@ pub struct UiState {
     pub show_peripherals: bool,
     pub peripherals: Vec<peripherals::Controller>,
     pub record_offset: i32,
+    pub sync: sync::SyncPrefs,
     pub plugin_native_editor: bool,
     pub vst3_folders: Vec<String>,
     pub hrtf_sofa: String,
@@ -214,6 +216,7 @@ impl Default for UiState {
             show_peripherals: false,
             peripherals: Vec::new(),
             record_offset: 0,
+            sync: sync::SyncPrefs::default(),
             plugin_native_editor: true,
             vst3_folders: Vec::new(),
             hrtf_sofa: String::new(),
@@ -386,6 +389,7 @@ pub struct SoundApp {
     recent_checked: Option<(f64, Vec<String>, Vec<bool>)>,
     pub player: Option<Player>,
     pub(crate) surfaces: peripherals::Surfaces,
+    pub(crate) sync_state: sync::SyncState,
     pub(crate) learn: midi_learn::Learn,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) audio_to_midi: Option<audio_to_midi::Converter>,
@@ -486,6 +490,7 @@ impl SoundApp {
             engine,
             player,
             surfaces: Default::default(),
+            sync_state: Default::default(),
             learn: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             audio_to_midi: None,
@@ -1180,7 +1185,7 @@ impl SoundApp {
         if let Some(player) = &self.player {
             let flags = &self.engine.session().edit.flags;
             let mut enabled: Vec<String> = flags.iter().filter_map(|f| f.strip_prefix("midi.input.").map(str::to_string)).collect();
-            enabled.retain(|n| !self.ui.peripherals.iter().any(|c| c.kind != "none" && &c.input == n));
+            enabled.retain(|n| !self.ui.peripherals.iter().any(|c| c.kind != "none" && &c.input == n) && *n != self.ui.sync.mtc_in);
             if let Some(mm) = &mut self.midi_manager {
                 mm.sync_enabled(&enabled);
             } else {
@@ -1661,6 +1666,7 @@ impl SoundApp {
         self.frame_ms = self.frame_ms * 0.9 + dt * 1000.0 * 0.1;
         control::drain(self, ctx);
         peripherals::run(self, ctx);
+        sync::run(self, ctx);
         midi_learn::run(self, ctx);
         self.follow_selection_while_playing(ctx);
         self.ara_requests();

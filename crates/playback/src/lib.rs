@@ -5,6 +5,7 @@ pub mod midi;
 pub mod readahead;
 pub mod record;
 pub mod surface;
+pub mod sync;
 
 pub use devices::AudioConfig;
 pub use midi::{LiveMidiEvent, MidiDeviceInfo, MidiInputRing, MidiManager};
@@ -74,6 +75,7 @@ enum Cmd {
     Play { from: Samples, end: Option<Samples>, looped: Option<Range> },
     Stop,
     Locate(Samples),
+    Ltc { out: Option<usize>, input: Option<usize> },
 }
 
 pub(crate) struct Shared {
@@ -84,6 +86,8 @@ pub(crate) struct Shared {
     late: Mutex<LateBlocks>,
     clock: Mutex<ClockPoint>,
     rec_anchor: Mutex<Option<(Samples, u64)>>,
+    ltc_reading: Mutex<Option<sync::TcReading>>,
+    out_latency: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -113,6 +117,10 @@ pub struct PlayClock {
 impl PlayClock {
     pub fn point(&self) -> ClockPoint {
         *self.shared.clock.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn same_as(&self, other: &PlayClock) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
     }
 
     pub fn now(&self) -> (bool, f64) {
@@ -228,6 +236,8 @@ struct AudioState {
     out_latency_us: u64,
     cb_frame: usize,
     want_anchor: bool,
+    ltc_out: Option<(usize, sync::LtcEncoder)>,
+    ltc_in: Option<(usize, sync::LtcDecoder)>,
 }
 
 fn new_engine(sr: f32) -> MixEngine {
@@ -250,6 +260,8 @@ impl AudioState {
             out_latency_us: 0,
             cb_frame: 0,
             want_anchor: false,
+            ltc_out: None,
+            ltc_in: None,
             fold: fold_gains(&session),
             rx,
             shared,
@@ -322,7 +334,7 @@ impl AudioState {
                     }
                     self.mix.adopt(instances);
                     self.mix.main_offset = usize::from(s.main_first_channel);
-                    let nch = openpt_mix::output_channels(&s);
+                    let nch = self.wanted_channels(&s);
                     if self.pending.len() != nch {
                         self.pending = vec![vec![0.0; BLOCK]; nch];
                         self.pending_len = 0;
@@ -369,6 +381,14 @@ impl AudioState {
                     self.rendered_samples = 0;
                     self.mix.reset();
                 }
+                Cmd::Ltc { out, input } => {
+                    self.ltc_out = out.map(|c| (c, sync::LtcEncoder::default()));
+                    self.ltc_in = input.map(|c| (c, sync::LtcDecoder::default()));
+                    let nch = self.wanted_channels(&self.session.clone());
+                    if self.pending.len() < nch {
+                        self.pending.resize_with(nch, || vec![0.0; BLOCK]);
+                    }
+                }
             }
         }
         if changed {
@@ -376,6 +396,11 @@ impl AudioState {
         }
         self.send_garbage();
         self.shared.playing.store(self.playing, Ordering::Relaxed);
+    }
+
+    fn wanted_channels(&self, s: &Session) -> usize {
+        let ltc = self.ltc_out.as_ref().map_or(0, |(c, _)| c + 1);
+        openpt_mix::output_channels(s).max(ltc).min(64)
     }
 
     fn send_garbage(&mut self) {
@@ -431,6 +456,16 @@ impl AudioState {
                 self.mix.input = vec![vec![0.0; BLOCK]; ch];
             }
             ring.pop_into(&mut self.mix.input, n, self.session.sample_rate.hz());
+            if let Some((ch, dec)) = &mut self.ltc_in
+                && let Some(src) = self.mix.input.get(*ch)
+                && let Some((tc, at)) = dec.feed(&src[..n.min(src.len())], self.session.frame_rate, self.session.sample_rate)
+            {
+                let rate = self.session.frame_rate;
+                let at_us = self.cb_us + ((self.cb_frame + at) as f64 * 1_000_000.0 / self.device_rate.max(1.0)) as u64;
+                if let Ok(mut r) = self.shared.ltc_reading.try_lock() {
+                    *r = Some(sync::TcReading { frames: tc.to_frames(rate) + 1, rate, at_us, running: true });
+                }
+            }
         }
         self.mix.midi_input.clear();
         if let Some(ring) = &self.midi_input {
@@ -496,6 +531,14 @@ impl AudioState {
         } else {
             self.monitor = None;
         }
+        if self.playing
+            && let Some((ch, enc)) = &mut self.ltc_out
+            && let Some(buf) = self.pending.get_mut(*ch)
+        {
+            let start = self.pos + self.session.timecode_start;
+            let len = n.min(buf.len());
+            enc.render(&mut buf[..len], start, self.session.sample_rate, self.session.frame_rate);
+        }
         if self.recording
             && self.playing
             && let Some(rec_ring) = &self.midi_record
@@ -546,7 +589,7 @@ impl AudioState {
             });
         let midi_has_events = self.midi_input.as_ref().is_some_and(|r| !r.is_empty());
         let instruments = self.session.tracks.iter().any(|t| t.instrument.is_some() && !t.inactive);
-        let monitoring = audio_monitoring || midi_monitoring || midi_has_events || instruments;
+        let monitoring = audio_monitoring || midi_monitoring || midi_has_events || instruments || (self.ltc_in.is_some() && self.input.is_some());
         if !self.playing && !monitoring {
             out.iter_mut().for_each(|x| *x = 0.0);
             if self.latency_probe {
@@ -762,6 +805,8 @@ impl Player {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let want = session.sample_rate.hz();
         let want_ch: u16 = 64;
@@ -1158,6 +1203,18 @@ impl Player {
         PlayClock { shared: Arc::clone(&self.shared) }
     }
 
+    pub fn set_ltc(&self, out: Option<usize>, input: Option<usize>) {
+        let _ = self.tx.send(Cmd::Ltc { out, input });
+    }
+
+    pub fn ltc_reading(&self) -> Option<sync::TcReading> {
+        *self.shared.ltc_reading.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn output_latency_us(&self) -> u64 {
+        self.shared.out_latency.load(Ordering::Relaxed)
+    }
+
     pub fn take_record_anchor(&self) -> Option<(Samples, u64)> {
         self.shared.rec_anchor.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
@@ -1320,6 +1377,7 @@ where
             let now = midi::monotonic_now_us();
             let ts = info.timestamp();
             state.out_latency_us = ts.playback.duration_since(&ts.callback).map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(0));
+            guard.out_latency.store(state.out_latency_us, Ordering::Relaxed);
             let mut done = 0usize;
             for out in data.chunks_mut(chunk) {
                 state.cb_us = now + (done / frame) as u64 * 1_000_000 / rate.max(1.0) as u64;
@@ -1443,6 +1501,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         };
         let fault = Fault::default();
         let mut out = [0.5f32; 8];
@@ -1487,6 +1547,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), s, 48_000.0, channel().0);
@@ -1508,6 +1570,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), s, 48_000.0, channel().0);
@@ -1536,6 +1600,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::clone(&s), 48_000.0, channel().0);
@@ -1570,6 +1636,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let (gtx, grx) = channel();
@@ -1620,6 +1688,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let (gtx, _grx) = channel();
@@ -1702,6 +1772,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let (gtx, grx) = channel();
@@ -1734,6 +1806,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), s, 48_000.0, channel().0);
@@ -1772,6 +1846,8 @@ mod tests {
                 late: Mutex::default(),
                 clock: Mutex::default(),
                 rec_anchor: Mutex::new(None),
+                ltc_reading: Mutex::new(None),
+                out_latency: std::sync::atomic::AtomicU64::new(0),
             });
             let (tx, rx) = channel();
             let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);
@@ -1805,6 +1881,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);
@@ -1841,6 +1919,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);
@@ -1876,6 +1956,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 48_000.0, channel().0);
@@ -1919,6 +2001,8 @@ mod tests {
             late: Mutex::default(),
             clock: Mutex::default(),
             rec_anchor: Mutex::new(None),
+            ltc_reading: Mutex::new(None),
+            out_latency: std::sync::atomic::AtomicU64::new(0),
         });
         let (tx, rx) = channel();
         let mut st = AudioState::new(rx, Arc::clone(&shared), Arc::new(s), 44_100.0, channel().0);

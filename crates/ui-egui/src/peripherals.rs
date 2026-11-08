@@ -304,7 +304,9 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
             }
         });
         ui.separator();
-        if tab != 2 {
+        if tab == 0 {
+            crate::sync::tab(app, ui);
+        } else if tab != 2 {
             ui.label("Nothing to set up here yet.");
         } else {
             egui::Grid::new("midi_controllers").num_columns(5).spacing(egui::vec2(12.0, 8.0)).show(ui, |ui| {
