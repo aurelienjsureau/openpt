@@ -15,7 +15,7 @@
   <img alt="Windows · macOS" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS-native-2f7bf5?style=flat-square">
   <img alt="Plugins: VST3 · AU" src="https://img.shields.io/badge/plugins-VST3%20%C2%B7%20AU-7a4fd0?style=flat-square">
   <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-3a3a3a?style=flat-square">
-  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-d69e2e?style=flat-square">
+  <img alt="Latest release" src="https://img.shields.io/github/v/release/aurelienjsureau/openpt?style=flat-square&color=2e9d5b">
 </p>
 
 <br>
@@ -178,7 +178,7 @@ See [`docs/control-protocol.md`](docs/control-protocol.md) and [`docs/mcp.md`](d
 Installers for Windows x64 and Apple Silicon Macs are on the [releases page](https://github.com/aurelienjsureau/openpt/releases/latest):
 
 - [Windows installer](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.7.0-Setup.exe)
-- [macOS disk image](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.7.0-alpha-macos-arm64.dmg)
+- [macOS disk image](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.7.0-macos-arm64.dmg)
 
 They are not signed by a recognised publisher, so Windows SmartScreen and macOS Gatekeeper will warn on first launch.
 
@@ -204,8 +204,9 @@ OPENPT_NO_SYSTEM_PLUGINS=1 cargo test --workspace --exclude openpt-web
 
 ## Status
 
-> [!IMPORTANT]
-> **OpenPT is an alpha, and we want to be straight about where it stands: it is not yet a Pro Tools replacement for daily professional work.** The biggest gaps are audio interface channel routing and low-latency duplex, AAF/OMF interchange, saving back to `.ptx`, Mackie Control and EUCON, external sync, and an English-only interface. Plugins still run in-process, and Windows is the most exercised platform: the macOS build is Apple Silicon only and unsigned, and Linux has seen little testing. Expect rough edges, and please file issues.
+OpenPT 0.7 is stable and ready for real sessions. Not there yet: audio interface channel routing and low-latency duplex, AAF/OMF interchange, saving back to `.ptx`, Mackie Control and EUCON, external sync, and interface languages other than English. Plugins run in-process. Windows is the most exercised platform; the macOS build is Apple Silicon only and unsigned, and Linux has seen little testing.
+
+Bug reports and feature requests are welcome in the [issues](https://github.com/aurelienjsureau/openpt/issues).
 
 ## Contributing
 
