@@ -80,7 +80,7 @@ pub fn open(app: &mut SoundApp, track: Option<TrackId>) {
     let s = app.engine.session();
     let track = track.or_else(|| s.edit.selected_tracks.first().copied());
     let Some(t) = track.and_then(|t| s.track(t)).filter(|t| t.kind == openpt_model::TrackKind::Audio) else {
-        app.ui.status = "Audio to MIDI: select audio on an audio track".into();
+        app.ui.status = t!("Audio to MIDI: select audio on an audio track").into();
         return;
     };
     let sel = s.edit.selection;
@@ -94,7 +94,7 @@ pub fn open(app: &mut SoundApp, track: Option<TrackId>) {
         openpt_engine::io::bounded_to_track(s, t.id, sel)
     };
     if range.is_empty() {
-        app.ui.status = "Audio to MIDI: nothing to convert on this track".into();
+        app.ui.status = t!("Audio to MIDI: nothing to convert on this track").into();
         return;
     }
     let mono = Arc::new(openpt_engine::cmd::audio_midi::selected_mono(s, t.id, range));
@@ -492,89 +492,97 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut create = false;
-    egui::Window::new("Audio to MIDI").open(&mut open).collapsible(false).resizable(true).default_width(760.0).fit_screen(ctx).show(ctx, |ui| {
-        ui.label(format!("{} · {:.2} s", c.name, c.range.len() as f64 / f64::from(c.rate.max(1))));
-        ui.horizontal(|ui| {
-            for (m, label, tip) in [
-                (Mode::Poly, "Polyphonic", "Chords and several voices: piano, guitar, pads"),
-                (Mode::Mono, "Melody", "One note at a time: vocals, bass, leads"),
-                (Mode::Drums, "Drums", "Hits sorted into kick, snare, hi-hat, toms and cymbals"),
-            ] {
-                if ui.selectable_label(c.mode == m, label).on_hover_text(tip).clicked() && c.mode != m {
-                    c.mode = m;
-                    c.stale = true;
-                }
-            }
-        });
-        ui.separator();
-        let before = (c.onset, c.frame, c.min_ms, c.low, c.high, c.bends, c.sensitivity, c.drum_note);
-        if c.mode == Mode::Drums {
+    egui::Window::new(t!("Audio to MIDI"))
+        .id(egui::Id::new("Audio to MIDI"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(760.0)
+        .fit_screen(ctx)
+        .show(ctx, |ui| {
+            ui.label(format!("{} · {:.2} s", c.name, c.range.len() as f64 / f64::from(c.rate.max(1))));
             ui.horizontal(|ui| {
-                let mut db = 20.0 * c.threshold.max(1e-6).log10();
-                if ui.add(egui::Slider::new(&mut db, -60.0..=0.0).text("Threshold").suffix(" dB").max_decimals(1)).changed() {
-                    c.threshold = 10f32.powf(db / 20.0);
-                    c.stale = true;
+                for (m, label, tip) in [
+                    (Mode::Poly, "Polyphonic", "Chords and several voices: piano, guitar, pads"),
+                    (Mode::Mono, "Melody", "One note at a time: vocals, bass, leads"),
+                    (Mode::Drums, "Drums", "Hits sorted into kick, snare, hi-hat, toms and cymbals"),
+                ] {
+                    if ui.selectable_label(c.mode == m, label).on_hover_text(tip).clicked() && c.mode != m {
+                        c.mode = m;
+                        c.stale = true;
+                    }
                 }
-                let shown = DRUM_NOTES.iter().find(|d| d.0 == c.drum_note).map_or("Auto", |d| d.1);
-                egui::ComboBox::from_label("Hits as").selected_text(shown).show_ui(ui, |ui| {
-                    for (n, label) in DRUM_NOTES {
-                        ui.selectable_value(&mut c.drum_note, n, label);
+            });
+            ui.separator();
+            let before = (c.onset, c.frame, c.min_ms, c.low, c.high, c.bends, c.sensitivity, c.drum_note);
+            if c.mode == Mode::Drums {
+                ui.horizontal(|ui| {
+                    let mut db = 20.0 * c.threshold.max(1e-6).log10();
+                    if ui.add(egui::Slider::new(&mut db, -60.0..=0.0).text("Threshold").suffix(" dB").max_decimals(1)).changed() {
+                        c.threshold = 10f32.powf(db / 20.0);
+                        c.stale = true;
+                    }
+                    let shown = DRUM_NOTES.iter().find(|d| d.0 == c.drum_note).map_or("Auto", |d| d.1);
+                    egui::ComboBox::from_label("Hits as").selected_text(shown).show_ui(ui, |ui| {
+                        for (n, label) in DRUM_NOTES {
+                            ui.selectable_value(&mut c.drum_note, n, label);
+                        }
+                    });
+                });
+                ui.horizontal(|ui| {
+                    let s = ui.add(egui::Slider::new(&mut c.sensitivity, 0.0..=100.0).text("Sensitivity").suffix(" %").max_decimals(0));
+                    let r =
+                        ui.add(egui::Slider::new(&mut c.retrigger, 5.0..=300.0).logarithmic(true).text("Retrigger").suffix(" ms").max_decimals(0));
+                    for resp in [s, r] {
+                        if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                            c.redetect();
+                        }
+                    }
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Slider::new(&mut c.onset, 0.05..=0.95).text("Note attack threshold"));
+                    ui.add(egui::Slider::new(&mut c.frame, 0.05..=0.95).text("Sustain threshold"));
+                });
+                ui.horizontal(|ui| {
+                    ui.add(egui::Slider::new(&mut c.min_ms, 20.0..=1000.0).logarithmic(true).text("Shortest note").suffix(" ms"));
+                    ui.add(egui::Slider::new(&mut c.low, 21..=108).text("Lowest").custom_formatter(|v, _| note_name(v as u8)));
+                    ui.add(egui::Slider::new(&mut c.high, 21..=108).text("Highest").custom_formatter(|v, _| note_name(v as u8)));
+                });
+                crate::widgets::checkbox(ui, &mut c.bends, "Pitch bend (melody and single notes)");
+            }
+            if before != (c.onset, c.frame, c.min_ms, c.low, c.high, c.bends, c.sensitivity, c.drum_note) {
+                c.stale = true;
+            }
+            ui.add(egui::Slider::new(&mut c.floor, 1..=127).text("Drop notes quieter than (velocity)"));
+            if let Some((_, progress, _)) = &c.job {
+                ui.add(egui::ProgressBar::new(progress.load(Ordering::Relaxed) as f32 / 1000.0).text("Analysing the audio…"));
+            }
+            if let Some(e) = &c.error {
+                ui.colored_label(Color32::from_rgb(230, 120, 100), e.as_str());
+            }
+            if c.mode == Mode::Drums {
+                drum_view(ui, &mut c);
+            } else {
+                piano_roll(ui, &mut c);
+            }
+            let kept = c.kept().len();
+            ui.horizontal(|ui| {
+                if c.mode == Mode::Drums {
+                    ui.label(format!(
+                        "{kept} of {} hits kept · drag: threshold · click a hit: keep/drop · Alt+click: add or delete",
+                        c.hits.as_ref().map_or(0, Vec::len)
+                    ));
+                } else {
+                    ui.label(format!("{kept} of {} notes kept · click a note to drop it or bring it back", c.notes.len()));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add_enabled(kept > 0, egui::Button::new(t!("Create MIDI Track"))).clicked() {
+                        create = true;
                     }
                 });
             });
-            ui.horizontal(|ui| {
-                let s = ui.add(egui::Slider::new(&mut c.sensitivity, 0.0..=100.0).text("Sensitivity").suffix(" %").max_decimals(0));
-                let r = ui.add(egui::Slider::new(&mut c.retrigger, 5.0..=300.0).logarithmic(true).text("Retrigger").suffix(" ms").max_decimals(0));
-                for resp in [s, r] {
-                    if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
-                        c.redetect();
-                    }
-                }
-            });
-        } else {
-            ui.horizontal(|ui| {
-                ui.add(egui::Slider::new(&mut c.onset, 0.05..=0.95).text("Note attack threshold"));
-                ui.add(egui::Slider::new(&mut c.frame, 0.05..=0.95).text("Sustain threshold"));
-            });
-            ui.horizontal(|ui| {
-                ui.add(egui::Slider::new(&mut c.min_ms, 20.0..=1000.0).logarithmic(true).text("Shortest note").suffix(" ms"));
-                ui.add(egui::Slider::new(&mut c.low, 21..=108).text("Lowest").custom_formatter(|v, _| note_name(v as u8)));
-                ui.add(egui::Slider::new(&mut c.high, 21..=108).text("Highest").custom_formatter(|v, _| note_name(v as u8)));
-            });
-            crate::widgets::checkbox(ui, &mut c.bends, "Pitch bend (melody and single notes)");
-        }
-        if before != (c.onset, c.frame, c.min_ms, c.low, c.high, c.bends, c.sensitivity, c.drum_note) {
-            c.stale = true;
-        }
-        ui.add(egui::Slider::new(&mut c.floor, 1..=127).text("Drop notes quieter than (velocity)"));
-        if let Some((_, progress, _)) = &c.job {
-            ui.add(egui::ProgressBar::new(progress.load(Ordering::Relaxed) as f32 / 1000.0).text("Analysing the audio…"));
-        }
-        if let Some(e) = &c.error {
-            ui.colored_label(Color32::from_rgb(230, 120, 100), e.as_str());
-        }
-        if c.mode == Mode::Drums {
-            drum_view(ui, &mut c);
-        } else {
-            piano_roll(ui, &mut c);
-        }
-        let kept = c.kept().len();
-        ui.horizontal(|ui| {
-            if c.mode == Mode::Drums {
-                ui.label(format!(
-                    "{kept} of {} hits kept · drag: threshold · click a hit: keep/drop · Alt+click: add or delete",
-                    c.hits.as_ref().map_or(0, Vec::len)
-                ));
-            } else {
-                ui.label(format!("{kept} of {} notes kept · click a note to drop it or bring it back", c.notes.len()));
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(kept > 0, egui::Button::new("Create MIDI Track")).clicked() {
-                    create = true;
-                }
-            });
         });
-    });
     if create {
         let notes: Vec<Value> = c
             .kept()

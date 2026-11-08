@@ -137,7 +137,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     egui::Modal::new(egui::Id::new("dashboard")).show(ctx, |ui| {
         ui.set_width(640.0);
         let t = Tokens::current();
-        ui.label(egui::RichText::new("Dashboard").font(bold(14.0)));
+        ui.label(egui::RichText::new(t!("Dashboard")).font(bold(14.0)));
         ui.separator();
         ui.allocate_ui(vec2(640.0, 300.0), |ui| {
             ui.horizontal_top(|ui| {
@@ -156,10 +156,10 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     match d.tab {
                         Tab::Create => {
                             egui::Grid::new("dash_create").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-                                ui.label("Name");
+                                ui.label(t!("Name"));
                                 ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(320.0));
                                 ui.end_row();
-                                ui.label("Template");
+                                ui.label(t!("Template"));
                                 egui::ComboBox::from_id_salt("dash_tpl").width(320.0).selected_text(template_label(&d.template)).show_ui(ui, |ui| {
                                     ui.selectable_value(&mut d.template, "blank".to_string(), "Blank");
                                     ui.selectable_value(&mut d.template, "demo".to_string(), "Demo session");
@@ -173,13 +173,13 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                     }
                                 });
                                 if let Some(pick) = &app.services.pick_open
-                                    && ui.small_button("Browse…").on_hover_text("A template or session file (OpenPT or Pro Tools)").clicked()
+                                    && ui.small_button(t!("Browse…")).on_hover_text(t!("A template or session file (OpenPT or Pro Tools)")).clicked()
                                     && let Some(p) = pick("session.open", &[])
                                 {
                                     d.template = p;
                                 }
                                 ui.end_row();
-                                ui.label("Sample Rate");
+                                ui.label(t!("Sample Rate"));
                                 egui::ComboBox::from_id_salt("dash_rate")
                                     .width(320.0)
                                     .selected_text(format!("{} kHz", f64::from(d.sample_rate) / 1000.0))
@@ -189,18 +189,18 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                                         }
                                     });
                                 ui.end_row();
-                                ui.label("Bit Depth");
+                                ui.label(t!("Bit Depth"));
                                 egui::ComboBox::from_id_salt("dash_bits").width(320.0).selected_text(bits_label(&d.bit_depth)).show_ui(ui, |ui| {
                                     for b in ["16", "24", "32f"] {
                                         ui.selectable_value(&mut d.bit_depth, b.to_string(), bits_label(b));
                                     }
                                 });
                                 ui.end_row();
-                                ui.label("Location");
+                                ui.label(t!("Location"));
                                 ui.horizontal(|ui| {
                                     ui.add(egui::TextEdit::singleline(&mut d.dir).desired_width(240.0));
                                     if let Some(pick) = &app.services.pick_folder
-                                        && ui.button("Browse…").clicked()
+                                        && ui.button(t!("Browse…")).clicked()
                                         && let Some(p) = pick(&d.dir)
                                     {
                                         d.dir = p;
@@ -218,7 +218,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         }
                         Tab::Recent => {
                             if app.ui.recent_sessions.is_empty() {
-                                ui.label(egui::RichText::new("No recent sessions.").color(t.text_dim));
+                                ui.label(egui::RichText::new(t!("No recent sessions.")).color(t.text_dim));
                             }
                             egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
                                 for (i, path) in app.ui.recent_sessions.iter().enumerate() {
@@ -257,11 +257,11 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         Tab::Recent => d.picked.and_then(|i| app.ui.recent_sessions.get(i)).map(|p| ("session.open", json!({"path": p}))),
                     };
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(t!("Cancel")).clicked() {
                     close = true;
                 }
                 if let Some(pick) = &app.services.pick_open
-                    && ui.button("Open from Disk…").clicked()
+                    && ui.button(t!("Open from Disk…")).clicked()
                     && let Some(p) = pick("session.open", &[])
                 {
                     run = Some(("session.open", json!({"path": p})));

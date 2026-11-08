@@ -38,7 +38,7 @@ pub fn header(
                 );
                 ui.add_enabled(false, egui::Button::new("−").small());
                 ui.add_enabled(false, egui::Button::new("+").small());
-                ui.add_enabled(false, egui::Button::new("Compare").small());
+                ui.add_enabled(false, egui::Button::new(t!("Compare")).small());
             });
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
@@ -47,10 +47,10 @@ pub fn header(
                     .fill(if ins.bypass { Color32::from_rgb(40, 110, 200) } else { t.slot_face[0] })
                     .min_size(vec2(26.0, 20.0)),
             );
-            if bypass.on_hover_text("Bypass").clicked() {
+            if bypass.on_hover_text(t!("Bypass")).clicked() {
                 let _ = app.run("mix.insert_bypass", json!({"track": tid.0, "slot": slot}));
             }
-            if ui.add(egui::Button::new("Auto").small()).on_hover_text("Plug-in Automation: choose what can be automated").clicked() {
+            if ui.add(egui::Button::new(t!("Auto")).small()).on_hover_text(t!("Plug-in Automation: choose what can be automated")).clicked() {
                 open_automation_dialog(ui.ctx(), tid, slot);
             }
         });
@@ -94,7 +94,7 @@ fn frame(ui: &mut Ui, info: &PluginInfo, size: egui::Vec2) -> Rect {
     let p = ui.painter();
     p.rect(r, CornerRadius::same(3), PANEL, Stroke::new(1.0, PANEL_EDGE), StrokeKind::Inside);
     p.text(pos2(r.min.x + 12.0, r.min.y + 16.0), Align2::LEFT_CENTER, info.name.to_uppercase(), bold(13.0), Color32::from_rgb(232, 234, 236));
-    p.text(pos2(r.max.x - 12.0, r.min.y + 16.0), Align2::RIGHT_CENTER, "OpenPT", regular(9.5), LABEL);
+    p.text(pos2(r.max.x - 12.0, r.min.y + 16.0), Align2::RIGHT_CENTER, t!("OpenPT"), regular(9.5), LABEL);
     r
 }
 
@@ -224,7 +224,7 @@ fn dynamics_panel(ui: &mut Ui, info: &PluginInfo, ins: &Insert, gr: f32, set: &m
     draw_graph(ui.painter(), g, Graph::Dynamics, info, ins);
     let m = Rect::from_min_size(pos2(g.max.x + 12.0, g.min.y + 14.0), vec2(12.0, graph - 14.0));
     let p = ui.painter();
-    p.text(pos2(m.center().x, g.min.y + 5.0), Align2::CENTER_CENTER, "GR", bold(9.0), LABEL);
+    p.text(pos2(m.center().x, g.min.y + 5.0), Align2::CENTER_CENTER, t!("GR"), bold(9.0), LABEL);
     p.rect_filled(m, 2.0, READOUT_BG);
     let k = (gr.max(0.0) / 20.0).clamp(0.0, 1.0);
     if k > 0.0 {
@@ -359,22 +359,22 @@ pub fn key_input(app: &mut SoundApp, ui: &mut Ui, tid: TrackId, slot: usize, ins
     for x in [r.max.x - 2.0, r.max.x - 5.0] {
         p.line_segment([pos2(x, c.y), pos2(x, c.y + 3.0)], Stroke::new(1.5, col));
     }
-    resp.on_hover_text("Key Input");
+    resp.on_hover_text(t!("Key Input"));
     ui.menu_button(egui::RichText::new(current).font(regular(11.0)), |ui| key_menu(app, ui, tid, slot, ins, &busses));
-    let ext =
-        ui.add_enabled(ins.key.is_some(), egui::Button::new(egui::RichText::new("External Key").font(regular(10.0))).fill(lit(ins.key_on)).small());
+    let ext = ui
+        .add_enabled(ins.key.is_some(), egui::Button::new(egui::RichText::new(t!("External Key")).font(regular(10.0))).fill(lit(ins.key_on)).small());
     if ext.clicked() {
         let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "on": !ins.key_on}));
     }
     let listen =
-        ui.add_enabled(ins.key_on, egui::Button::new(egui::RichText::new("Key Listen").font(regular(10.0))).fill(lit(ins.key_listen)).small());
+        ui.add_enabled(ins.key_on, egui::Button::new(egui::RichText::new(t!("Key Listen")).font(regular(10.0))).fill(lit(ins.key_listen)).small());
     if listen.clicked() {
         let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "listen": !ins.key_listen}));
     }
 }
 
 pub fn key_menu(app: &mut SoundApp, ui: &mut Ui, tid: TrackId, slot: usize, ins: &Insert, busses: &[(u64, String)]) {
-    if ui.selectable_label(ins.key.is_none(), "no key input").clicked() {
+    if ui.selectable_label(ins.key.is_none(), t!("no key input")).clicked() {
         let _ = app.run("mix.insert_key", json!({"track": tid.0, "slot": slot, "bus": null}));
         ui.close();
     }
@@ -472,7 +472,7 @@ fn sections_panel(ui: &mut Ui, info: &PluginInfo, ins: &Insert, gr: f32, section
 }
 
 fn gr_meter(p: &egui::Painter, m: Rect, gr: f32) {
-    p.text(pos2(m.center().x, m.min.y - 8.0), Align2::CENTER_CENTER, "GR", bold(9.0), LABEL);
+    p.text(pos2(m.center().x, m.min.y - 8.0), Align2::CENTER_CENTER, t!("GR"), bold(9.0), LABEL);
     p.rect_filled(m, 2.0, READOUT_BG);
     let k = (gr.max(0.0) / 20.0).clamp(0.0, 1.0);
     if k > 0.0 {
@@ -591,31 +591,31 @@ pub fn automation_dialog(app: &mut SoundApp, ctx: &egui::Context) {
             };
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label("Controls");
+                    ui.label(t!("Controls"));
                     list(ui, &left, &mut sel.0, "auto-left");
                 });
                 ui.vertical(|ui| {
                     ui.add_space(110.0);
-                    if ui.add_enabled(!sel.0.is_empty(), egui::Button::new("Add >>")).clicked() {
+                    if ui.add_enabled(!sel.0.is_empty(), egui::Button::new(t!("Add >>"))).clicked() {
                         change = Some((std::mem::take(&mut sel.0), true));
                     }
-                    if ui.add_enabled(!sel.1.is_empty(), egui::Button::new("<< Remove")).clicked() {
+                    if ui.add_enabled(!sel.1.is_empty(), egui::Button::new(t!("<< Remove"))).clicked() {
                         change = Some((std::mem::take(&mut sel.1), false));
                     }
                 });
                 ui.vertical(|ui| {
-                    ui.label("Automation enabled");
+                    ui.label(t!("Automation enabled"));
                     list(ui, &right, &mut sel.1, "auto-right");
                 });
             });
             ui.horizontal(|ui| {
-                if ui.button("Add All").clicked() {
+                if ui.button(t!("Add All")).clicked() {
                     change = Some((left.iter().map(|(id, _)| (*id).to_string()).collect(), true));
                 }
-                if ui.button("Remove All").clicked() {
+                if ui.button(t!("Remove All")).clicked() {
                     change = Some((right.iter().map(|(id, _)| (*id).to_string()).collect(), false));
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done = ui.button("Done").clicked());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done = ui.button(t!("Done")).clicked());
             });
         });
     if let Some((ids, enable)) = change

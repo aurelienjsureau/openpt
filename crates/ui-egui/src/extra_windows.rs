@@ -100,7 +100,7 @@ fn renderer(app: &mut SoundApp, ctx: &egui::Context) {
             (tr.name.clone(), sp.x, sp.y, sp.z)
         })
         .collect();
-    egui::Window::new(egui::RichText::new("Renderer").font(bold(13.0)))
+    egui::Window::new(egui::RichText::new(t!("Renderer")).font(bold(13.0)))
         .open(&mut open)
         .default_size(vec2(380.0, 440.0))
         .resizable(true)
@@ -134,7 +134,7 @@ fn renderer(app: &mut SoundApp, ctx: &egui::Context) {
             ui.add_space(4.0);
             if objects.is_empty() {
                 ui.label(
-                    egui::RichText::new("No object tracks. Use the Object view in the Mix window to route tracks as objects.")
+                    egui::RichText::new(t!("No object tracks. Use the Object view in the Mix window to route tracks as objects."))
                         .small()
                         .color(t.text_dim),
                 );
@@ -144,10 +144,11 @@ fn renderer(app: &mut SoundApp, ctx: &egui::Context) {
             ui.separator();
             monitor_controls(app, ui);
             ui.horizontal(|ui| {
-                if ui.button("Trim and Downmix…").clicked() {
+                if ui.button(t!("Trim and Downmix…")).clicked() {
                     app.extra.show_trim_downmix = true;
                 }
-                if ui.button("Export ADM BWF…").on_hover_text("Bed (main output) + object tracks as a Dolby Atmos ADM BWF master").clicked() {
+                if ui.button(t!("Export ADM BWF…")).on_hover_text(t!("Bed (main output) + object tracks as a Dolby Atmos ADM BWF master")).clicked()
+                {
                     export_adm(app);
                 }
             });
@@ -160,20 +161,20 @@ fn ui_customization(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new(egui::RichText::new("Appearance").font(bold(13.0)))
+    egui::Window::new(egui::RichText::new(t!("Appearance")).font(bold(13.0)))
         .open(&mut open)
         .default_size(vec2(320.0, 180.0))
         .resizable(false)
         .fit_screen(ctx)
         .show(ctx, |ui| {
             egui::Grid::new("ui_custom").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-                ui.label("Interface scale");
+                ui.label(t!("Interface scale"));
                 ui.add(egui::Slider::new(&mut app.extra.ui_scale, 0.75..=1.5).step_by(0.05).custom_formatter(|v, _| format!("{:.0} %", v * 100.0)));
                 ui.end_row();
-                ui.label("Reduce motion");
+                ui.label(t!("Reduce motion"));
                 crate::widgets::checkbox(ui, &mut app.extra.reduce_motion, "");
                 ui.end_row();
-                ui.label("Theme");
+                ui.label(t!("Theme"));
                 let mut chosen = None;
                 egui::ComboBox::from_id_salt("theme_mode").selected_text(app.ui.theme.label()).show_ui(ui, |ui| {
                     for mode in crate::theme::ThemeMode::ALL {
@@ -186,11 +187,11 @@ fn ui_customization(app: &mut SoundApp, ctx: &egui::Context) {
                     let _ = app.run("ui.theme", json!({"mode": mode.id()}));
                 }
                 ui.end_row();
-                ui.label("Auto-update configuration");
+                ui.label(t!("Auto-update configuration"));
                 crate::widgets::checkbox(ui, &mut app.extra.auto_update_config, "");
                 ui.end_row();
             });
-            if ui.button("Reset").clicked() {
+            if ui.button(t!("Reset")).clicked() {
                 app.extra.ui_scale = 1.0;
                 app.extra.reduce_motion = false;
                 let _ = app.run("ui.theme", json!({"mode": crate::theme::ThemeMode::default().id()}));
@@ -209,7 +210,7 @@ fn monitor_controls(app: &mut SoundApp, ui: &mut egui::Ui) {
     let a = app.engine.session().atmos;
     let fmt = app.engine.session().main_format();
     ui.horizontal(|ui| {
-        ui.label("Monitor");
+        ui.label(t!("Monitor"));
         egui::ComboBox::from_id_salt("atmos_monitor").width(220.0).selected_text(a.monitor.label()).show_ui(ui, |ui| {
             for m in openpt_model::AtmosMonitor::ALL {
                 if ui.selectable_label(a.monitor == m, m.label()).clicked() {
@@ -219,7 +220,7 @@ fn monitor_controls(app: &mut SoundApp, ui: &mut egui::Ui) {
         });
     });
     if fmt.channels() <= 2 && a.monitor != openpt_model::AtmosMonitor::Speakers {
-        ui.weak("The main output is stereo: set an immersive format (e.g. 7.1.4) in I/O Setup to use the renderer.");
+        ui.weak(t!("The main output is stereo: set an immersive format (e.g. 7.1.4) in I/O Setup to use the renderer."));
     }
     if a.monitor == openpt_model::AtmosMonitor::Binaural {
         let mut g = a.binaural_gain_db;
@@ -250,7 +251,7 @@ fn binaural_controls(app: &mut SoundApp, ui: &mut egui::Ui, a: openpt_model::Atm
         _ => "Mixed",
     };
     ui.horizontal(|ui| {
-        ui.label("Bed distance");
+        ui.label(t!("Bed distance"));
         if let Some(d) = distance_menu(ui, "binaural_distance_all".to_string(), shown) {
             set_atmos(app, json!({"binaural_distance": d.id()}));
         }
@@ -263,7 +264,7 @@ fn binaural_controls(app: &mut SoundApp, ui: &mut egui::Ui, a: openpt_model::Atm
         .map(|tr| (tr.id.0, tr.name.clone(), tr.mixer.binaural_distance, tr.mixer.output == openpt_model::Route::Main))
         .collect();
     if !objects.is_empty() {
-        egui::CollapsingHeader::new("Distance per object").id_salt("binaural_distance_objects").default_open(true).show(ui, |ui| {
+        egui::CollapsingHeader::new(t!("Distance per object")).id_salt("binaural_distance_objects").default_open(true).show(ui, |ui| {
             egui::Grid::new("binaural_distance_objects_grid").num_columns(2).spacing(vec2(6.0, 3.0)).show(ui, |ui| {
                 for (id, name, current, _) in &objects {
                     ui.label(name);
@@ -274,12 +275,12 @@ fn binaural_controls(app: &mut SoundApp, ui: &mut egui::Ui, a: openpt_model::Atm
                 }
             });
             if objects.iter().any(|(_, _, _, direct)| !direct) {
-                ui.weak("Objects routed through a bus are heard at the bed distance.");
+                ui.weak(t!("Objects routed through a bus are heard at the bed distance."));
             }
         });
     }
-    ui.weak("Saved in ADM masters as metadata. The room is never in the exported audio.");
-    egui::CollapsingHeader::new("Distance per bed channel").id_salt("binaural_distance_channels").show(ui, |ui| {
+    ui.weak(t!("Saved in ADM masters as metadata. The room is never in the exported audio."));
+    egui::CollapsingHeader::new(t!("Distance per bed channel")).id_salt("binaural_distance_channels").show(ui, |ui| {
         egui::Grid::new("binaural_distance_grid").num_columns(4).spacing(vec2(6.0, 3.0)).show(ui, |ui| {
             let mut column = 0;
             for (c, sp) in speakers.iter().enumerate() {
@@ -300,9 +301,9 @@ fn binaural_controls(app: &mut SoundApp, ui: &mut egui::Ui, a: openpt_model::Atm
     });
     let profile = openpt_mix::hrtf::current().name.clone();
     ui.horizontal(|ui| {
-        ui.label("Headphone profile");
+        ui.label(t!("Headphone profile"));
         ui.label(egui::RichText::new(profile).color(Tokens::current().text));
-        if ui.button("Load SOFA…").on_hover_text("Use your own HRTF measurement (AES69 .sofa file)").clicked()
+        if ui.button(t!("Load SOFA…")).on_hover_text(t!("Use your own HRTF measurement (AES69 .sofa file)")).clicked()
             && let Some(pick) = &app.services.pick_open
             && let Some(path) = pick("renderer.hrtf", &["sofa"])
         {
@@ -314,7 +315,7 @@ fn binaural_controls(app: &mut SoundApp, ui: &mut egui::Ui, a: openpt_model::Atm
                 Err(e) => app.ui.status = format!("Could not read this SOFA file: {e}"),
             }
         }
-        if !app.ui.hrtf_sofa.is_empty() && ui.button("Use KEMAR").clicked() {
+        if !app.ui.hrtf_sofa.is_empty() && ui.button(t!("Use KEMAR")).clicked() {
             openpt_mix::hrtf::use_kemar();
             app.ui.hrtf_sofa.clear();
         }
@@ -356,26 +357,29 @@ fn trim_downmix(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new(egui::RichText::new("Trim and Downmix").font(bold(13.0))).open(&mut open).resizable(false).fit_screen(ctx).show(ctx, |ui| {
-        let a = app.engine.session().atmos;
-        ui.label(format!("Source: {}", app.engine.session().main_format().label()));
-        monitor_controls(app, ui);
-        ui.separator();
-        ui.strong("Downmix trims");
-        let (mut s, mut h) = (a.surround_trim_db, a.height_trim_db);
-        let rs = ui.add(egui::Slider::new(&mut s, -24.0..=6.0).text("Surround trim").suffix(" dB"));
-        let rh = ui.add(egui::Slider::new(&mut h, -24.0..=6.0).text("Height trim").suffix(" dB"));
-        if rs.changed() || rh.changed() {
-            set_atmos(app, json!({"surround_trim_db": s, "height_trim_db": h}));
-        }
-        ui.horizontal(|ui| {
-            for (label, sv, hv) in [("Music (−3 / −3)", -3.0, -3.0), ("Film (−3 / −6)", -3.0, -6.0), ("Flat (0 / 0)", 0.0, 0.0)] {
-                if ui.small_button(label).clicked() {
-                    set_atmos(app, json!({"surround_trim_db": sv, "height_trim_db": hv}));
-                }
+    egui::Window::new(egui::RichText::new(t!("Trim and Downmix")).font(bold(13.0))).open(&mut open).resizable(false).fit_screen(ctx).show(
+        ctx,
+        |ui| {
+            let a = app.engine.session().atmos;
+            ui.label(format!("Source: {}", app.engine.session().main_format().label()));
+            monitor_controls(app, ui);
+            ui.separator();
+            ui.strong(t!("Downmix trims"));
+            let (mut s, mut h) = (a.surround_trim_db, a.height_trim_db);
+            let rs = ui.add(egui::Slider::new(&mut s, -24.0..=6.0).text("Surround trim").suffix(" dB"));
+            let rh = ui.add(egui::Slider::new(&mut h, -24.0..=6.0).text("Height trim").suffix(" dB"));
+            if rs.changed() || rh.changed() {
+                set_atmos(app, json!({"surround_trim_db": s, "height_trim_db": h}));
             }
-        });
-        ui.weak("Trims shape the 5.1 and stereo (Lo/Ro) downmixes you monitor; the bed and objects themselves are not changed.");
-    });
+            ui.horizontal(|ui| {
+                for (label, sv, hv) in [("Music (−3 / −3)", -3.0, -3.0), ("Film (−3 / −6)", -3.0, -6.0), ("Flat (0 / 0)", 0.0, 0.0)] {
+                    if ui.small_button(label).clicked() {
+                        set_atmos(app, json!({"surround_trim_db": sv, "height_trim_db": hv}));
+                    }
+                }
+            });
+            ui.weak(t!("Trims shape the 5.1 and stereo (Lo/Ro) downmixes you monitor; the bed and objects themselves are not changed."));
+        },
+    );
     app.extra.show_trim_downmix = open;
 }

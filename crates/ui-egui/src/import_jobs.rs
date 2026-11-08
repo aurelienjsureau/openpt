@@ -31,7 +31,7 @@ pub fn start(app: &mut SoundApp, paths: Vec<String>, at: Samples) -> bool {
         return true;
     }
     if app.import_job.is_some() {
-        app.ui.status = "An import is already running".into();
+        app.ui.status = t!("An import is already running").into();
         return false;
     }
     let rate = app.engine.session().sample_rate.hz();
@@ -96,7 +96,7 @@ fn poll(app: &mut SoundApp) -> Option<(usize, usize, String)> {
 pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     let Some((done, total, current)) = poll(app) else { return };
     let mut cancel = false;
-    egui::Window::new(egui::RichText::new("Importing Audio").font(bold(13.0)))
+    egui::Window::new(egui::RichText::new(t!("Importing Audio")).font(bold(13.0)))
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -80.0))
@@ -107,7 +107,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
             ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).show_percentage());
             ui.label(egui::RichText::new(current).small().color(Tokens::current().text_dim));
             ui.separator();
-            cancel = ui.button("Cancel").clicked();
+            cancel = ui.button(t!("Cancel")).clicked();
         });
     if cancel && let Some(job) = &app.import_job {
         job.cancel.store(true, Ordering::Relaxed);

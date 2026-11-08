@@ -152,6 +152,7 @@ struct App {
     meter_type: String,
     vst3_folders: Vec<String>,
     record_offset: i32,
+    language: String,
 }
 
 impl App {
@@ -176,6 +177,7 @@ impl App {
             meter_type: u.meter_type.clone(),
             vst3_folders: u.vst3_folders.clone(),
             record_offset: u.record_offset,
+            language: u.language.clone(),
         }
     }
 
@@ -197,6 +199,7 @@ impl App {
         u.numeric_keypad = self.numeric_keypad;
         u.meter_type = self.meter_type;
         u.record_offset = self.record_offset.clamp(-48_000, 48_000);
+        u.language = self.language;
         if u.vst3_folders != self.vst3_folders {
             u.vst3_folders = self.vst3_folders;
             openpt_vst3_host::set_search_dirs(u.vst3_folders.iter().map(std::path::PathBuf::from).collect());
@@ -232,9 +235,9 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     egui::Modal::new(egui::Id::new("preferences")).show(ctx, |ui| {
         let t = Tokens::current();
         ui.set_width(880.0);
-        ui.label(egui::RichText::new("Preferences").font(bold(14.0)));
+        ui.label(egui::RichText::new(t!("Preferences")).font(bold(14.0)));
         ui.add_space(4.0);
-        let search = ui.add(egui::TextEdit::singleline(&mut d.search).hint_text("🔍  Type to search preferences").desired_width(f32::INFINITY));
+        let search = ui.add(egui::TextEdit::singleline(&mut d.search).hint_text(t!("🔍  Type to search preferences")).desired_width(f32::INFINITY));
         if !d.focused {
             search.request_focus();
             d.focused = true;
@@ -253,10 +256,10 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         });
         ui.add_space(6.0);
         ui.allocate_ui_with_layout(vec2(ui.available_width(), 26.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(egui::Button::new(egui::RichText::new("OK").strong()).fill(t.accent).min_size(vec2(96.0, 22.0))).clicked() {
+            if ui.add(egui::Button::new(egui::RichText::new(t!("OK")).strong()).fill(t.accent).min_size(vec2(96.0, 22.0))).clicked() {
                 ok = true;
             }
-            if ui.add(egui::Button::new("Cancel").min_size(vec2(96.0, 22.0))).clicked() {
+            if ui.add(egui::Button::new(t!("Cancel")).min_size(vec2(96.0, 22.0))).clicked() {
                 cancel = true;
             }
         });
@@ -307,7 +310,7 @@ fn tabs(ui: &mut Ui, page: &mut Page) {
 }
 
 fn hit(q: &str, label: &str) -> bool {
-    q.is_empty() || label.to_lowercase().contains(q)
+    q.is_empty() || label.to_lowercase().contains(q) || t!(label).to_lowercase().contains(q)
 }
 
 fn group(ui: &mut Ui, q: &str, title: &str, labels: &[&str], body: impl FnOnce(&mut Ui)) {
@@ -319,7 +322,7 @@ fn group(ui: &mut Ui, q: &str, title: &str, labels: &[&str], body: impl FnOnce(&
         ui.set_width(ui.available_width());
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
         ui.painter().rect_filled(r, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, t.group_header);
-        ui.painter().text(egui::pos2(r.min.x + 8.0, r.center().y), egui::Align2::LEFT_CENTER, title, bold(12.5), t.text);
+        ui.painter().text(egui::pos2(r.min.x + 8.0, r.center().y), egui::Align2::LEFT_CENTER, t!(title), bold(12.5), t.text);
         egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 6, bottom: 10 }).show(ui, |ui| {
             ui.set_width(ui.available_width());
             body(ui);
@@ -330,38 +333,38 @@ fn group(ui: &mut Ui, q: &str, title: &str, labels: &[&str], body: impl FnOnce(&
 
 fn check(ui: &mut Ui, q: &str, on: &mut bool, label: &str) {
     if hit(q, label) {
-        crate::widgets::checkbox(ui, on, label);
+        crate::widgets::checkbox(ui, on, t!(label));
     }
 }
 
 fn number<N: egui::emath::Numeric>(ui: &mut Ui, v: &mut N, range: std::ops::RangeInclusive<N>, speed: f64, suffix: &str) {
     crate::widgets::value_box(ui, |ui| ui.add(egui::DragValue::new(v).range(range).speed(speed).min_decimals(0).max_decimals(2)));
     if !suffix.is_empty() {
-        ui.label(suffix);
+        ui.label(t!(suffix));
     }
 }
 
 fn row(ui: &mut Ui, q: &str, label: &str, body: impl FnOnce(&mut Ui)) {
     if hit(q, label) {
         ui.horizontal(|ui| {
-            ui.label(format!("{label}:"));
+            ui.label(format!("{}:", t!(label)));
             body(ui);
         });
     }
 }
 
 fn combo(ui: &mut Ui, id: &str, value: &mut String, options: &[(&str, &str)]) {
-    let shown = options.iter().find(|o| o.0 == value.as_str()).map_or(value.as_str(), |o| o.1).to_string();
+    let shown = options.iter().find(|o| o.0 == value.as_str()).map_or(value.as_str(), |o| t!(o.1)).to_string();
     egui::ComboBox::from_id_salt(id).width(200.0).selected_text(shown).show_ui(ui, |ui| {
         for (id, label) in options {
-            ui.selectable_value(value, (*id).to_string(), *label);
+            ui.selectable_value(value, (*id).to_string(), t!(*label));
         }
     });
 }
 
 fn radios(ui: &mut Ui, value: &mut String, options: &[(&str, &str)]) {
     for (id, label) in options {
-        if ui.radio(value == id, *label).clicked() {
+        if ui.radio(value == id, t!(*label)).clicked() {
             *value = (*id).to_string();
         }
     }
@@ -397,7 +400,12 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                         )
                     });
                 });
-                group(left, q, "Basics", &["Organize Plugin Menus By", "Interface Scale", "Track Color Tint"], |ui| {
+                group(left, q, "Basics", &["Language", "Organize Plugin Menus By", "Interface Scale", "Track Color Tint"], |ui| {
+                    row(ui, q, "Language", |ui| {
+                        let mut options: Vec<(&str, &str)> = vec![("", "System default")];
+                        options.extend(crate::i18n::LANGUAGES);
+                        combo(ui, "pref_language", &mut a.language, &options)
+                    });
                     row(ui, q, "Organize Plugin Menus By", |ui| {
                         combo(
                             ui,
@@ -447,16 +455,16 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                     row(ui, q, "Backup every", |ui| number(ui, &mut a.autosave_minutes, 1..=120, 0.1, "minutes"));
                 });
                 group(right, q, "Audio", &["Playback Engine", "I/O Setup", "audio interface", "sound card", "buffer", "Recording offset", "latency"], |ui| {
-                    ui.label(egui::RichText::new("Audio interface, sample rate and buffer size.").color(Tokens::current().text_dim));
+                    ui.label(egui::RichText::new(t!("Audio interface, sample rate and buffer size.")).color(Tokens::current().text_dim));
                     row(ui, q, "Recording offset", |ui| number(ui, &mut a.record_offset, -48_000..=48_000, 1.0, "samples"));
                     if hit(q, "Recording offset") {
-                        ui.label(egui::RichText::new("Takes are already lined up with the latency the audio driver reports. Add samples here if a loopback test still shows a gap: a positive value moves recorded audio earlier.").small().color(Tokens::current().text_dim));
+                        ui.label(egui::RichText::new(t!("Takes are already lined up with the latency the audio driver reports. Add samples here if a loopback test still shows a gap: a positive value moves recorded audio earlier.")).small().color(Tokens::current().text_dim));
                     }
                     ui.horizontal(|ui| {
-                        if ui.button("Playback Engine…").clicked() {
+                        if ui.button(t!("Playback Engine…")).clicked() {
                             *open_window = Some("window.playback_engine");
                         }
-                        if ui.button("I/O Setup…").clicked() {
+                        if ui.button(t!("I/O Setup…")).clicked() {
                             *open_window = Some("window.io_setup");
                         }
                     });
@@ -486,7 +494,7 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                     check(ui, q, &mut a.plugin_native_editor, "Open Plug-ins in Their Own Editor");
                     check(ui, q, &mut o.sends_default_inf, "Send Levels Default to -INF");
                     if hit(q, "Solo Mode") {
-                        ui.label("Solo Mode:");
+                        ui.label(t!("Solo Mode:"));
                         ui.indent("solo", |ui| radios(ui, &mut o.solo_mode, &[("sip", "Solo In Place"), ("afl", "AFL"), ("pfl", "PFL")]));
                     }
                 });
@@ -494,11 +502,11 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                     check(ui, q, &mut o.delay_compensation, "Delay Compensation");
                 });
                 group(right, q, "VST3 Plug-in Folders", &["VST3 Plug-in Folders", "plugin folder"], |ui| {
-                    ui.label(egui::RichText::new("Searched after the standard VST3 folders.").small().color(Tokens::current().text_dim));
+                    ui.label(egui::RichText::new(t!("Searched after the standard VST3 folders.")).small().color(Tokens::current().text_dim));
                     let mut remove = None;
                     for (i, dir) in a.vst3_folders.iter().enumerate() {
                         ui.horizontal(|ui| {
-                            if ui.small_button("✕").on_hover_text("Remove").clicked() {
+                            if ui.small_button("✕").on_hover_text(t!("Remove")).clicked() {
                                 remove = Some(i);
                             }
                             ui.label(dir);
@@ -507,7 +515,7 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                     if let Some(i) = remove {
                         a.vst3_folders.remove(i);
                     }
-                    if ui.button("Add Folder…").clicked() {
+                    if ui.button(t!("Add Folder…")).clicked() {
                         *add_folder = true;
                     }
                 });
@@ -517,11 +525,11 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                     ui.columns(2, |c| {
                         if let [l, r] = c {
                             if hit(q, "Peak Hold") {
-                                l.label("Peak Hold:");
+                                l.label(t!("Peak Hold:"));
                                 radios(l, &mut a.meter_peak_hold, &[("3s", "3 Seconds"), ("infinite", "Infinite"), ("none", "None")]);
                             }
                             if hit(q, "Clip Indication") {
-                                r.label("Clip Indication:");
+                                r.label(t!("Clip Indication:"));
                                 radios(r, &mut a.meter_clip_hold, &[("3s", "3 Seconds"), ("infinite", "Infinite"), ("none", "None")]);
                             }
                         }
@@ -531,7 +539,7 @@ fn page_body(ui: &mut Ui, page: Page, q: &str, a: &mut App, o: &mut Opts, open_w
                 group(right, q, "Track Meters", &["Pre-Fader Metering", "Meter Type", "VU", "K-20", "K-14", "K-12"], |ui| {
                     check(ui, q, &mut o.pre_fader_metering, "Pre-Fader Metering");
                     if hit(q, "Meter Type") || hit(q, "VU") || hit(q, "K-20") {
-                        ui.label("Meter Type:");
+                        ui.label(t!("Meter Type:"));
                         radios(
                             ui,
                             &mut a.meter_type,

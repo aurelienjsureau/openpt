@@ -58,7 +58,7 @@ fn response(ui: &mut Ui, cx: &Ctx, g: Rect, algo: usize, size: usize) {
     p.vline(tx(0.0) + 1.0, plot.y_range(), Stroke::new(2.0, DIM));
     if pre > 0.0 {
         p.add(egui::Shape::dashed_line(&[pos2(tx(0.0), da.y(-6.0)), pos2(tx(pre), da.y(-6.0))], Stroke::new(1.0, DIM), 4.0, 3.0));
-        p.text(pos2(tx(pre * 0.5), da.y(-6.0) - 3.0), Align2::CENTER_BOTTOM, "pre-delay", regular(9.0), DIM);
+        p.text(pos2(tx(pre * 0.5), da.y(-6.0) - 3.0), Align2::CENTER_BOTTOM, t!("pre-delay"), regular(9.0), DIM);
     }
     let tail_col = ACCENT;
     let fill = Color32::from_rgba_unmultiplied(74, 47, 143, 110);
@@ -107,7 +107,7 @@ fn response(ui: &mut Ui, cx: &Ctx, g: Rect, algo: usize, size: usize) {
         TEXT,
     );
     if !a.er.is_empty() && early > 0.0 {
-        p.text(pos2(plot.min.x + 8.0, plot.min.y + 20.0), Align2::LEFT_TOP, "early reflections", regular(9.0), READOUT);
+        p.text(pos2(plot.min.x + 8.0, plot.min.y + 20.0), Align2::LEFT_TOP, t!("early reflections"), regular(9.0), READOUT);
     }
 }
 
@@ -117,14 +117,14 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect, algo: usize) {
     let cell = vec2(84.0, 96.0);
     let row = strip.min.y + 10.0;
     let mut x = strip.min.x + 10.0;
-    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, "LEVEL", bold(10.0), ACCENT);
+    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, t!("LEVEL"), bold(10.0), ACCENT);
     for (id, label) in [("input", "Input"), ("mix", "Mix")] {
         knob(ui, cx, Rect::from_min_size(pos2(x, row + 16.0), cell), id, label, READOUT);
         x += cell.x;
     }
     x += 12.0;
     p.vline(x - 8.0, strip.min.y + 6.0..=strip.max.y - 6.0, Stroke::new(1.0, EDGE));
-    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, "REVERB", bold(10.0), ACCENT);
+    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, t!("REVERB"), bold(10.0), ACCENT);
     if let Some(prm) = cx.param("decay") {
         let v = cx.get("decay");
         let nonlinear = algo == NONLINEAR;
@@ -145,7 +145,7 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect, algo: usize) {
     x += cell.x;
     x += 12.0;
     p.vline(x - 8.0, strip.min.y + 6.0..=strip.max.y - 6.0, Stroke::new(1.0, EDGE));
-    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, "TONE", bold(10.0), ACCENT);
+    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, t!("TONE"), bold(10.0), ACCENT);
     for (id, label) in [("hf_cut", "HF Cut"), ("lp_filter", "LP Filter")] {
         if let Some(prm) = cx.param(id) {
             let v = cx.get(id);

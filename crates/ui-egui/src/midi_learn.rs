@@ -162,10 +162,10 @@ pub fn menu_items(app: &mut SoundApp, ui: &mut egui::Ui, target: &LearnTarget) {
     let bound: Vec<String> = app.engine.session().midi_learn.iter().filter(|m| m.target == *target).map(|m| m.source.label()).collect();
     let armed = app.learn.armed.as_ref() == Some(target);
     let text = if armed { "MIDI Learn (waiting…)" } else { "MIDI Learn" };
-    if ui.button(text).on_hover_text("Move a knob, fader or key on the controller set up in Setup > Peripherals").clicked() {
+    if ui.button(text).on_hover_text(t!("Move a knob, fader or key on the controller set up in Setup > Peripherals")).clicked() {
         app.learn.armed = if armed { None } else { Some(target.clone()) };
         if input(app).is_none() {
-            app.ui.status = "MIDI Learn: choose an input in Setup > Peripherals > MIDI Controllers (type “MIDI Learn”)".into();
+            app.ui.status = t!("MIDI Learn: choose an input in Setup > Peripherals > MIDI Controllers (type “MIDI Learn”)").into();
         }
         ui.close();
     }
@@ -208,16 +208,18 @@ pub fn window_rows(app: &mut SoundApp, ui: &mut egui::Ui) {
         ui.colored_label(egui::Color32::from_rgb(230, 120, 100), format!("MIDI Learn: {e}"));
     }
     if maps.is_empty() {
-        ui.weak("MIDI Learn: right-click a fader, pan, mute, solo, record, send level or plug-in parameter, choose MIDI Learn and move a control.");
+        ui.weak(t!(
+            "MIDI Learn: right-click a fader, pan, mute, solo, record, send level or plug-in parameter, choose MIDI Learn and move a control."
+        ));
         return;
     }
-    ui.strong("MIDI Learn mappings (this session)");
+    ui.strong(t!("MIDI Learn mappings (this session)"));
     let mut remove = None;
     egui::Grid::new("learn_maps").num_columns(3).spacing(egui::vec2(12.0, 4.0)).show(ui, |ui| {
         for (i, m) in maps.iter().enumerate() {
             ui.label(m.source.label());
             ui.label(label(app, &m.target));
-            if ui.small_button("Remove").clicked() {
+            if ui.small_button(t!("Remove")).clicked() {
                 remove = Some(i);
             }
             ui.end_row();
@@ -238,11 +240,11 @@ pub fn insert_menu_items(app: &mut SoundApp, ui: &mut egui::Ui, track: TrackId, 
         .filter(|m| matches!(&m.target, LearnTarget::PluginParam { track: t, slot: s, .. } if *t == track && *s == slot))
         .map(|m| m.target.clone())
         .collect();
-    ui.menu_button("MIDI Learn", |ui| {
+    ui.menu_button(t!("MIDI Learn"), |ui| {
         match last {
             Some((_, _, param)) => menu_items(app, ui, &LearnTarget::PluginParam { track, slot, param }),
             None => {
-                ui.weak("Move a parameter in the plug-in first:\nthe last one touched gets learned.");
+                ui.weak(t!("Move a parameter in the plug-in first:\nthe last one touched gets learned."));
             }
         }
         if !learned.is_empty() {
@@ -250,7 +252,7 @@ pub fn insert_menu_items(app: &mut SoundApp, ui: &mut egui::Ui, track: TrackId, 
             for t in learned {
                 ui.horizontal(|ui| {
                     ui.label(label(app, &t));
-                    if ui.small_button("Forget").clicked() {
+                    if ui.small_button(t!("Forget")).clicked() {
                         let _ = app.run("setup.midi_learn", json!({"action": "remove", "target": t}));
                     }
                 });

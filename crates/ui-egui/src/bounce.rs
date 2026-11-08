@@ -78,7 +78,7 @@ fn spawn_bounce(mut job: Bounce, progress: Arc<AtomicU32>, cancel: Arc<AtomicBoo
 
 pub fn start(app: &mut SoundApp, params: &Value) {
     if app.bounce.is_some() || app.live_commit.is_some() {
-        app.ui.status = "A bounce is already running".into();
+        app.ui.status = t!("A bounce is already running").into();
         return;
     }
     if app.is_playing() {
@@ -158,7 +158,7 @@ fn finish_worker(app: &SoundApp, handle: Option<std::thread::JoinHandle<Rendered
 
 pub fn refuses_session_switch(app: &mut SoundApp) -> bool {
     if app.bounce.is_some() {
-        app.ui.status = "Finish or cancel the bounce first".into();
+        app.ui.status = t!("Finish or cancel the bounce first").into();
     }
     app.bounce.is_some()
 }
@@ -188,13 +188,13 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         ui.label(egui::RichText::new(format!("Bouncing {name}")).font(bold(13.0)));
         ui.add(egui::ProgressBar::new(job.progress()));
         ui.horizontal(|ui| {
-            cancel |= ui.button("Cancel").clicked();
+            cancel |= ui.button(t!("Cancel")).clicked();
             ui.label(egui::RichText::new(format!("{:.0}%", job.progress() * 100.0)).color(Tokens::current().text_dim));
         });
     });
     if cancel {
         cancel_job(app);
-        app.ui.status = "Bounce cancelled".into();
+        app.ui.status = t!("Bounce cancelled").into();
     }
 }
 
@@ -207,11 +207,11 @@ pub struct RealtimeBounce {
 
 pub fn start_realtime(app: &mut SoundApp, params: &Value) {
     if app.bounce.is_some() || app.rt_bounce.is_some() {
-        app.ui.status = "A bounce is already running".into();
+        app.ui.status = t!("A bounce is already running").into();
         return;
     }
     if app.player.is_none() {
-        app.ui.status = "A real-time bounce needs the audio engine".into();
+        app.ui.status = t!("A real-time bounce needs the audio engine").into();
         return;
     }
     let s = app.engine.session();
@@ -269,7 +269,7 @@ pub fn show_realtime(app: &mut SoundApp, ctx: &egui::Context) {
         ui.label(egui::RichText::new(format!("Bouncing {name} in real time")).font(bold(13.0)));
         ui.add(egui::ProgressBar::new(done));
         ui.horizontal(|ui| {
-            cancel |= ui.button("Cancel").clicked();
+            cancel |= ui.button(t!("Cancel")).clicked();
             ui.label(egui::RichText::new(format!("{:.0}%", done * 100.0)).color(Tokens::current().text_dim));
         });
     });
@@ -279,7 +279,7 @@ pub fn show_realtime(app: &mut SoundApp, ctx: &egui::Context) {
         }
         app.rt_bounce = None;
         app.stop_play();
-        app.ui.status = "Bounce cancelled".into();
+        app.ui.status = t!("Bounce cancelled").into();
     }
 }
 
@@ -370,7 +370,7 @@ pub fn renders_live(s: &openpt_model::Session, t: openpt_model::TrackId) -> bool
 pub fn start_live_commit(app: &mut SoundApp, tracks: Vec<openpt_model::TrackId>, cmd: &str, then: Vec<openpt_model::TrackId>) {
     let freeze = cmd == "track.freeze";
     if app.bounce.is_some() || app.rt_bounce.is_some() || app.live_commit.is_some() {
-        app.ui.status = "A bounce is already running".into();
+        app.ui.status = t!("A bounce is already running").into();
         return;
     }
     let session = app.engine.session_arc();
@@ -382,7 +382,7 @@ pub fn start_live_commit(app: &mut SoundApp, tracks: Vec<openpt_model::TrackId>,
         app.stop_play();
     }
     let Some(mut eng) = lend_for_render(app, &session) else {
-        app.ui.status = "Commit: the audio engine did not answer".into();
+        app.ui.status = t!("Commit: the audio engine did not answer").into();
         return;
     };
     eng.reset();
@@ -436,7 +436,7 @@ pub fn step_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
     }
     let Some(mut lc) = app.live_commit.take() else { return };
     let Some(CommitRender { eng, taps, .. }) = take_render(&mut lc) else {
-        app.ui.status = "Commit failed".into();
+        app.ui.status = t!("Commit failed").into();
         return;
     };
     give_back(app, eng);
@@ -476,7 +476,7 @@ pub fn show_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
         ui.label(egui::RichText::new(format!("{what} {n} track{}", if n == 1 { "" } else { "s" })).font(bold(13.0)));
         ui.add(egui::ProgressBar::new(done));
         ui.horizontal(|ui| {
-            cancel |= ui.button("Cancel").clicked();
+            cancel |= ui.button(t!("Cancel")).clicked();
             ui.label(egui::RichText::new(format!("{:.0}%", done * 100.0)).color(Tokens::current().text_dim));
         });
     });
@@ -484,7 +484,7 @@ pub fn show_live_commit(app: &mut SoundApp, ctx: &egui::Context) {
         if let Some(r) = take_render(&mut lc) {
             give_back(app, r.eng);
         }
-        app.ui.status = "Commit cancelled".into();
+        app.ui.status = t!("Commit cancelled").into();
     }
 }
 

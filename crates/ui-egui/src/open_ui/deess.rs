@@ -23,7 +23,7 @@ pub fn show(ui: &mut Ui, cx: &mut Ctx) {
         let p = &ui.painter().clone();
         p.rect_filled(strip, 3.0, PLATE_HI);
         let col = Rect::from_min_size(strip.min + vec2(8.0, 8.0), vec2(150.0, strip.height() - 16.0));
-        p.text(col.min, Align2::LEFT_TOP, "MODE", regular(9.0), DIM);
+        p.text(col.min, Align2::LEFT_TOP, t!("MODE"), regular(9.0), DIM);
         let mode = cx.idx("mode");
         for (i, m) in MODES.iter().enumerate() {
             let b = Rect::from_min_size(pos2(col.min.x, col.min.y + 14.0 + i as f32 * 26.0), vec2(col.width(), 22.0));
@@ -32,7 +32,7 @@ pub fn show(ui: &mut Ui, cx: &mut Ctx) {
             }
         }
         let band = cx.idx("band");
-        p.text(pos2(col.min.x, col.min.y + 72.0), Align2::LEFT_TOP, "PROCESSING", regular(9.0), DIM);
+        p.text(pos2(col.min.x, col.min.y + 72.0), Align2::LEFT_TOP, t!("PROCESSING"), regular(9.0), DIM);
         for (i, m) in BANDS.iter().enumerate() {
             let b =
                 Rect::from_min_size(pos2(col.min.x + i as f32 * (col.width() / 2.0 + 2.0), col.min.y + 86.0), vec2(col.width() / 2.0 - 2.0, 22.0));
@@ -50,7 +50,7 @@ pub fn show(ui: &mut Ui, cx: &mut Ctx) {
         }
         let on = cx.on("listen");
         let lb = Rect::from_min_size(pos2(x + 6.0, strip.min.y + 26.0), vec2(strip.max.x - x - 18.0, 26.0));
-        if button(ui, lb, "LISTEN", on, Color32::from_rgb(222, 196, 52)).on_hover_text("Hear what triggers the de-esser").clicked() {
+        if button(ui, lb, "LISTEN", on, Color32::from_rgb(222, 196, 52)).on_hover_text(t!("Hear what triggers the de-esser")).clicked() {
             cx.set("listen", if on { 0.0 } else { 1.0 });
         }
     });

@@ -98,7 +98,7 @@ pub fn icon_button(ui: &mut Ui, size: egui::Vec2, icon: &str, on: bool, tip: &st
         let s = r.height().min(r.width()) * 0.78;
         icons::draw(ui.painter(), Rect::from_center_size(r.center(), vec2(s, s)), icon, tint);
     });
-    resp.on_hover_text(tip)
+    resp.on_hover_text(t!(tip))
 }
 
 pub fn pressed(ui: &Ui, resp: &Response) -> bool {
@@ -111,8 +111,8 @@ pub fn text_toggle(ui: &mut Ui, size: egui::Vec2, text: &str, on: bool, on_color
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
     key(ui.painter(), r, &resp, if on { on_color } else { key_fill(&resp) });
     let col = if on { t.text_dark } else { t.text };
-    ui.painter().text(r.center(), Align2::CENTER_CENTER, text, bold((size.y * 0.62).clamp(8.0, 13.0)), col);
-    resp.on_hover_text(tip)
+    ui.painter().text(r.center(), Align2::CENTER_CENTER, t!(text), bold((size.y * 0.62).clamp(8.0, 13.0)), col);
+    resp.on_hover_text(t!(tip))
 }
 
 pub fn rec_toggle(ui: &mut Ui, size: egui::Vec2, on: bool, tip: &str) -> Response {
@@ -134,7 +134,7 @@ pub fn rec_toggle(ui: &mut Ui, size: egui::Vec2, on: bool, tip: &str) -> Respons
         }
         ui.painter().circle_stroke(r.center(), rad, Stroke::new(1.0, Color32::from_black_alpha(90)));
     });
-    resp.on_hover_text(tip)
+    resp.on_hover_text(t!(tip))
 }
 
 pub fn selector_box(ui: &mut Ui, width: f32, height: f32, text: &str, color: Color32) -> Response {
@@ -155,7 +155,7 @@ pub(crate) fn selector_box_with_tooltip(ui: &mut Ui, width: f32, height: f32, te
     let galley = ui.painter().layout_job(job);
     let pos = text_rect.center() - galley.size() * 0.5;
     ui.painter().with_clip_rect(r.shrink(1.0)).galley(pos, galley, color);
-    resp.on_hover_text(tooltip)
+    resp.on_hover_text(t!(tooltip))
 }
 
 pub fn pan_knob(ui: &mut Ui, size: f32, value: &mut f32, tip: &str) -> Response {
@@ -189,7 +189,7 @@ pub fn knob(ui: &mut Ui, size: f32, value: &mut f32, range: std::ops::RangeInclu
     p.circle_stroke(c, rad, Stroke::new(1.2, t.knob_ring));
     p.line_segment([c + d * rad * 0.15, c + d * (rad - 3.2)], Stroke::new(1.6, t.knob_pointer));
     p.circle_filled(c + d * rad, 2.1, t.counter_text);
-    resp.on_hover_text(tip)
+    resp.on_hover_text(t!(tip))
 }
 
 pub fn pan_text(v: f32) -> String {
@@ -473,7 +473,7 @@ pub fn surround_panner(ui: &mut Ui, size: f32, speakers: &[PannerSpeaker], puck:
     }
     painter.circle(pp, 5.0, t.counter_text, Stroke::new(1.0, Color32::BLACK));
     let tip = "Surround pan: drag the puck · double-click: front centre · Alt-drag: divergence";
-    let _ = resp.on_hover_text(tip);
+    let _ = resp.on_hover_text(t!(tip));
     let mut sliders: Vec<(&str, f32, u8)> = vec![("div", div, 0)];
     if let Some(z) = z {
         sliders.push(("z", z, 1));

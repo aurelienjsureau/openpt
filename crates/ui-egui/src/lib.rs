@@ -1,5 +1,11 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+macro_rules! t {
+    ($s:expr) => {
+        $crate::i18n::tr($s)
+    };
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audio_to_midi;
 pub mod bounce;
@@ -10,6 +16,7 @@ pub mod docking;
 pub mod edit_window;
 pub mod extra_windows;
 pub mod fonts;
+pub mod i18n;
 pub mod icons;
 pub mod import_jobs;
 pub mod menus;
@@ -131,6 +138,7 @@ pub struct UiState {
     pub peripherals: Vec<peripherals::Controller>,
     pub record_offset: i32,
     pub sync: sync::SyncPrefs,
+    pub language: String,
     pub plugin_native_editor: bool,
     pub vst3_folders: Vec<String>,
     pub hrtf_sofa: String,
@@ -217,6 +225,7 @@ impl Default for UiState {
             peripherals: Vec::new(),
             record_offset: 0,
             sync: sync::SyncPrefs::default(),
+            language: String::new(),
             plugin_native_editor: true,
             vst3_folders: Vec::new(),
             hrtf_sofa: String::new(),
@@ -1120,7 +1129,7 @@ impl SoundApp {
 
     pub fn recover(&mut self, left: &openpt_engine::autosave::Leftover) {
         if self.engine.transport.recording {
-            self.ui.status = "Stop recording before recovering other work.".into();
+            self.ui.status = t!("Stop recording before recovering other work.").into();
             return;
         }
         self.close_autosave();
@@ -1309,7 +1318,7 @@ impl SoundApp {
         let midi_takes = self.midi_recorder.take().map(|mut r| r.finish(self.engine.session(), pos)).unwrap_or_default();
         if std::mem::take(&mut self.discard_take) {
             self.punch = None;
-            self.ui.status = "Take discarded".into();
+            self.ui.status = t!("Take discarded").into();
             return;
         }
         let tracks = audio_takes.len().max(1);
@@ -1665,6 +1674,7 @@ impl SoundApp {
         let dt = self.last_frame.replace(now).map_or(1.0 / 60.0, |t| (now - t) as f32).clamp(0.0, 0.25);
         self.frame_ms = self.frame_ms * 0.9 + dt * 1000.0 * 0.1;
         control::drain(self, ctx);
+        i18n::set_language(if self.ui.language.is_empty() { i18n::default_language() } else { &self.ui.language });
         peripherals::run(self, ctx);
         sync::run(self, ctx);
         midi_learn::run(self, ctx);

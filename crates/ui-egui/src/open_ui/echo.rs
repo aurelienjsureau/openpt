@@ -29,12 +29,12 @@ fn simple(ui: &mut Ui, cx: &mut Ctx, body: Rect) {
     let top = body.min.y + 10.0;
     let p = &ui.painter().clone();
     let mut x = body.min.x + 12.0;
-    p.text(pos2(x, top + 12.0), Align2::LEFT_CENTER, "STYLE", bold(10.0), ACCENT);
+    p.text(pos2(x, top + 12.0), Align2::LEFT_CENTER, t!("STYLE"), bold(10.0), ACCENT);
     if let Some(k) = choice(ui, Rect::from_min_size(pos2(x + 44.0, top), vec2(170.0, 24.0)), (cx.id, "style"), STYLES, style) {
         cx.set("style", k as f32);
     }
     x += 240.0;
-    p.text(pos2(x, top + 12.0), Align2::LEFT_CENTER, "MODE", bold(10.0), ACCENT);
+    p.text(pos2(x, top + 12.0), Align2::LEFT_CENTER, t!("MODE"), bold(10.0), ACCENT);
     if let Some(k) = choice(ui, Rect::from_min_size(pos2(x + 40.0, top), vec2(130.0, 24.0)), (cx.id, "mode"), MODES, mode) {
         cx.set("mode", k as f32);
     }
@@ -162,7 +162,7 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect, mode: usize) {
     let cell = vec2(82.0, 96.0);
     let row = strip.min.y + 10.0;
     let mut x = strip.min.x + 10.0;
-    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, "TIME", bold(10.0), ACCENT);
+    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, t!("TIME"), bold(10.0), ACCENT);
     let sync = cx.on("sync");
     if button(ui, Rect::from_min_size(pos2(x + 44.0, row - 6.0), vec2(48.0, 16.0)), "SYNC", sync, READOUT).clicked() {
         cx.set("sync", if sync { 0.0 } else { 1.0 });

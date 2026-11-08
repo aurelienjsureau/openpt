@@ -1,0 +1,1162 @@
++ Marker	+ Marqueur
++ Selection	+ Sélection
+0 dB	0 dB
+1st Order Ambisonics	Ambisonie 1er ordre
+2nd Order Ambisonics	Ambisonie 2e ordre
+320 kb/s	320 kb/s
+3rd Order Ambisonics	Ambisonie 3e ordre
+4th Order Ambisonics	Ambisonie 4e ordre
+5th Order Ambisonics	Ambisonie 5e ordre
+6th Order Ambisonics	Ambisonie 6e ordre
+7.0 SDDS	7.0 SDDS
+7.1 SDDS	7.1 SDDS
+7th Order Ambisonics	Ambisonie 7e ordre
+<< Remove	<< Retirer
+<ALL>	<TOUT>
+<factory default>	<réglage d'usine>
+A bounce is already running	Un bounce est déjà en cours
+A port used by a controller is not also a MIDI input for recording.	Un port utilisé par un contrôleur ne sert pas aussi d'entrée MIDI pour l'enregistrement.
+A preset with this name exists in this category: it will be replaced.	Un preset de ce nom existe dans cette catégorie : il sera remplacé.
+A real-time bounce needs the audio engine	Un bounce en temps réel a besoin du moteur audio
+A template or session file (OpenPT or Pro Tools)	Un modèle ou un fichier de session (OpenPT ou Pro Tools)
+AFL (After Fader Listen)	AFL (écoute après fader)
+AFL/PFL path:	Chemin AFL/PFL :
+ARA Note Overlay	Notes ARA en surimpression
+ARA Plugins	Plug-ins ARA
+Ableton Link	Ableton Link
+About OpenPT	À propos d'OpenPT
+Activate HEAT	Activer HEAT
+Add >>	Ajouter >>
+Add All	Tout ajouter
+Add Automation Breakpoint	Ajouter un point d'automation
+Add Chord Change...	Ajouter un changement d'accord...
+Add Folder…	Ajouter un dossier…
+Add Key Change...	Ajouter un changement de tonalité...
+Add MIDI Note	Ajouter une note MIDI
+Add Note	Ajouter une note
+Add Warp Marker	Ajouter un marqueur Warp
+Add Warp Markers at Events	Ajouter des marqueurs Warp sur les événements
+Add a row	Ajouter une ligne
+Adjust existing fades	Ajuster les fondus existants
+After Playback	Après la lecture
+All	Tout
+All Automation	Toute l'automation
+All MIDI Notes Off	Arrêt de toutes les notes MIDI
+All MIDI devices	Tous les périphériques MIDI
+All Marker Rulers	Toutes les règles de marqueurs
+All New	Tout nouveau
+All audio clips have loaded media within source bounds.	Tous les clips audio ont un média chargé dans les limites de leur source.
+Alt+Shift: on every selected track · Alt: on every track	Alt+Maj : sur chaque piste sélectionnée · Alt : sur toutes les pistes
+An import is already running	Une importation est déjà en cours
+Analyze	Analyser
+Appearance	Apparence
+Applies across the edit selection (constant: at the insertion point; scale: factor = end / start; stretch: factor = start / end).	S'applique à la sélection d'édition (constant : au point d'insertion ; échelle : facteur = fin / début ; étirement : facteur = début / fin).
+Applies to the selected MIDI clips (or those under the selection).	S'applique aux clips MIDI sélectionnés (ou à ceux sous la sélection).
+Apply	Appliquer
+Arrange	Organiser
+Arrange Panel	Disposer le panneau
+Assign Send	Affecter un départ
+Assign to VCA	Affecter au VCA
+At Selection	À la sélection
+At Transients	Sur les transitoires
+Atmos Monitoring	Écoute Atmos
+Audio Device	Périphérique audio
+Audio as MIDI	Audio en MIDI
+Audio interface, sample rate and buffer size.	Interface audio, fréquence d'échantillonnage et taille de tampon.
+Audio system	Système audio
+Audio to MIDI	Audio vers MIDI
+Audio to MIDI...	Audio vers MIDI...
+Audio to MIDI: nothing to convert on this track	Audio vers MIDI : rien à convertir sur cette piste
+Audio to MIDI: select audio on an audio track	Audio vers MIDI : sélectionnez de l'audio sur une piste audio
+Audio...	Audio...
+AudioSuite	AudioSuite
+AudioSuite Process	Traitement AudioSuite
+Auto	Auto
+Auto-Spot Clips	Placement automatique des clips
+Auto-Update Active Configuration	Mise à jour auto de la configuration active
+Auto-update configuration	Mise à jour auto de la configuration
+Automation	Automation
+Automation Follows Edit	L'automation suit l'édition
+Automation Mode	Mode d'automation
+Automation enabled	Automation activée
+BPM	BPM
+BPM, from bar	BPM, à partir de la mesure
+BYP	BYP
+BYPASS	BYPASS
+Back to the default color	Revenir à la couleur par défaut
+Bars and beats of the Edit selection	Mesures et temps de la sélection d'édition
+Bars per system	Mesures par système
+Bars|Beats	Mesures|Temps
+Basic Folder	Dossier simple
+Beat Detective	Beat Detective
+Bed (main output) + object tracks as a Dolby Atmos ADM BWF master	Bed (sortie principale) + pistes objets en master Dolby Atmos ADM BWF
+Bed distance	Distance du bed
+Big Counter	Grand compteur
+Binaural Distance	Distance binaurale
+Bit Depth	Résolution
+Bounce Mix...	Bounce du mix...
+Bounce Mix…	Bounce du mix…
+Bounce Stems...	Bounce des stems...
+Bounce cancelled	Bounce annulé
+Bounce...	Bounce...
+Bounces the edit selection, or the whole session when nothing is selected.	Bounce de la sélection d'édition, ou de toute la session si rien n'est sélectionné.
+Bring to Front	Mettre au premier plan
+Browse…	Parcourir…
+Buffer size	Taille du tampon
+Bus	Bus
+Bypass	Bypass
+Bypass Insert	Bypass de l'insert
+Bypass Inserts	Bypass des inserts
+C major	Do majeur
+Calibration Mode	Mode calibration
+Can't Redo	Impossible de rétablir
+Can't Undo	Impossible d'annuler
+Cancel	Annuler
+Capture Selection	Capturer la sélection
+Capture...	Capturer...
+Cascade	Cascade
+Category	Catégorie
+Center Playhead	Centrer la tête de lecture
+Change Duration...	Modifier la durée...
+Change Edit to Match Timeline	Faire correspondre l'édition à la timeline
+Change Meter...	Modifier la mesure...
+Change Timeline to Match Edit	Faire correspondre la timeline à l'édition
+Change Track Width	Modifier la largeur de piste
+Change Velocity...	Modifier la vélocité...
+Channel Name	Nom du canal
+Chase	Asservissement
+Checks loaded media only, not files on disk, signal levels, plugins or routing.	Vérifie uniquement les médias chargés, pas les fichiers sur disque, les niveaux, les plug-ins ni le routage.
+Chord Symbols	Symboles d'accords
+Clear	Effacer
+Clear All Clip Indicators	Effacer tous les indicateurs d'écrêtage
+Clear All Mutes	Désactiver tous les mutes
+Clear All Solos	Désactiver tous les solos
+Clear Automation	Effacer l'automation
+Clear Clips	Effacer les clips
+Clear Recent	Effacer les récents
+Clear Sampler Sample	Effacer l'échantillon du sampler
+Clear Special	Effacement spécial
+Clear Tempo or Meter Changes	Effacer les changements de tempo ou de mesure
+Clear Trim Automation	Effacer l'automation de trim
+Clear…	Effacer…
+Click	Clic
+Click a take (or the selection) to promote it to the main playlist	Cliquez sur une prise (ou la sélection) pour la passer dans la playlist principale
+Click keys to step-enter notes into the selected MIDI clip at the insertion point.	Cliquez sur les touches pour saisir des notes pas à pas dans le clip MIDI sélectionné, au point d'insertion.
+Click/Countoff...	Clic/Décompte...
+Click: open instrument · right-click: change	Clic : ouvrir l'instrument · clic droit : changer
+Clip	Clip
+Clip Color	Couleur du clip
+Clip Effects	Effets de clip
+Clip Effects Status	État des effets de clip
+Clip Gain	Gain de clip
+Clip Gain Info	Infos du gain de clip
+Clip Gain Line	Ligne de gain de clip
+Clip Gain Point	Point de gain de clip
+Clip Groups...	Groupes de clips...
+Clip Indication:	Indication d'écrêtage :
+Clip List	Liste des clips
+Clips	Clips
+Clips/Markers	Clips/Marqueurs
+Close All Workspaces	Fermer tous les espaces de travail
+Close Plugin Editor	Fermer l'éditeur de plug-in
+Close Session	Fermer la session
+Close Window	Fermer la fenêtre
+Coalesce Clip Gain to Volume Automation	Fusionner le gain de clip dans l'automation de volume
+Coalesce Pan Guide Automation	Fusionner l'automation du guide de panoramique
+Coalesce Trim Automation	Fusionner l'automation de trim
+Coalesce VCA Controller Automation	Fusionner l'automation du VCA
+Coalesce Volume Automation to Clip Gain	Fusionner l'automation de volume dans le gain de clip
+Collaboration	Collaboration
+Color Palette	Palette de couleurs
+Columns beside the track headers: inserts, sends, I/O…	Colonnes à côté des en-têtes de pistes : inserts, départs, E/S…
+Comments	Commentaires
+Commit cancelled	Validation annulée
+Commit failed	Échec de la validation
+Commit...	Valider...
+Commit: the audio engine did not answer	Validation : le moteur audio n'a pas répondu
+Compare	Comparer
+Composer	Compositeur
+Composite Playlist	Playlist composite
+Configurations	Configurations
+Conform Song to Tempo...	Conformer le morceau au tempo...
+Conform Song to Tempo: tick at least one track to read the hits from	Conformer le morceau au tempo : cochez au moins une piste où lire les frappes
+Conform to Tempo	Conformer au tempo
+Consolidate	Consolider
+Constant...	Constant...
+Contains	Contient
+Continuous	Continu
+Controls	Commandes
+Convert Aux to Routing Folder	Convertir l'aux en dossier de routage
+Convert Clip Gain to Volume Automation	Convertir le gain de clip en automation de volume
+Convert Volume Automation to Clip Gain	Convertir l'automation de volume en gain de clip
+Copy	Copier
+Copy Selection to...	Copier la sélection vers...
+Copy Special	Copie spéciale
+Copy to Send...	Copier vers le départ...
+Copy/Move Indicators	Indicateurs de copie/déplacement
+Count Off	Décompte
+Counters	Compteurs
+Create	Créer
+Create Click Track	Créer une piste de clic
+Create MIDI Track	Créer une piste MIDI
+Create new fades	Créer de nouveaux fondus
+Create...	Créer...
+Current Feet+Frames Position...	Position pieds+images actuelle...
+Current Time	Heure actuelle
+Current Timecode Position...	Position timecode actuelle...
+Cut	Couper
+Cut Special	Coupe spéciale
+Cut Time...	Couper du temps...
+DC Offset Removal	Suppression de l'offset DC
+DESTINATION	DESTINATION
+DETECTION	DÉTECTION
+Dashboard	Tableau de bord
+Dashboard...	Tableau de bord...
+Decrease Track Height	Réduire la hauteur de piste
+Default	Par défaut
+Delay	Délai
+Delay Compensation	Compensation du délai
+Delete	Supprimer
+Delete Automation Point	Supprimer le point d'automation
+Delete Group	Supprimer le groupe
+Delete Memory Location	Supprimer l'emplacement mémoire
+Delete Notes	Supprimer les notes
+Delete Unused Playlists	Supprimer les playlists inutilisées
+Delete Unused...	Supprimer les inutilisés...
+Delete this bus (tracks using it lose the route)	Supprimer ce bus (les pistes qui l'utilisent perdent la route)
+Deselect All	Tout désélectionner
+Designate as Target Playlist	Désigner comme playlist cible
+Destination	Destination
+Destructive Record	Enregistrement destructif
+DestructivePunch	DestructivePunch
+Device default	Défaut du périphérique
+Digital audio workstation. Made with Rust and egui.	Station de travail audionumérique. Faite avec Rust et egui.
+Discard	Abandonner
+Disk Allocation...	Allocation disque...
+Disk Usage	Utilisation du disque
+Display on All Channels	Afficher sur tous les canaux
+Distance per bed channel	Distance par canal du bed
+Distance per object	Distance par objet
+Don't Save	Ne pas enregistrer
+Done	Terminé
+Dotted	Pointé
+Double Edit	Double édition
+Double-click the display to add a band (near the ends: a shelf).	Double-cliquez sur l'affichage pour ajouter une bande (près des bords : un shelf).
+Double-click the display to add a band.	Double-cliquez sur l'affichage pour ajouter une bande.
+Double-click to import audio/MIDI at the insertion point or open a session.	Double-cliquez pour importer de l'audio/MIDI au point d'insertion ou ouvrir une session.
+Downmix trims	Niveaux du downmix
+Drag a dot: frequency and drive. Wheel: width. Right-click: remove.	Faites glisser un point : fréquence et drive. Molette : largeur. Clic droit : supprimer.
+Drag a handle, wheel for Q, right-click to remove.	Faites glisser une poignée, molette pour le Q, clic droit pour supprimer.
+Drag the dot (Alt: freely), the edges and the dashed range line; wheel to widen.	Faites glisser le point (Alt : librement), les bords et la ligne pointillée ; molette pour élargir.
+Drag to change the tempo (Shift: fine steps), or click to type it	Faites glisser pour changer le tempo (Maj : pas fins) ou cliquez pour le saisir
+Drag: fader length · Double-click: fill the window / back to default	Glisser : longueur du fader · Double-clic : remplir la fenêtre / revenir au défaut
+Drop an audio file here	Déposez un fichier audio ici
+Drop an audio file on this window	Déposez un fichier audio sur cette fenêtre
+Dropped Video Frame Indicator	Indicateur d'images vidéo perdues
+Duplicate	Dupliquer
+Duplicate Dolby Atmos Plugin Automation to Pan Automation	Dupliquer l'automation du plug-in Dolby Atmos vers l'automation de panoramique
+Duplicate Pan Automation to Dolby Atmos Plugin Automation	Dupliquer l'automation de panoramique vers le plug-in Dolby Atmos
+Duplicate Playlist	Dupliquer la playlist
+Duplicate and Extend Edit	Dupliquer et étendre l'édition
+Duplicate of Main Playlist	Duplicata de la playlist principale
+Duplicate...	Dupliquer...
+Duration	Durée
+Dynamic Transport	Transport dynamique
+Dynamics	Dynamique
+EQ	EQ
+EQ Curve	Courbe d'EQ
+Each track onto the track of the same name here, when there is one	Chaque piste sur la piste du même nom ici, quand il y en a une
+Edit	Édition
+Edit Lock/Unlock	Verrouiller/déverrouiller l'édition
+Edit Memory Location	Modifier l'emplacement mémoire
+Edit Mode	Mode d'édition
+Edit Note	Modifier la note
+Edit Parameters…	Modifier les paramètres…
+Edit Tool	Outil d'édition
+Edit Window Scrolling	Défilement de la fenêtre d'édition
+Edit Window Views	Affichages de la fenêtre d'édition
+Edit/Tool Mode Keyboard Lock	Verrouillage clavier des modes et outils
+Elastic Audio	Elastic Audio
+Elastic Pitch	Elastic Pitch
+Elastic Pitch...	Elastic Pitch...
+Elastic Properties	Propriétés Elastic
+Enabled parameters	Paramètres activés
+End	Fin
+End Bar|Beat	Mesure|temps de fin
+End to Fill Selection	Fin jusqu'à remplir la sélection
+End to Insertion	Fin au point d'insertion
+Event	Événement
+Event Operations	Opérations sur les événements
+Event Operations Window	Fenêtre des opérations sur les événements
+Expand Channels to New Tracks	Éclater les canaux sur de nouvelles pistes
+Expanded	Étendu
+Expanded Sends	Départs étendus
+Export	Exporter
+Export ADM BWF (Dolby Atmos)...	Exporter en ADM BWF (Dolby Atmos)...
+Export ADM BWF…	Exporter en ADM BWF…
+Export Clip Groups...	Exporter les groupes de clips...
+Export Clips as Files...	Exporter les clips en fichiers...
+Extend Edit Down	Étendre l'édition vers le bas
+Extend Edit Down to Members	Étendre l'édition vers le bas aux membres
+Extend Edit Selection To Marker Lane Above	Étendre la sélection à la ligne de marqueurs au-dessus
+Extend Edit Selection To Marker Lane Below	Étendre la sélection à la ligne de marqueurs en dessous
+Extend Edit Up	Étendre l'édition vers le haut
+Extend Edit Up to Members	Étendre l'édition vers le haut aux membres
+Extend Selection to Session End	Étendre la sélection jusqu'à la fin de la session
+Extend Selection to Session Start	Étendre la sélection jusqu'au début de la session
+External Key	Clé externe
+External Timecode Offset...	Décalage du timecode externe...
+Extract Chords from Selection	Extraire les accords de la sélection
+Extract MIDI to New Track	Extraire le MIDI sur une nouvelle piste
+FMP	FMP
+FOCUS	FOCUS
+FX	FX
+Fade to End	Fondu jusqu'à la fin
+Fade to Start	Fondu depuis le début
+Fades	Fondus
+Fast Forward	Avance rapide
+Feet+Frames	Pieds+images
+Field Recorder Channels	Canaux de l'enregistreur de terrain
+Field Recorder Matches	Correspondances de l'enregistreur de terrain
+File	Fichier
+Fill And Crossfade	Remplir et fondu enchaîné
+Fill Gaps	Combler les vides
+Fill Window With Session	Afficher toute la session
+Find Clip	Rechercher un clip
+Find Talent	Trouver des talents
+Finish or cancel the bounce first	Terminez ou annulez d'abord le bounce
+Flatten Performance...	Aplatir l'interprétation...
+Folder Lines	Lignes de dossiers
+Follow Main Time Scale	Suivre l'échelle temporelle principale
+Forget	Oublier
+Format	Format
+Format Time	Format de temps
+Freeze	Geler
+GR	GR
+Gain	Gain
+Generate	Générer
+Get Info...	Lire les informations...
+Glide Pan Only	Glissement du panoramique seul
+Glide to All Enabled	Glissement de tout ce qui est activé
+Glide to Current	Glissement jusqu'à la valeur actuelle
+Go to End	Aller à la fin
+Go to Next Marker	Aller au marqueur suivant
+Go to Previous Marker	Aller au marqueur précédent
+Grid	Grille
+Grid Value	Valeur de grille
+Group	Grouper
+Group Color	Couleur du groupe
+Group...	Grouper...
+HEAT	HEAT
+HEAT Drive and Tone	Drive et Tone de HEAT
+HEAT on Track	HEAT sur la piste
+Half-Speed Playback	Lecture à demi-vitesse
+Half-Speed Record	Enregistrement à demi-vitesse
+Halve Edit	Diviser l'édition par deux
+Hardware...	Matériel...
+Harmonic	Harmonique
+Headphone profile	Profil de casque
+Heal Separation	Réparer la séparation
+Hear what triggers the de-esser	Écouter ce qui déclenche le de-esser
+Hide All Floating Windows	Masquer toutes les fenêtres flottantes
+Hide Track	Masquer la piste
+Hits are read on these tracks	Les frappes sont lues sur ces pistes
+I/O	E/S
+I/O Setup	Configuration E/S
+I/O Setup…	Configuration E/S…
+I/O...	E/S...
+Identify Beat...	Identifier le temps...
+Identify Beat: the selection is	Identifier le temps : la sélection fait
+Identify Sync Point	Identifier le point de synchro
+Import	Importer
+Import Changes	Importer les modifications
+Importing Audio	Importation audio
+Includes alternate takes and muted clips. Refresh after editing.	Inclut les prises alternatives et les clips muets. Actualisez après une édition.
+Increase Track Height	Augmenter la hauteur de piste
+Input	Entrée
+Input Monitoring	Écoute de l'entrée
+Input Quantize...	Quantification à l'entrée...
+Input Trim	Trim d'entrée
+Input device	Périphérique d'entrée
+Insert Plugin	Insérer un plug-in
+Insert Silence	Insérer du silence
+Insert Time...	Insérer du temps...
+Insert menu	Menu des inserts
+Insertion Follows Playback	Le point d'insertion suit la lecture
+Insertion to Selection End	Point d'insertion à la fin de la sélection
+Insertion to Selection Start	Point d'insertion au début de la sélection
+Inserts A-E	Inserts A-E
+Inserts F-J	Inserts F-J
+Inspect Clip	Inspecter le clip
+Inspect Session	Inspecter la session
+Inspect Track	Inspecter la piste
+Instrument	Instrument
+Instruments	Instruments
+Interface scale	Échelle de l'interface
+Invert	Inverser
+Key Input	Entrée de clé
+Key Listen	Écoute de la clé
+Key Signature	Armure
+Key Signature Staff	Portée d'armure
+Keyboard Focus	Focus clavier
+Keyboard Shortcuts	Raccourcis clavier
+Keyboard Shortcuts...	Raccourcis clavier...
+LCR	LCR
+LCRS	LCRS
+LEVEL	NIVEAU
+LTC on input channel	LTC sur le canal d'entrée
+LTC on output channel	LTC sur le canal de sortie
+Latch	Latch
+Layered Editing	Édition en couches
+Learn	Apprendre
+Legato	Legato
+Limit inter-sample peaks too	Limiter aussi les crêtes inter-échantillons
+Linear...	Linéaire...
+Link Timeline and Edit Selection	Lier la sélection de timeline et d'édition
+Link Track and Edit Selection	Lier la sélection de piste et d'édition
+Linked Sessions	Sessions liées
+List Commands	Lister les commandes
+List MIDI Notes	Lister les notes MIDI
+List Plugins	Lister les plug-ins
+List VST3 Plugins	Lister les plug-ins VST3
+Load SOFA…	Charger un SOFA…
+Load Sampler Sample	Charger un échantillon dans le sampler
+Load Sample…	Charger un échantillon…
+Load Track Preset	Charger un preset de piste
+Load and edit sounds in the plugin's own editor.	Chargez et modifiez les sons dans l'éditeur du plug-in.
+Locate	Localiser
+Location	Emplacement
+Location: bar|beat|tick	Position : mesure|temps|tick
+Loop Playback	Lecture en boucle
+Loop Record	Enregistrement en boucle
+Loop...	Boucle...
+Low Latency Monitoring	Écoute à faible latence
+Lower Dock	Dock inférieur
+MIDI	MIDI
+MIDI Beat Clock to	MIDI Beat Clock vers
+MIDI Beat Clock...	MIDI Beat Clock...
+MIDI Channel	Canal MIDI
+MIDI Controls	Commandes MIDI
+MIDI EDITOR	ÉDITEUR MIDI
+MIDI Editor	Éditeur MIDI
+MIDI Editors	Éditeurs MIDI
+MIDI Editors to Back	Éditeurs MIDI à l'arrière-plan
+MIDI Editors to Front	Éditeurs MIDI au premier plan
+MIDI Event List	Liste des événements MIDI
+MIDI Input	Entrée MIDI
+MIDI Input Devices...	Périphériques d'entrée MIDI...
+MIDI Input Display	Affichage de l'entrée MIDI
+MIDI Input Filter...	Filtre d'entrée MIDI...
+MIDI Keyboard	Clavier MIDI
+MIDI Learn	MIDI Learn
+MIDI Learn mappings (this session)	Affectations MIDI Learn (cette session)
+MIDI Learn: choose an input in Setup > Peripherals > MIDI Controllers (type “MIDI Learn”)	MIDI Learn : choisissez une entrée dans Configuration > Périphériques > Contrôleurs MIDI (type « MIDI Learn »)
+MIDI Learn: right-click a fader, pan, mute, solo, record, send level or plug-in parameter, choose MIDI Learn and move a control.	MIDI Learn : faites un clic droit sur un fader, un panoramique, un mute, un solo, un armement, un niveau de départ ou un paramètre de plug-in, choisissez MIDI Learn et bougez une commande.
+MIDI Live Mode	Mode MIDI live
+MIDI Merge	Fusion MIDI
+MIDI Real-Time Properties	Propriétés MIDI en temps réel
+MIDI Studio...	Studio MIDI...
+MIDI Thru	MIDI Thru
+MIDI Time Code from	MIDI Time Code depuis
+MIDI Time Code to	MIDI Time Code vers
+MIDI Track Offsets	Décalages des pistes MIDI
+MIDI input devices:	Périphériques d'entrée MIDI :
+MIDI...	MIDI...
+MODE	MODE
+Machine Track Arming	Armement des pistes de la machine
+Machine Track Arming Profiles...	Profils d'armement des pistes de la machine...
+Main Counter	Compteur principal
+Main Output Format	Format de la sortie principale
+Main output	Sortie principale
+Main output:	Sortie principale :
+Make Inactive	Rendre inactive
+Marker Controls	Commandes des marqueurs
+Marker Displays	Affichages des marqueurs
+Marker Target Follows First Selected Track	La cible des marqueurs suit la première piste sélectionnée
+Markers	Marqueurs
+Markers 2	Marqueurs 2
+Markers 3	Marqueurs 3
+Markers 4	Marqueurs 4
+Markers 5	Marqueurs 5
+Markers Follow Edit	Les marqueurs suivent l'édition
+Match Tracks	Faire correspondre les pistes
+Melodyne	Melodyne
+Memory Locations	Emplacements mémoire
+Merge MIDI	Fusionner le MIDI
+Merge Markers	Fusionner les marqueurs
+Messages	Messages
+Metadata Inspector	Inspecteur de métadonnées
+Meter	Mesure
+Meter Type:	Type d'indicateur :
+Meters and Faders	Indicateurs et faders
+Mic Preamps	Préamplis micro
+Min:Secs	Min:Sec
+Minimal	Minimal
+Mirrored MIDI Editing	Édition MIDI en miroir
+Mix	Mixage
+Mix Window View	Affichage de la fenêtre de mixage
+Mix Window Views	Affichages de la fenêtre de mixage
+Mix in Separate Window	Mixage dans une fenêtre séparée
+Modify Group...	Modifier le groupe...
+Modulation	Modulation
+Momentary	Momentané
+Monitor	Écoute
+Mono	Mono
+Move Automation Point	Déplacer le point d'automation
+Move Clips	Déplacer les clips
+Move Edit Left	Déplacer l'édition à gauche
+Move Edit Right	Déplacer l'édition à droite
+Move Edit Selection To Marker Lane Above	Déplacer la sélection vers la ligne de marqueurs au-dessus
+Move Edit Selection To Marker Lane Below	Déplacer la sélection vers la ligne de marqueurs en dessous
+Move Insert	Déplacer l'insert
+Move Notes	Déplacer les notes
+Move Selection to...	Déplacer la sélection vers...
+Move Song Start...	Déplacer le début du morceau...
+Move Track	Déplacer la piste
+Move Warp Marker	Déplacer le marqueur Warp
+Move a knob, fader or key on the controller set up in Setup > Peripherals	Bougez un bouton, un fader ou une touche du contrôleur configuré dans Configuration > Périphériques
+Move a parameter in the plug-in first:\nthe last one touched gets learned.	Bougez d'abord un paramètre dans le plug-in :\nle dernier touché est appris.
+Move or Copy Insert	Déplacer ou copier l'insert
+Move to Folder	Déplacer dans le dossier
+Move to New Folder...	Déplacer dans un nouveau dossier...
+Moves the separated clips onto the grid; detection uses its last settings.	Place les clips séparés sur la grille ; la détection reprend ses derniers réglages.
+Movies	Films
+Multiple Outputs	Sorties multiples
+Multiple Outputs with Aux Tracks	Sorties multiples avec pistes aux
+Mute	Mute
+Mute Sends	Couper les départs
+Name	Nom
+Name:	Nom :
+Narrow Mix	Mixage étroit
+New Aux Track for Bus	Nouvelle piste aux pour le bus
+New Bus	Nouveau bus
+New Configuration	Nouvelle configuration
+New Configuration...	Nouvelle configuration...
+New Configuration…	Nouvelle configuration…
+New Group…	Nouveau groupe…
+New MIDI Clip	Nouveau clip MIDI
+New Memory Location	Nouvel emplacement mémoire
+New Playlist	Nouvelle playlist
+New Track	Nouvelle piste
+New Tracks…	Nouvelles pistes…
+New Workspace	Nouvel espace de travail
+New...	Nouveau...
+Next	Suivant
+Next ▶	Suivant ▶
+No MIDI input devices detected.	Aucun périphérique d'entrée MIDI détecté.
+No Preset	Aucun preset
+No Recent Sessions	Aucune session récente
+No Scrolling	Pas de défilement
+No Time	Pas de temps
+No Video track — File › Import › Video…	Aucune piste vidéo — Fichier › Importer › Vidéo…
+No background tasks are running.	Aucune tâche de fond en cours.
+No busses yet.	Aucun bus pour l'instant.
+No matches	Aucun résultat
+No object tracks. Use the Object view in the Mix window to route tracks as objects.	Aucune piste objet. Utilisez l'affichage Objet de la fenêtre de mixage pour router des pistes en objets.
+No parameters.	Aucun paramètre.
+No plug-ins	Aucun plug-in
+No recent sessions.	Aucune session récente.
+No track presets yet (Track > Save Track Preset...)	Aucun preset de piste pour l'instant (Piste > Enregistrer un preset de piste...)
+Non-destructive, applied at playback to the selected MIDI tracks.	Non destructif, appliqué à la lecture aux pistes MIDI sélectionnées.
+None	Aucun
+Normalize	Normaliser
+Not Now	Plus tard
+Notation view of the MIDI clip; edit notes in the MIDI Editor or Event List.	Vue en notation du clip MIDI ; modifiez les notes dans l'éditeur MIDI ou la liste des événements.
+Nothing to set up here yet.	Rien à configurer ici pour l'instant.
+Nudge	Décalage
+Nudge Clip Gain Down	Baisser le gain de clip d'un cran
+Nudge Clip Gain Up	Monter le gain de clip d'un cran
+Nudge Value	Valeur de décalage
+OK	OK
+OUTPUT	SORTIE
+Object	Objet
+Object / Bed	Objet / Bed
+Objects routed through a bus are heard at the bed distance.	Les objets routés par un bus sont entendus à la distance du bed.
+Omni (All)	Omni (tous)
+On Grid	Sur la grille
+Online: follow the incoming timecode	En ligne : suivre le timecode entrant
+Open Plugin Editor	Ouvrir l'éditeur de plug-in
+Open Recent	Ouvrir un fichier récent
+Open Session...	Ouvrir une session...
+Open from Disk…	Ouvrir depuis le disque…
+Open/Close Folder	Ouvrir/fermer le dossier
+OpenComp	OpenComp
+OpenDS	OpenDS
+OpenEQ	OpenEQ
+OpenEcho	OpenEcho
+OpenG	OpenG
+OpenL	OpenL
+OpenMB	OpenMB
+OpenPT	OpenPT
+OpenR	OpenR
+OpenSat	OpenSat
+Options	Options
+Original Time Stamp	Horodatage d'origine
+Other	Autre
+Other Displays	Autres affichages
+Outlines	Contours
+Output	Sortie
+Output Meters	Indicateurs de sortie
+Output device	Périphérique de sortie
+Overlap Shadows	Ombres de chevauchement
+Overlapped Crossfades	Fondus enchaînés superposés
+Overwrite Indicator	Indicateur d'écrasement
+PFL (Pre Fader Listen)	PFL (écoute avant fader)
+PRE	PRE
+PROCESSING	TRAITEMENT
+Page	Page
+Pan Automation	Automation de panoramique
+Parabolic...	Parabolique...
+Parent folder	Dossier parent
+Parity Report	Rapport de parité
+Paste	Coller
+Paste Clip Effects	Coller les effets de clip
+Paste Clip Gain	Coller le gain de clip
+Paste Special	Collage spécial
+Pause	Pause
+Peak	Crête
+Peak Hold:	Maintien des crêtes :
+Peripherals	Périphériques
+Peripherals...	Périphériques...
+Phase Invert	Inversion de phase
+Pin Track	Épingler la piste
+Pinned Tracks	Pistes épinglées
+Pitch II	Pitch II
+Pitch Shift	Pitch Shift
+Pitch Shift Legacy	Pitch Shift Legacy
+Place Audio File	Placer le fichier audio
+Place Audio Files	Placer les fichiers audio
+Place on New Track	Placer sur une nouvelle piste
+Place on Selected Track	Placer sur la piste sélectionnée
+Placement:	Placement :
+Play	Lecture
+Play (Space)	Lecture (Espace)
+Play Edit	Lire l'édition
+Play Timeline	Lire la timeline
+Play/Stop	Lecture/Arrêt
+Playback Engine	Moteur de lecture
+Playback Engine...	Moteur de lecture...
+Playback Engine…	Moteur de lecture…
+Playlists	Playlists
+Plug-in Automation	Automation des plug-ins
+Plug-in Automation: choose what can be automated	Automation des plug-ins : choisissez ce qui peut être automatisé
+Plug-in MIDI out	Sortie MIDI du plug-in
+Plugin Automation	Automation des plug-ins
+Positional reference	Référence de position
+Post-Roll Amount	Durée du post-roll
+Post-roll	Post-roll
+Power	Puissance
+Pre-Fader Metering	Mesure avant fader
+Pre-Roll Amount	Durée du pré-roll
+Pre-roll	Pré-roll
+Pre/Post-Roll	Pré/post-roll
+Preferences	Préférences
+Preferences...	Préférences...
+Prepare DPE Tracks	Préparer les pistes DPE
+Presets ▾	Presets ▾
+Presets:	Presets :
+Previous	Précédent
+Previous/Next Playlist	Playlist précédente/suivante
+Print Score...	Imprimer la partition...
+Pro Tools Projects	Projets Pro Tools
+Pro Tools Search	Recherche Pro Tools
+Processes selected clips offline	Traite hors ligne les clips sélectionnés
+Processing State	État du traitement
+Project...	Projet...
+Promote to Main Playlist	Passer dans la playlist principale
+Quad	Quad
+Quantize	Quantifier
+Quantize to Grid	Quantifier sur la grille
+Quantize to the grid	Quantifier sur la grille
+Quantize...	Quantifier...
+QuickPunch	QuickPunch
+Quit	Quitter
+REVERB	RÉVERB
+Range Warp	Warp de plage
+Rating	Note
+Real-Time Properties	Propriétés en temps réel
+Recall	Rappeler
+Recall Memory Location	Rappeler l'emplacement mémoire
+Recall Track Preset	Rappeler un preset de piste
+Reconnect audio device	Reconnecter le périphérique audio
+Record	Enregistrer
+Record (Cmd+Space)	Enregistrer (Cmd+Espace)
+Record Enable	Armement d'enregistrement
+Record Safe	Protection d'enregistrement
+Recover	Récupérer
+Recover Unsaved Work	Récupérer le travail non enregistré
+Rectified	Redressé
+Redo	Rétablir
+Reduce motion	Réduire les animations
+Refresh Report	Actualiser le rapport
+Refresh devices	Actualiser les périphériques
+Regroup	Regrouper
+Remove	Retirer
+Remove All	Tout retirer
+Remove All Sends	Retirer tous les départs
+Remove Clip Gain Point	Supprimer le point de gain de clip
+Remove Duplicate Notes	Supprimer les notes en double
+Remove Edit from Bottom	Retirer l'édition par le bas
+Remove Edit from Top	Retirer l'édition par le haut
+Remove Insert	Retirer l'insert
+Remove Instrument	Retirer l'instrument
+Remove Meter Change	Supprimer le changement de mesure
+Remove Pitch Shift	Supprimer le pitch shift
+Remove Send	Retirer le départ
+Remove Tempo Change	Supprimer le changement de tempo
+Remove Warp	Supprimer le warp
+Remove Warp Marker	Supprimer le marqueur Warp
+Remove from Folder	Retirer du dossier
+Remove send	Retirer le départ
+Remove this row	Retirer cette ligne
+Rename Track	Renommer la piste
+Rename bus…	Renommer le bus…
+Rename...	Renommer...
+Render	Rendu
+Renderer	Moteur de rendu
+Renders and AudioSuite processes run to completion before returning.	Les rendus et traitements AudioSuite vont jusqu'au bout avant de rendre la main.
+Renumber Bars...	Renuméroter les mesures...
+Reopen the audio devices with these settings	Rouvrir les périphériques audio avec ces réglages
+Repeat to Fill Selection	Répéter pour remplir la sélection
+Repeat...	Répéter...
+Replace with Field Recorder Channel	Remplacer par le canal de l'enregistreur de terrain
+Reset	Réinitialiser
+Reset Edit Settings	Réinitialiser les réglages d'édition
+Reset Panel Layout	Réinitialiser la disposition des panneaux
+Restore Last Selection	Restaurer la dernière sélection
+Restore Performance...	Restaurer l'interprétation...
+Retrospective Record	Enregistrement rétrospectif
+Return to Zero	Retour à zéro
+Reverb	Réverbération
+Reverse	Inverser le sens
+Revert	Rétablir
+Revert Session to Saved...	Revenir à la session enregistrée...
+Rewind	Retour rapide
+Right-click: show its automation	Clic droit : afficher son automation
+Route as an immersive object or to the bed	Router en objet immersif ou vers le bed
+Route to Track	Router vers la piste
+Routing Folder	Dossier de routage
+Ruler Lane Color	Couleur des lignes de règle
+Ruler Lines	Lignes de règle
+Rulers	Règles
+S-Curve...	Courbe en S...
+SENDS	DÉPARTS
+SIDE CHAIN	SIDE CHAIN
+SIP (Solo In Place)	SIP (solo sur place)
+STYLE	STYLE
+Sample Rate	Fréquence d'échantillonnage
+Sample rate	Fréquence d'échantillonnage
+Samples	Échantillons
+Save	Enregistrer
+Save As Template...	Enregistrer comme modèle...
+Save Session	Enregistrer la session
+Save Session As...	Enregistrer la session sous...
+Save Session Copy In...	Enregistrer une copie de la session dans...
+Save Track Preset...	Enregistrer un preset de piste...
+Saved in ADM masters as metadata. The room is never in the exported audio.	Enregistré comme métadonnée dans les masters ADM. La pièce n'est jamais dans l'audio exporté.
+Scale...	Échelle...
+Scan VST3	Analyser les VST3
+Scene And Take	Scène et prise
+Score Editor	Éditeur de partition
+Score Setup...	Configuration de la partition...
+Scroll Timeline	Faire défiler la timeline
+Scroll into View	Faire défiler jusqu'à l'affichage
+Scroll to Track...	Faire défiler jusqu'à la piste...
+Search	Rechercher
+Search commands…	Rechercher une commande…
+Searched after the standard VST3 folders.	Parcourus après les dossiers VST3 standard.
+Select All	Tout sélectionner
+Select All Clips	Sélectionner tous les clips
+Select Playlist	Sélectionner la playlist
+Select Tracks in Group	Sélectionner les pistes du groupe
+Select Unused Clips	Sélectionner les clips inutilisés
+Select a MIDI clip or MIDI track.	Sélectionnez un clip ou une piste MIDI.
+Select a MIDI clip.	Sélectionnez un clip MIDI.
+Select an audio clip.	Sélectionnez un clip audio.
+Select/Split Notes...	Sélectionner/séparer les notes...
+Selected Tracks as Audio Files...	Pistes sélectionnées en fichiers audio...
+Selected Tracks as New AAF/OMF...	Pistes sélectionnées en nouveau AAF/OMF...
+Selected Tracks as New Media Composer Compatible Session...	Pistes sélectionnées en nouvelle session compatible Media Composer...
+Selected Tracks as New Session...	Pistes sélectionnées en nouvelle session...
+Selection	Sélection
+Send A	Départ A
+Send B	Départ B
+Send C	Départ C
+Send D	Départ D
+Send E	Départ E
+Send F	Départ F
+Send G	Départ G
+Send H	Départ H
+Send I	Départ I
+Send J	Départ J
+Send Level	Niveau de départ
+Send Levels Default to -INF	Niveaux de départ à -INF par défaut
+Send To...	Envoyer vers...
+Send to Back	Mettre à l'arrière-plan
+Sends A-E	Départs A-E
+Sends F-J	Départs F-J
+Separate	Séparer
+Separate Clip	Séparer le clip
+Session	Session
+Session Audio Health	Santé audio de la session
+Session Data Tracks	Pistes de données de session
+Session Data...	Données de session...
+Session Info	Infos de la session
+Session Info as Text...	Infos de la session en texte...
+Session comments	Commentaires de la session
+Session rate	Fréquence de la session
+Session...	Session...
+Set Clip Effects	Régler les effets de clip
+Set Edit Selection	Définir la sélection d'édition
+Set Instrument	Choisir l'instrument
+Set Instrument Parameter	Régler un paramètre de l'instrument
+Set Pan	Régler le panoramique
+Set Plugin Parameter	Régler un paramètre de plug-in
+Set Plugin Parameters	Régler les paramètres de plug-in
+Set Record Tracks to Input Only	Pistes armées en écoute de l'entrée seule
+Set Send Surround Pan	Régler le panoramique surround du départ
+Set Surround Pan	Régler le panoramique surround
+Set Tempo	Régler le tempo
+Set UI State	Définir l'état de l'interface
+Set Video Start	Définir le début de la vidéo
+Set Volume	Régler le volume
+Set Zoom	Régler le zoom
+Setup	Configuration
+Shift...	Décaler...
+Show	Afficher
+Show / Hide...	Afficher / masquer...
+Show Automation Lane	Afficher la ligne d'automation
+Show Edit and Mix at once, e.g. one per monitor	Afficher Édition et Mixage en même temps, par exemple un par écran
+Show Grid Lines	Afficher les lignes de grille
+Show Target Playlist	Afficher la playlist cible
+Show grid lines	Afficher les lignes de grille
+Show in the Mix window	Afficher dans la fenêtre de mixage
+Shuffle Lock	Verrouillage du mode Shuffle
+Shuttle	Shuttle
+Sibelius	Sibelius
+Sibelius...	Sibelius...
+Sign In	Se connecter
+Signal Generator	Générateur de signal
+Sketch to Front	Sketch au premier plan
+Sketch...	Sketch...
+Smart Tool (F6+F7 / F7+F8)	Outil intelligent (F6+F7 / F7+F8)
+Snap to	Aligner sur
+Snap to Bar	Aligner sur la mesure
+Snap to Grid	Aligner sur la grille
+Solo	Solo
+Solo Mode	Mode solo
+Solo Mode:	Mode solo :
+Solo Safe	Protection solo
+SoundFlow	SoundFlow
+Soundbase	Soundbase
+Source track	Piste source
+Space Clips…	Espacer les clips…
+Splice	Splice
+Split into Mono	Séparer en mono
+Spot to where it was recorded	Placer là où il a été enregistré
+Spot...	Spot...
+Start	Début
+Start Bar|Beat	Mesure|temps de début
+Start Collaboration...	Démarrer une collaboration...
+Start to Fill Selection	Début jusqu'à remplir la sélection
+Start to Insertion	Début au point d'insertion
+Step Input...	Saisie pas à pas...
+Stereo	Stéréo
+Stop	Arrêt
+Stop (Space)	Arrêt (Espace)
+Stop and Discard Take	Arrêter et abandonner la prise
+Stop recording before recovering other work.	Arrêtez l'enregistrement avant de récupérer un autre travail.
+Stop recording first	Arrêtez d'abord l'enregistrement
+Store Plugin State	Mémoriser l'état du plug-in
+Stretch...	Étirer...
+Strip Silence	Strip Silence
+Sub	Sub
+Sub Counter	Compteur secondaire
+Suspend All Groups	Suspendre tous les groupes
+Sync Point	Point de synchro
+Synchronization	Synchronisation
+System Usage	Utilisation du système
+TCE Edit to Timeline Selection	TCE de l'édition à la sélection de timeline
+TIME	TEMPS
+TONE	TONE
+Tab	Tab
+Tab to Transient	Tab vers le transitoire
+Take discarded	Prise abandonnée
+Takes are already lined up with the latency the audio driver reports. Add samples here if a loopback test still shows a gap: a positive value moves recorded audio earlier.	Les prises sont déjà alignées sur la latence annoncée par le pilote audio. Ajoutez des échantillons ici si un test en boucle montre encore un écart : une valeur positive avance l'audio enregistré.
+Target Playlist	Playlist cible
+Task Manager	Gestionnaire de tâches
+Template	Modèle
+Template name	Nom du modèle
+Tempo	Tempo
+Tempo Change	Changement de tempo
+Tempo Editor	Éditeur de tempo
+Tempo Operations	Opérations sur le tempo
+Tempo Operations Window	Fenêtre des opérations sur le tempo
+The band's detector listens to the key input	Le détecteur de la bande écoute l'entrée de clé
+The current tempo map places each hit on its beat; the song then plays at the new tempo.	La carte de tempo actuelle place chaque frappe sur son temps ; le morceau joue ensuite au nouveau tempo.
+The main output is stereo: set an immersive format (e.g. 7.1.4) in I/O Setup to use the renderer.	La sortie principale est en stéréo : choisissez un format immersif (par exemple 7.1.4) dans la configuration E/S pour utiliser le moteur de rendu.
+The mix runs in 512-sample blocks; the buffer size sets the device's own latency.	Le mixage tourne par blocs de 512 échantillons ; la taille du tampon règle la latence propre du périphérique.
+The tracks of the same name take its new data; what they had stays as alternate playlists.	Les pistes du même nom prennent ses nouvelles données ; leur contenu précédent reste en playlists alternatives.
+Theme	Thème
+Thin	Alléger
+Thin All	Tout alléger
+This plugin has no editor of its own, or it is not loaded	Ce plug-in n'a pas d'éditeur propre, ou il n'est pas chargé
+Tile	Mosaïque
+Tile Horizontal	Mosaïque horizontale
+Tile Vertical	Mosaïque verticale
+Time Compression Expansion	Compression/expansion temporelle
+Time Lock/Unlock	Verrouiller/déverrouiller la position
+Time Operations	Opérations temporelles
+Time Operations Window	Fenêtre des opérations temporelles
+Time Scale	Échelle temporelle
+Time Shift	Time Shift
+Timecode	Timecode
+Timecode 2	Timecode 2
+Timecode follows the session frame rate and start time in Setup › Session. A port used here is not also a MIDI input for recording.	Le timecode suit la cadence d'images et l'heure de début de la session (Configuration › Session). Un port utilisé ici ne sert pas aussi d'entrée MIDI pour l'enregistrement.
+Title	Titre
+To Current Automation Type	Vers le type d'automation actuel
+To File Boundaries	Aux limites du fichier
+To File End	À la fin du fichier
+To File Start	Au début du fichier
+To Fill Selection	Pour remplir la sélection
+To Selection	À la sélection
+Toggle Group Active	Activer/désactiver le groupe
+Toggle Mix/Edit	Basculer Mixage/Édition
+Toggle Recent Playlist	Basculer vers la playlist récente
+Toggle Track View	Changer l'affichage de piste
+Track	Piste
+Track Color	Couleur de piste
+Track Comments	Commentaires de piste
+Track Height	Hauteur de piste
+Track Input	Entrée de piste
+Track Lane	Ligne de piste
+Track Lane Color	Couleur des lignes de piste
+Track List	Liste des pistes
+Track Number	Numéro de piste
+Track Output	Sortie de piste
+Track Presets	Presets de piste
+Track Timebase	Base de temps de la piste
+Track Transcription Lane	Ligne de transcription de piste
+Track View	Affichage de piste
+Track data to import	Données de piste à importer
+Track options	Options de piste
+Track preset: type, width, inserts, sends, color	Preset de piste : type, largeur, inserts, départs, couleur
+TrackPunch	TrackPunch
+Tracks	Pistes
+Transcript	Transcription
+Transcription Settings...	Réglages de transcription...
+Transparency	Transparence
+Transport	Transport
+Transport Online	Transport en ligne
+Transport Status	État du transport
+Transpose...	Transposer...
+Trim	Trim
+Trim Automation	Automation de trim
+Trim Clip	Ajuster le clip
+Trim Clip Gain	Ajuster le gain de clip
+Trim Playlist	Ajuster la playlist
+Trim and Downmix	Niveaux et downmix
+Trim and Downmix…	Niveaux et downmix…
+Trim to All Enabled	Trim de tout ce qui est activé
+Trim to Current	Trim jusqu'à la valeur actuelle
+Trims shape the 5.1 and stereo (Lo/Ro) downmixes you monitor; the bed and objects themselves are not changed.	Les niveaux règlent les downmix 5.1 et stéréo (Lo/Ro) écoutés ; le bed et les objets eux-mêmes ne changent pas.
+Triplet	Triolet
+Turn on the plug-in's extra outputs; Aux tracks take them as inputs	Activer les sorties supplémentaires du plug-in ; des pistes aux les prennent en entrée
+Turn the extra outputs on and add an Aux track for each	Activer les sorties supplémentaires et ajouter une piste aux pour chacune
+UI Customization	Personnalisation de l'interface
+Undo	Annuler
+Undo History	Historique des annulations
+Ungroup	Dissocier
+Ungroup All	Tout dissocier
+Universe	Univers
+Unloop...	Déboucler...
+Update Active Configuration	Mettre à jour la configuration active
+Update Linked Session	Mettre à jour la session liée
+Use	Utiliser
+Use KEMAR	Utiliser KEMAR
+Use your own HRTF measurement (AES69 .sofa file)	Utiliser votre propre mesure HRTF (fichier AES69 .sofa)
+User Time Stamp	Horodatage utilisateur
+User presets need the desktop app.	Les presets utilisateur demandent l'application de bureau.
+Uses the edit selection.	Utilise la sélection d'édition.
+VCA Group	Groupe VCA
+VENUE Channel Names as Track Names	Noms de canaux VENUE comme noms de pistes
+Vari-Fi	Vari-Fi
+Vel +10	Vél +10
+Vel −10	Vél −10
+Velocity	Vélocité
+Video	Vidéo
+Video Sync Offset...	Décalage de synchro vidéo...
+Video Track Offline	Piste vidéo hors ligne
+Video Track Online	Piste vidéo en ligne
+Video Universe	Video Universe
+Video...	Vidéo...
+View	Affichage
+View Flags	Indicateurs d'affichage
+Voice: dyn plays the track, off makes it inactive	Voix : dyn lit la piste, off la rend inactive
+Warp Events	Événements Warp
+Waveform Zoom	Zoom de la forme d'onde
+Waveforms	Formes d'onde
+Window	Fenêtre
+Window Configuration List	Liste des configurations de fenêtres
+Workspace	Espace de travail
+Workspaces	Espaces de travail
+Workspaces to Front	Espaces de travail au premier plan
+Write Automation	Écrire l'automation
+Write MIDI Real-Time Properties	Écrire les propriétés MIDI en temps réel
+Write Trim Automation	Écrire l'automation de trim
+Write automation for the selected tracks:	Écrire l'automation des pistes sélectionnées :
+Write to All Enabled	Écrire tout ce qui est activé
+Write to Current	Écrire la valeur actuelle
+Write to Notes	Écrire dans les notes
+X-OR (Cancels Previous Solo)	X-OR (annule le solo précédent)
+Zoom By	Zoomer de
+Zoom In	Zoom avant
+Zoom Out	Zoom arrière
+Zoom Preset	Préréglage de zoom
+Zoom Toggle	Bascule de zoom
+Zoom preset (click to recall, Cmd-click to store)	Préréglage de zoom (clic pour rappeler, Cmd-clic pour mémoriser)
+Zoom to Selection	Zoomer sur la sélection
+bar(s)	mesure(s)
+early reflections	premières réflexions
+mean of the playing	moyenne du jeu
+media offline	média hors ligne
+movie missing from session	film absent de la session
+multi-mono plug-in	plug-in multi-mono
+multichannel plug-in	plug-in multicanal
+new bus...	nouveau bus...
+new track...	nouvelle piste...
+no insert	aucun insert
+no instrument	aucun instrument
+no key input	aucune entrée de clé
+none	aucun
+plug-in	plug-in
+pre-delay	pré-délai
+◀ Previous	◀ Précédent
+🔍  Type to search preferences	🔍  Tapez pour rechercher dans les préférences
+🔍 Find clips	🔍 Rechercher des clips
+ (alternate playlist)	 (playlist alternative)
+ (resampled to the device rate)	 (rééchantillonné à la fréquence du périphérique)
+1 foot	1 pied
+1 second	1 seconde
+3 Seconds	3 secondes
+AFL	AFL
+Active audio end time is unknown (invalid session sample rate)	Fin de l'audio active inconnue (fréquence de session invalide)
+Audio	Audio
+Audio files	Fichiers audio
+Auto Backup	Sauvegarde automatique
+Backup every	Sauvegarder toutes les
+Basics	Général
+Bit depth	Résolution
+Brightness	Luminosité
+Bypass HEAT on every track	Bypass de HEAT sur toutes les pistes
+Bypass HEAT on this track	Bypass de HEAT sur cette piste
+CLIPS	CLIPS
+Category and Manufacturer	Catégorie et fabricant
+Centered Playhead	Tête de lecture centrée
+Classic	Classique
+Clip Indication	Indication d'écrêtage
+Clip List Keyboard Focus (type a name to select a clip)	Focus clavier de la liste des clips (tapez un nom pour sélectionner un clip)
+Clip effects gain (dB)	Gain des effets de clip (dB)
+Commands Keyboard Focus (single-key editing)	Focus clavier des commandes (édition à une touche)
+Conform	Conformer
+Countoff	Décompte
+Ctrl+Win+S	Ctrl+Win+S
+Decay	Retombée
+Delay compensation	Compensation du délai
+Detection	Détection
+Edit Window	Fenêtre d'édition
+Enable Session File Auto Backup	Activer la sauvegarde automatique de la session
+Fill window with session (Alt+A)	Afficher toute la session (Alt+A)
+Flat List	Liste simple
+Follow Main Pan	Suivre le panoramique principal
+Freq	Fréq
+GROUPS	GROUPES
+Go to End (End)	Aller à la fin (Fin)
+Groove	Groove
+Groups	Groupes
+Groups List Keyboard Focus (type a group letter to enable or disable it)	Focus clavier de la liste des groupes (tapez la lettre d'un groupe pour l'activer ou le désactiver)
+HEAT before the inserts (else after them)	HEAT avant les inserts (sinon après)
+Hz	Hz
+Infinite	Infini
+Input monitoring	Écoute de l'entrée
+Interface Scale	Échelle de l'interface
+Length	Longueur
+Levels of Undo	Niveaux d'annulation
+Link	Lier
+Loop	Boucle
+Loop Playback (Cmd+Shift+L)	Lecture en boucle (Cmd+Maj+L)
+Manufacturer	Fabricant
+Meter Type	Type d'indicateur
+Middle C	Do central
+Mute send	Couper le départ
+Mute · Alt-click: all tracks	Mute · Alt-clic : toutes les pistes
+Mute: lit while any track is muted. Click to clear every mute.	Mute : allumé tant qu'une piste est coupée. Cliquez pour annuler tous les mutes.
+Note	Note
+Note Display	Affichage des notes
+Numeric Keypad	Pavé numérique
+Open	Ouvrir
+Open Plug-ins in Their Own Editor	Ouvrir les plug-ins dans leur propre éditeur
+Operation	Fonctionnement
+Organize Plugin Menus By	Organiser les menus de plug-ins par
+PFL	PFL
+Pan (drag; double-click centres)	Panoramique (glisser ; double-clic pour centrer)
+Peak / Clip	Crête / écrêtage
+Peak Hold	Maintien des crêtes
+Post-Roll	Post-roll
+Pre-Roll	Pré-roll
+Pre-fader	Avant fader
+REL GRID	GRILLE REL
+Range	Plage
+Range Knee	Coude de la plage
+Record enable · Ctrl-click: Record Safe	Armement · Ctrl-clic : protection d'enregistrement
+Recording offset	Décalage d'enregistrement
+Return to Zero (Home)	Retour à zéro (Début)
+Sample Peak	Crête échantillon
+Saturation	Saturation
+Scrub	Scrub
+Send pan (drag; double-click centres)	Panoramique du départ (glisser ; double-clic pour centrer)
+Separation	Séparation
+Show Dashboard after closing a session	Afficher le tableau de bord après la fermeture d'une session
+Show Dashboard when OpenPT starts	Afficher le tableau de bord au démarrage d'OpenPT
+Slip	Slip
+Smoothing	Lissage
+Solo In Place	Solo sur place
+Solo · Ctrl-click: Solo Safe · Alt-click: all tracks	Solo · Ctrl-clic : protection solo · Alt-clic : toutes les pistes
+Solo: lit while any track is soloed. Click to clear every solo.	Solo : allumé tant qu'une piste est en solo. Cliquez pour annuler tous les solos.
+Spot	Spot
+Standard	Standard
+Start (ticks)	Début (ticks)
+TCE	TCE
+TRACKS	PISTES
+Threshold	Seuil
+Time	Temps
+Timecode rate	Cadence du timecode
+Track Color Tint	Teinte de couleur des pistes
+Track Meters	Indicateurs de piste
+Track tint in the Edit window	Teinte des pistes dans la fenêtre d'édition
+Trig Level	Niveau de déclenchement
+VST3 Plug-in Folders	Dossiers de plug-ins VST3
+VU	VU
+VU (0 VU = -18 dBFS)	VU (0 VU = -18 dBFS)
+Vel	Vél
+Warnings & Dialogs	Avertissements et dialogues
+Waveform zoom in (Cmd+Alt+])	Zoom avant sur la forme d'onde (Cmd+Alt+])
+Win+Alt+L	Win+Alt+L
+Win+Shift+P	Win+Maj+P
+Window Configurations	Configurations de fenêtres
+Zoom Toggle (E)	Bascule de zoom (E)
+Zoom in (Cmd+])	Zoom avant (Cmd+])
+Zoom out (Cmd+[)	Zoom arrière (Cmd+[)
+audio interface	interface audio
+dB/s	dB/s
+default buffer	tampon par défaut
+no device (silent clock)	aucun périphérique (horloge muette)
+no engine	pas de moteur
+opened on first record or monitor	ouvert au premier enregistrement ou à la première écoute
+plugin folder	dossier de plug-ins
+send level	niveau de départ
+send mute	mute du départ
+send pan	panoramique du départ
+sound card	carte son
+Language	Langue
+System default	Langue du système

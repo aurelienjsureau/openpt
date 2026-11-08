@@ -38,7 +38,7 @@ fn panel_header(ui: &mut Ui, title: &str) -> Rect {
     let t = Tokens::current();
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
     ui.painter().rect_filled(r, 0.0, t.panel_bg2);
-    ui.painter().text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, title, bold(11.5), t.header_text);
+    ui.painter().text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, t!(title), bold(11.5), t.header_text);
     ui.painter().line_segment([pos2(r.min.x, r.max.y), pos2(r.max.x, r.max.y)], Stroke::new(1.0, t.border));
     r
 }
@@ -152,20 +152,20 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
         app.engine.session().groups.iter().map(|g| (g.id.0, g.letter, g.name.clone(), g.active, g.color)).collect();
     let out = egui::ScrollArea::vertical().id_salt("groups_scroll").auto_shrink([false, false]).scroll_bar_visibility(hidden).show(ui, |ui| {
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), Sense::hover());
-        ui.painter().text(pos2(r.min.x + 30.0, r.center().y), Align2::LEFT_CENTER, "<ALL>", regular(11.5).clone(), t.text);
+        ui.painter().text(pos2(r.min.x + 30.0, r.center().y), Align2::LEFT_CENTER, t!("<ALL>"), regular(11.5).clone(), t.text);
         let all = ui.interact(r, ui.id().with("group_all"), Sense::click());
         if all.double_clicked() {
             let _ = app.run("edit.select_all", json!({}));
         }
         all.context_menu(|ui| {
-            if ui.button("New Group…").clicked() {
+            if ui.button(t!("New Group…")).clicked() {
                 let _ = app.dialogs.open_for_command(&app.engine, "track.group");
                 ui.close();
             }
             let suspended = app.engine.session().edit.flag("groups.suspended");
             if ui
                 .add(
-                    egui::Button::new("Suspend All Groups")
+                    egui::Button::new(t!("Suspend All Groups"))
                         .selected(suspended)
                         .shortcut_text(crate::shortcuts::shortcut_label("Cmd+Shift+G", ui.ctx().os().is_mac())),
                 )
@@ -199,12 +199,12 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
                 let _ = app.run("edit.select", json!({"tracks": members, "exact": true}));
             }
             resp.context_menu(|ui| {
-                if ui.button("Modify Group...").clicked() {
+                if ui.button(t!("Modify Group...")).clicked() {
                     let s = app.engine.session_arc();
                     app.dialogs.open_modify_group(&s, id);
                     ui.close();
                 }
-                if ui.button("Select Tracks in Group").clicked() {
+                if ui.button(t!("Select Tracks in Group")).clicked() {
                     let _ = app.run("edit.select", json!({"tracks": members, "exact": true}));
                     ui.close();
                 }
@@ -212,7 +212,7 @@ pub fn tracks_and_groups(app: &mut SoundApp, ui: &mut Ui) {
                     let _ = app.run("track.group_toggle", json!({"group": id}));
                     ui.close();
                 }
-                if ui.button("Delete Group").clicked() {
+                if ui.button(t!("Delete Group")).clicked() {
                     let _ = app.run("track.ungroup", json!({"group": id}));
                     ui.close();
                 }
@@ -298,9 +298,9 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
     let t = Tokens::current();
     let head = panel_header(ui, "CLIPS");
     header_tools(ui, head, |ui| {
-        ui.menu_button(egui::RichText::new("Show").font(regular(10.0)), |ui| {
+        ui.menu_button(egui::RichText::new(t!("Show")).font(regular(10.0)), |ui| {
             for (i, label) in ["Audio", "MIDI", "Clip Groups", "Auto-Created"].into_iter().enumerate() {
-                ui.checkbox(&mut app.ui.clip_list_show[i], label);
+                ui.checkbox(&mut app.ui.clip_list_show[i], t!(label));
             }
         });
         focus_button(app, ui, "clips", "Clip List Keyboard Focus (type a name to select a clip)");
@@ -308,7 +308,7 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
     let items = clip_list_items(app);
     let fkey = egui::Id::new("clip_filter");
     let mut filter: String = ui.ctx().memory(|m| m.data.get_temp(fkey)).unwrap_or_default();
-    let find = ui.add(egui::TextEdit::singleline(&mut filter).hint_text("🔍 Find clips").desired_width(f32::INFINITY));
+    let find = ui.add(egui::TextEdit::singleline(&mut filter).hint_text(t!("🔍 Find clips")).desired_width(f32::INFINITY));
     if std::mem::take(&mut app.focus_clip_find) {
         find.request_focus();
     }
@@ -324,20 +324,20 @@ pub fn clip_list(app: &mut SoundApp, ui: &mut Ui) {
             let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), if whole { Sense::click_and_drag() } else { Sense::click() });
             resp.context_menu(|ui| {
                 if whole {
-                    if ui.button("Place on New Track").clicked() {
+                    if ui.button(t!("Place on New Track")).clicked() {
                         let _ = app.run("clip.place_source", json!({"source": id}));
                         ui.close();
                     }
                     let sel_track = app.engine.session().edit.selected_tracks.first().map(|t| t.0);
                     if let Some(t) = sel_track
-                        && ui.button("Place on Selected Track").clicked()
+                        && ui.button(t!("Place on Selected Track")).clicked()
                     {
                         let _ = app.run("clip.place_source", json!({"source": id, "track": t}));
                         ui.close();
                     }
                     ui.separator();
                 }
-                if ui.button("Clear…").clicked() {
+                if ui.button(t!("Clear…")).clicked() {
                     let (clips, sources) = if whole { (vec![], vec![SourceId(id)]) } else { (vec![ClipId(id)], vec![]) };
                     app.dialogs.open_clear(&app.engine, clips, sources);
                     ui.close();
@@ -400,86 +400,89 @@ fn transport_window(app: &mut SoundApp, ctx: &egui::Context) {
         return;
     }
     let t = Tokens::current();
-    egui::Window::new("Transport").open(&mut open).resizable(false).default_pos(pos2(400.0, 500.0)).show(ctx, |ui| {
-        let flags = app.engine.session().edit.flags.clone();
-        let expanded = flags.contains("view.transport.expanded");
-        ui.horizontal(|ui| {
-            for (icon, cmd) in [
-                ("rtz", "transport.rtz"),
-                ("rewind", "transport.rewind"),
-                ("stop", "transport.stop"),
-                ("play", "transport.play"),
-                ("ffwd", "transport.fast_forward"),
-                ("end", "transport.go_to_end"),
-                ("record", "transport.record"),
-            ] {
-                let resp = crate::widgets::icon_button(
-                    ui,
-                    vec2(34.0, 26.0),
-                    icon,
-                    (cmd == "transport.play" && app.is_playing()) || (cmd == "transport.record" && app.engine.transport.recording),
-                    cmd,
-                );
-                if cmd == "transport.record"
-                    && let Some(why) = app.record_hint()
-                {
-                    egui::Tooltip::for_widget(&resp).show(|ui| ui.label(why));
-                }
-                if resp.clicked() {
-                    let _ = app.run(cmd, json!({}));
-                }
-            }
-            if flags.contains("view.transport.output_meters") {
-                let (r, _) = ui.allocate_exact_size(vec2(22.0, 26.0), Sense::hover());
-                let m = app.main_meter;
-                crate::widgets::meter(ui, Rect::from_min_size(r.min, vec2(10.0, 26.0)), m.shown(0), m.hold[0], m.clip);
-                crate::widgets::meter(ui, Rect::from_min_size(pos2(r.min.x + 12.0, r.min.y), vec2(10.0, 26.0)), m.shown(1), m.hold[1], m.clip);
-            }
-        });
-        let s = app.engine.session();
-        let fmt = |x: i64| s.format_position(x, s.edit.main_counter);
-        if flags.contains("view.transport.counters") || expanded || flags.is_empty() {
-            ui.label(egui::RichText::new(fmt(app.position())).font(mono(20.0)).color(t.counter_text));
-        }
-        if expanded {
-            let e = s.edit.clone();
-            egui::Grid::new("tx_exp").num_columns(4).show(ui, |ui| {
-                ui.label("Start");
-                ui.label(egui::RichText::new(fmt(e.selection.start)).font(mono(11.0)));
-                ui.label("Pre-roll");
-                ui.label(egui::RichText::new(format!("{:.2} s", s.sample_rate.seconds(e.pre_roll))).font(mono(11.0)));
-                ui.end_row();
-                ui.label("End");
-                ui.label(egui::RichText::new(fmt(e.selection.end)).font(mono(11.0)));
-                ui.label("Post-roll");
-                ui.label(egui::RichText::new(format!("{:.2} s", s.sample_rate.seconds(e.post_roll))).font(mono(11.0)));
-                ui.end_row();
-            });
-        }
-        if flags.contains("view.transport.midi_controls") || expanded {
-            let (click, countoff, merge, loop_rec, prepost) = {
-                let e = &app.engine.session().edit;
-                (e.click, e.countoff, e.midi_merge, e.loop_record, e.pre_post_roll)
-            };
+    egui::Window::new(t!("Transport")).id(egui::Id::new("Transport")).open(&mut open).resizable(false).default_pos(pos2(400.0, 500.0)).show(
+        ctx,
+        |ui| {
+            let flags = app.engine.session().edit.flags.clone();
+            let expanded = flags.contains("view.transport.expanded");
             ui.horizontal(|ui| {
-                for (label, on, cmd) in [
-                    ("Click", click, "options.click"),
-                    ("Count Off", countoff, "options.countoff"),
-                    ("MIDI Merge", merge, "options.midi_merge"),
-                    ("Loop Rec", loop_rec, "options.loop_record"),
-                    ("Pre/Post", prepost, "options.pre_post_roll"),
+                for (icon, cmd) in [
+                    ("rtz", "transport.rtz"),
+                    ("rewind", "transport.rewind"),
+                    ("stop", "transport.stop"),
+                    ("play", "transport.play"),
+                    ("ffwd", "transport.fast_forward"),
+                    ("end", "transport.go_to_end"),
+                    ("record", "transport.record"),
                 ] {
-                    if ui.selectable_label(on, label).clicked() {
+                    let resp = crate::widgets::icon_button(
+                        ui,
+                        vec2(34.0, 26.0),
+                        icon,
+                        (cmd == "transport.play" && app.is_playing()) || (cmd == "transport.record" && app.engine.transport.recording),
+                        cmd,
+                    );
+                    if cmd == "transport.record"
+                        && let Some(why) = app.record_hint()
+                    {
+                        egui::Tooltip::for_widget(&resp).show(|ui| ui.label(why));
+                    }
+                    if resp.clicked() {
                         let _ = app.run(cmd, json!({}));
                     }
                 }
+                if flags.contains("view.transport.output_meters") {
+                    let (r, _) = ui.allocate_exact_size(vec2(22.0, 26.0), Sense::hover());
+                    let m = app.main_meter;
+                    crate::widgets::meter(ui, Rect::from_min_size(r.min, vec2(10.0, 26.0)), m.shown(0), m.hold[0], m.clip);
+                    crate::widgets::meter(ui, Rect::from_min_size(pos2(r.min.x + 12.0, r.min.y), vec2(10.0, 26.0)), m.shown(1), m.hold[1], m.clip);
+                }
             });
-            let tick = app.engine.session().tempo.samples_to_ticks(app.position(), app.engine.session().sample_rate);
-            let bpm = app.engine.session().tempo.tempo_at_tick(tick);
-            let m = app.engine.session().tempo.meter_at_tick(tick);
-            ui.label(egui::RichText::new(format!("♩ = {bpm:.2}   {}/{}", m.numerator, m.denominator)).font(mono(12.0)).color(t.counter_text));
-        }
-    });
+            let s = app.engine.session();
+            let fmt = |x: i64| s.format_position(x, s.edit.main_counter);
+            if flags.contains("view.transport.counters") || expanded || flags.is_empty() {
+                ui.label(egui::RichText::new(fmt(app.position())).font(mono(20.0)).color(t.counter_text));
+            }
+            if expanded {
+                let e = s.edit.clone();
+                egui::Grid::new("tx_exp").num_columns(4).show(ui, |ui| {
+                    ui.label(t!("Start"));
+                    ui.label(egui::RichText::new(fmt(e.selection.start)).font(mono(11.0)));
+                    ui.label(t!("Pre-roll"));
+                    ui.label(egui::RichText::new(format!("{:.2} s", s.sample_rate.seconds(e.pre_roll))).font(mono(11.0)));
+                    ui.end_row();
+                    ui.label(t!("End"));
+                    ui.label(egui::RichText::new(fmt(e.selection.end)).font(mono(11.0)));
+                    ui.label(t!("Post-roll"));
+                    ui.label(egui::RichText::new(format!("{:.2} s", s.sample_rate.seconds(e.post_roll))).font(mono(11.0)));
+                    ui.end_row();
+                });
+            }
+            if flags.contains("view.transport.midi_controls") || expanded {
+                let (click, countoff, merge, loop_rec, prepost) = {
+                    let e = &app.engine.session().edit;
+                    (e.click, e.countoff, e.midi_merge, e.loop_record, e.pre_post_roll)
+                };
+                ui.horizontal(|ui| {
+                    for (label, on, cmd) in [
+                        ("Click", click, "options.click"),
+                        ("Count Off", countoff, "options.countoff"),
+                        ("MIDI Merge", merge, "options.midi_merge"),
+                        ("Loop Rec", loop_rec, "options.loop_record"),
+                        ("Pre/Post", prepost, "options.pre_post_roll"),
+                    ] {
+                        if ui.selectable_label(on, label).clicked() {
+                            let _ = app.run(cmd, json!({}));
+                        }
+                    }
+                });
+                let tick = app.engine.session().tempo.samples_to_ticks(app.position(), app.engine.session().sample_rate);
+                let bpm = app.engine.session().tempo.tempo_at_tick(tick);
+                let m = app.engine.session().tempo.meter_at_tick(tick);
+                ui.label(egui::RichText::new(format!("♩ = {bpm:.2}   {}/{}", m.numerator, m.denominator)).font(mono(12.0)).color(t.counter_text));
+            }
+        },
+    );
     app.ui.show_transport = open;
 }
 
@@ -488,7 +491,7 @@ fn big_counter(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new("Big Counter").open(&mut open).default_size(vec2(520.0, 110.0)).show(ctx, |ui| {
+    egui::Window::new(t!("Big Counter")).id(egui::Id::new("Big Counter")).open(&mut open).default_size(vec2(520.0, 110.0)).show(ctx, |ui| {
         let s = app.engine.session();
         let txt = s.format_position(app.position(), s.edit.main_counter);
         let r = ui.available_rect_before_wrap();
@@ -501,10 +504,10 @@ fn big_counter(app: &mut SoundApp, ctx: &egui::Context) {
 
 pub(crate) fn memory_locations(app: &mut SoundApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        if ui.button("+ Marker").clicked() {
+        if ui.button(t!("+ Marker")).clicked() {
             let _ = app.run("markers.add", json!({}));
         }
-        if ui.button("+ Selection").clicked() {
+        if ui.button(t!("+ Selection")).clicked() {
             let _ = app.run("markers.add", json!({"kind": "selection"}));
         }
     });
@@ -527,11 +530,11 @@ pub(crate) fn memory_locations(app: &mut SoundApp, ui: &mut Ui) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         egui::Grid::new("mem_grid").striped(true).num_columns(6).show(ui, |ui| {
             for h in ["#", "Name", "Location", "Length", "Type", ""] {
-                ui.label(egui::RichText::new(h).strong());
+                ui.label(egui::RichText::new(t!(h)).strong());
             }
             ui.end_row();
             for (n, name, loc, len, kind) in rows {
-                if ui.button(n.to_string()).on_hover_text("Recall").clicked() {
+                if ui.button(n.to_string()).on_hover_text(t!("Recall")).clicked() {
                     let _ = app.run("markers.recall", json!({"number": n}));
                 }
                 let key = egui::Id::new(("mem_name", n));
@@ -547,7 +550,7 @@ pub(crate) fn memory_locations(app: &mut SoundApp, ui: &mut Ui) {
                 ui.label(egui::RichText::new(loc).font(mono(11.0)));
                 ui.label(egui::RichText::new(len).font(mono(11.0)));
                 ui.label(kind);
-                if ui.small_button("✕").on_hover_text("Delete").clicked() {
+                if ui.small_button("✕").on_hover_text(t!("Delete")).clicked() {
                     let _ = app.run("markers.delete", json!({"number": n}));
                 }
                 ui.end_row();
@@ -627,8 +630,8 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                     if ui.button(label).clicked() {
                         let _ = app.run("mix.insert_bypass", json!({"track": tid.0, "slot": slot}));
                     }
-                    ui.menu_button("Presets ▾", |ui| preset_menu(app, ui, tid, slot, info, &ins));
-                    if ui.button("Auto").on_hover_text("Plug-in Automation: choose what can be automated").clicked() {
+                    ui.menu_button(t!("Presets ▾"), |ui| preset_menu(app, ui, tid, slot, info, &ins));
+                    if ui.button(t!("Auto")).on_hover_text(t!("Plug-in Automation: choose what can be automated")).clicked() {
                         crate::plugin_ui::open_automation_dialog(ui.ctx(), tid, slot);
                     }
                 }
@@ -638,7 +641,7 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                     let label = if open { "Close Plugin Editor" } else { "Open Plugin Editor" };
                     let resp = ui.add_enabled(available, egui::Button::new(label));
                     let resp =
-                        if available { resp } else { resp.on_disabled_hover_text("This plugin has no editor of its own, or it is not loaded") };
+                        if available { resp } else { resp.on_disabled_hover_text(t!("This plugin has no editor of its own, or it is not loaded")) };
                     if resp.clicked()
                         && let Some(p) = &app.player
                     {
@@ -654,7 +657,7 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| crate::plugin_ui::key_input(app, ui, tid, slot, &ins));
             }
             if instrument && openpt_mix::is_third_party(&ins.plugin) {
-                ui.label(egui::RichText::new("Load and edit sounds in the plugin's own editor.").color(Tokens::current().text_dim));
+                ui.label(egui::RichText::new(t!("Load and edit sounds in the plugin's own editor.")).color(Tokens::current().text_dim));
                 return;
             }
             if instrument && ins.plugin == crate::sampler_window::SAMPLER {
@@ -670,8 +673,8 @@ fn plugin_windows(app: &mut SoundApp, ctx: &egui::Context) {
                         let v = ins.params.get(p.id).copied().unwrap_or(p.default);
                         let name = ui.add(egui::Label::new(p.name).sense(egui::Sense::click()));
                         if !instrument {
-                            name.on_hover_text("Right-click: show its automation").context_menu(|ui| {
-                                if ui.button("Show Automation Lane").clicked() {
+                            name.on_hover_text(t!("Right-click: show its automation")).context_menu(|ui| {
+                                if ui.button(t!("Show Automation Lane")).clicked() {
                                     let view = format!("plugin:{}:{}", char::from(b'a'.saturating_add(slot as u8)), p.id);
                                     let _ = app.run("track.view", json!({"tracks": [tid.0], "view": view}));
                                     ui.close();
@@ -774,33 +777,39 @@ fn about(app: &mut SoundApp, ctx: &egui::Context) {
         return;
     }
     let tab_id = egui::Id::new("about_tab");
-    egui::Window::new("About OpenPT").open(&mut open).default_size(vec2(640.0, 420.0)).collapsible(false).fit_screen(ctx).show(ctx, |ui| {
-        let mut tab = ui.data_mut(|d| d.get_temp::<u8>(tab_id)).unwrap_or(0);
-        ui.horizontal(|ui| {
-            for (i, l) in (0u8..).zip(["About", "Licenses"]) {
-                if ui.selectable_label(tab == i, l).clicked() {
-                    tab = i;
+    egui::Window::new(t!("About OpenPT"))
+        .id(egui::Id::new("About OpenPT"))
+        .open(&mut open)
+        .default_size(vec2(640.0, 420.0))
+        .collapsible(false)
+        .fit_screen(ctx)
+        .show(ctx, |ui| {
+            let mut tab = ui.data_mut(|d| d.get_temp::<u8>(tab_id)).unwrap_or(0);
+            ui.horizontal(|ui| {
+                for (i, l) in (0u8..).zip(["About", "Licenses"]) {
+                    if ui.selectable_label(tab == i, l).clicked() {
+                        tab = i;
+                    }
+                }
+            });
+            ui.data_mut(|d| d.insert_temp(tab_id, tab));
+            ui.separator();
+            match tab {
+                1 => {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for text in [include_str!("../../../NOTICE"), include_str!("../../../LICENSE-MIT"), include_str!("../../../LICENSE-APACHE")] {
+                            ui.label(egui::RichText::new(text).font(mono(11.0)));
+                            ui.separator();
+                        }
+                    });
+                }
+                _ => {
+                    ui.label(egui::RichText::new(t!("OpenPT")).font(bold(22.0)));
+                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                    ui.label(t!("Digital audio workstation. Made with Rust and egui."));
                 }
             }
         });
-        ui.data_mut(|d| d.insert_temp(tab_id, tab));
-        ui.separator();
-        match tab {
-            1 => {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for text in [include_str!("../../../NOTICE"), include_str!("../../../LICENSE-MIT"), include_str!("../../../LICENSE-APACHE")] {
-                        ui.label(egui::RichText::new(text).font(mono(11.0)));
-                        ui.separator();
-                    }
-                });
-            }
-            _ => {
-                ui.label(egui::RichText::new("OpenPT").font(bold(22.0)));
-                ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                ui.label("Digital audio workstation. Made with Rust and egui.");
-            }
-        }
-    });
     app.ui.show_about = open;
 }
 
@@ -809,12 +818,15 @@ fn session_info(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new("Session Info").open(&mut open).default_size(vec2(480.0, 360.0)).fit_screen(ctx).show(ctx, |ui| {
-        let text = openpt_engine::inspect::session_text(&app.engine);
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.label(egui::RichText::new(text).font(mono(11.0)));
-        });
-    });
+    egui::Window::new(t!("Session Info")).id(egui::Id::new("Session Info")).open(&mut open).default_size(vec2(480.0, 360.0)).fit_screen(ctx).show(
+        ctx,
+        |ui| {
+            let text = openpt_engine::inspect::session_text(&app.engine);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.label(egui::RichText::new(text).font(mono(11.0)));
+            });
+        },
+    );
     app.ui.show_session_info = open;
 }
 
@@ -940,7 +952,7 @@ pub(crate) fn save_preset(
 }
 
 fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot: usize, info: &openpt_dsp::PluginInfo, ins: &openpt_model::Insert) {
-    if ui.button("<factory default>").clicked() {
+    if ui.button(t!("<factory default>")).clicked() {
         recall_preset(app, tid, slot, info, None);
         ui.close();
     }
@@ -956,7 +968,7 @@ fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot
     }
     factory_menu(app, ui, tid, slot, info);
     if preset_dir(app, info.id).is_none() {
-        ui.label("User presets need the desktop app.");
+        ui.label(t!("User presets need the desktop app."));
         return;
     }
     for n in user_preset_names(app, info.id) {
@@ -970,7 +982,7 @@ fn preset_menu(app: &mut SoundApp, ui: &mut Ui, tid: openpt_model::TrackId, slot
     let mut name: String = ui.ctx().memory(|m| m.data.get_temp(key)).unwrap_or_else(|| format!("{} preset", info.name));
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut name).desired_width(140.0));
-        if ui.button("Save").clicked() {
+        if ui.button(t!("Save")).clicked() {
             save_preset(app, tid, slot, info, ins, &name);
         }
     });

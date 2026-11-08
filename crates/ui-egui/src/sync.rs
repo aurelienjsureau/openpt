@@ -167,22 +167,22 @@ pub fn tab(app: &mut SoundApp, ui: &mut egui::Ui) {
             }
         });
     };
-    ui.strong("Generate");
+    ui.strong(t!("Generate"));
     egui::Grid::new("sync_out").num_columns(2).spacing(egui::vec2(12.0, 8.0)).show(ui, |ui| {
-        ui.label("MIDI Beat Clock to");
+        ui.label(t!("MIDI Beat Clock to"));
         port(ui, "sync_clock_out", &mut p.clock_out, &outputs);
         ui.end_row();
-        ui.label("MIDI Time Code to");
+        ui.label(t!("MIDI Time Code to"));
         port(ui, "sync_mtc_out", &mut p.mtc_out, &outputs);
         ui.end_row();
-        ui.label("LTC on output channel");
+        ui.label(t!("LTC on output channel"));
         channel(ui, "sync_ltc_out", &mut p.ltc_out, out_channels);
         ui.end_row();
     });
     ui.add_space(6.0);
-    ui.strong("Chase");
+    ui.strong(t!("Chase"));
     egui::Grid::new("sync_in").num_columns(2).spacing(egui::vec2(12.0, 8.0)).show(ui, |ui| {
-        ui.label("Positional reference");
+        ui.label(t!("Positional reference"));
         egui::ComboBox::from_id_salt("sync_chase").width(120.0).selected_text(if p.chase.is_empty() { "none" } else { p.chase.as_str() }).show_ui(
             ui,
             |ui| {
@@ -194,19 +194,19 @@ pub fn tab(app: &mut SoundApp, ui: &mut egui::Ui) {
         ui.end_row();
         match p.chase.as_str() {
             "MTC" => {
-                ui.label("MIDI Time Code from");
+                ui.label(t!("MIDI Time Code from"));
                 port(ui, "sync_mtc_in", &mut p.mtc_in, &inputs);
                 ui.end_row();
             }
             "LTC" => {
-                ui.label("LTC on input channel");
+                ui.label(t!("LTC on input channel"));
                 channel(ui, "sync_ltc_in", &mut p.ltc_in, in_channels);
                 ui.end_row();
             }
             _ => {}
         }
         ui.label("");
-        ui.checkbox(&mut p.online, "Online: follow the incoming timecode");
+        ui.checkbox(&mut p.online, t!("Online: follow the incoming timecode"));
         ui.end_row();
     });
     let s = &app.sync_state;
@@ -217,9 +217,9 @@ pub fn tab(app: &mut SoundApp, ui: &mut egui::Ui) {
         ui.colored_label(egui::Color32::from_rgb(230, 120, 100), e);
     }
     ui.label(
-        egui::RichText::new(
-            "Timecode follows the session frame rate and start time in Setup › Session. A port used here is not also a MIDI input for recording.",
-        )
+        egui::RichText::new(t!(
+            "Timecode follows the session frame rate and start time in Setup › Session. A port used here is not also a MIDI input for recording."
+        ))
         .small(),
     );
 }

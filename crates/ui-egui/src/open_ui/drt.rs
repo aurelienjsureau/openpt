@@ -97,13 +97,13 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect) {
     let cell = vec2(84.0, 96.0);
     let row = strip.min.y + 10.0;
     let mut x = strip.min.x + 10.0;
-    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, "DETECTION", bold(10.0), ACCENT);
+    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, t!("DETECTION"), bold(10.0), ACCENT);
     for (id, label) in [("sensitivity", "Sensitivity"), ("retrigger", "Retrigger"), ("floor", "Floor")] {
         knob(ui, cx, Rect::from_min_size(pos2(x, row + 16.0), cell), id, label, READOUT);
         x += cell.x;
     }
     let r = Rect::from_min_size(pos2(x + 4.0, row + 30.0), vec2(116.0, 20.0));
-    p.text(pos2(r.min.x, r.min.y - 4.0), Align2::LEFT_BOTTOM, "FOCUS", regular(9.0), DIM);
+    p.text(pos2(r.min.x, r.min.y - 4.0), Align2::LEFT_BOTTOM, t!("FOCUS"), regular(9.0), DIM);
     if let Some(v) = choice(ui, r, (cx.id, "focus"), openpt_dsp::plugins::open_drt::FOCUS, cx.idx("focus")) {
         cx.set("focus", v as f32);
     }
@@ -113,7 +113,7 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect) {
     }
     x += 140.0;
     p.vline(x - 8.0, strip.min.y + 6.0..=strip.max.y - 6.0, Stroke::new(1.0, EDGE));
-    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, "OUTPUT", bold(10.0), ACCENT);
+    p.text(pos2(x, row - 4.0), Align2::LEFT_TOP, t!("OUTPUT"), bold(10.0), ACCENT);
     knob(ui, cx, Rect::from_min_size(pos2(x, row + 16.0), cell), "triglevel", "Trig Level", ACCENT);
     x += cell.x;
     if let Some(prm) = cx.param("note") {
@@ -122,7 +122,7 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect) {
     }
     x += cell.x;
     let r = Rect::from_min_size(pos2(x + 4.0, row + 30.0), vec2(120.0, 20.0));
-    p.text(pos2(r.min.x, r.min.y - 4.0), Align2::LEFT_BOTTOM, "SENDS", regular(9.0), DIM);
+    p.text(pos2(r.min.x, r.min.y - 4.0), Align2::LEFT_BOTTOM, t!("SENDS"), regular(9.0), DIM);
     if let Some(v) = choice(ui, r, (cx.id, "outmode"), openpt_dsp::plugins::open_drt::OUT_MODES, cx.idx("outmode")) {
         cx.set("outmode", v as f32);
     }

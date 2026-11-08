@@ -212,7 +212,7 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, strip: Rect) {
         cx.set("audition", if on { 0.0 } else { 1.0 });
     }
     let sx = bx + 82.0;
-    p.text(pos2(sx, row - 2.0), Align2::LEFT_TOP, "SIDE CHAIN", regular(9.0), DIM);
+    p.text(pos2(sx, row - 2.0), Align2::LEFT_TOP, t!("SIDE CHAIN"), regular(9.0), DIM);
     let small = vec2(64.0, 90.0);
     knob_with_off(ui, cx, Rect::from_min_size(pos2(sx, row + 6.0), small), "sc_hp", "High Pass", |v| v <= 10.5);
     knob_with_off(ui, cx, Rect::from_min_size(pos2(sx + small.x, row + 6.0), small), "sc_lp", "Low Pass", |v| v >= 19_500.0);

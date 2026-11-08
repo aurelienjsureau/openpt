@@ -163,9 +163,9 @@ pub fn plate(ui: &mut Ui, size: egui::Vec2, name: &str) -> (Rect, Rect) {
         })
         .collect();
     p.add(egui::Shape::line(pts, Stroke::new(1.4, ACCENT)));
-    let open = p.text(pos2(m.max.x + 8.0, head.center().y), Align2::LEFT_CENTER, "Open", regular(15.0), TEXT);
+    let open = p.text(pos2(m.max.x + 8.0, head.center().y), Align2::LEFT_CENTER, t!("Open"), regular(15.0), TEXT);
     p.text(pos2(open.max.x, head.center().y), Align2::LEFT_CENTER, name, bold(15.0), ACCENT);
-    p.text(pos2(head.max.x - 12.0, head.center().y), Align2::RIGHT_CENTER, "OpenPT", regular(10.0), DIM);
+    p.text(pos2(head.max.x - 12.0, head.center().y), Align2::RIGHT_CENTER, t!("OpenPT"), regular(10.0), DIM);
     (Rect::from_min_max(pos2(r.min.x, head.max.y + 1.0), r.max), head)
 }
 

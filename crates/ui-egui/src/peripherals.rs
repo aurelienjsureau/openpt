@@ -295,66 +295,70 @@ pub fn window(app: &mut SoundApp, ctx: &egui::Context) {
     let outputs = openpt_playback::surface::list_output_devices();
     let mut open = true;
     let mut close = false;
-    egui::Window::new("Peripherals").open(&mut open).collapsible(false).resizable(false).fit_screen(ctx).show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            for (i, name) in ["Synchronization", "Machine Control", "MIDI Controllers", "Ethernet Controllers", "Mic Preamps"].iter().enumerate() {
-                if ui.selectable_label(tab == i, *name).clicked() {
-                    tab = i;
-                }
-            }
-        });
-        ui.separator();
-        if tab == 0 {
-            crate::sync::tab(app, ui);
-        } else if tab != 2 {
-            ui.label("Nothing to set up here yet.");
-        } else {
-            egui::Grid::new("midi_controllers").num_columns(5).spacing(egui::vec2(12.0, 8.0)).show(ui, |ui| {
-                for h in ["#", "Type", "Receive From", "Send To", "# Ch's"] {
-                    ui.strong(h);
-                }
-                ui.end_row();
-                for (row, c) in app.ui.peripherals.iter_mut().enumerate().take(CONTROLLER_ROWS) {
-                    ui.label(format!("#{}", row + 1));
-                    egui::ComboBox::from_id_salt(("pc_type", row)).width(90.0).selected_text(c.kind.as_str()).show_ui(ui, |ui| {
-                        for k in std::iter::once("none").chain(openpt_playback::surface::Protocol::KINDS).chain([crate::midi_learn::KIND]) {
-                            ui.selectable_value(&mut c.kind, k.to_string(), k);
-                        }
-                    });
-                    let port = |ui: &mut egui::Ui, salt: &str, value: &mut String, list: &[String]| {
-                        let shown = if value.is_empty() { "none".to_string() } else { value.clone() };
-                        egui::ComboBox::from_id_salt((salt, row)).width(200.0).selected_text(shown).show_ui(ui, |ui| {
-                            ui.selectable_value(value, String::new(), "none");
-                            for n in list {
-                                ui.selectable_value(value, n.clone(), n);
-                            }
-                        });
-                    };
-                    port(ui, "pc_in", &mut c.input, &inputs);
-                    port(ui, "pc_out", &mut c.output, &outputs);
-                    egui::ComboBox::from_id_salt(("pc_ch", row)).width(50.0).selected_text(c.channels.to_string()).show_ui(ui, |ui| {
-                        for n in [8u8, 16, 24, 32] {
-                            ui.selectable_value(&mut c.channels, n, n.to_string());
-                        }
-                    });
-                    ui.end_row();
+    egui::Window::new(t!("Peripherals")).id(egui::Id::new("Peripherals")).open(&mut open).collapsible(false).resizable(false).fit_screen(ctx).show(
+        ctx,
+        |ui| {
+            ui.horizontal(|ui| {
+                for (i, name) in ["Synchronization", "Machine Control", "MIDI Controllers", "Ethernet Controllers", "Mic Preamps"].iter().enumerate()
+                {
+                    if ui.selectable_label(tab == i, t!(*name)).clicked() {
+                        tab = i;
+                    }
                 }
             });
-            for (row, f) in app.surfaces.failed.iter().enumerate() {
-                if let Some((_, _, e)) = f {
-                    ui.colored_label(egui::Color32::from_rgb(230, 120, 100), format!("#{}: {e}", row + 1));
-                }
-            }
-            ui.label(egui::RichText::new("A port used by a controller is not also a MIDI input for recording.").small());
             ui.separator();
-            crate::midi_learn::window_rows(app, ui);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("OK").clicked() {
-                close = true;
+            if tab == 0 {
+                crate::sync::tab(app, ui);
+            } else if tab != 2 {
+                ui.label(t!("Nothing to set up here yet."));
+            } else {
+                egui::Grid::new("midi_controllers").num_columns(5).spacing(egui::vec2(12.0, 8.0)).show(ui, |ui| {
+                    for h in ["#", "Type", "Receive From", "Send To", "# Ch's"] {
+                        ui.strong(t!(h));
+                    }
+                    ui.end_row();
+                    for (row, c) in app.ui.peripherals.iter_mut().enumerate().take(CONTROLLER_ROWS) {
+                        ui.label(format!("#{}", row + 1));
+                        egui::ComboBox::from_id_salt(("pc_type", row)).width(90.0).selected_text(c.kind.as_str()).show_ui(ui, |ui| {
+                            for k in std::iter::once("none").chain(openpt_playback::surface::Protocol::KINDS).chain([crate::midi_learn::KIND]) {
+                                ui.selectable_value(&mut c.kind, k.to_string(), k);
+                            }
+                        });
+                        let port = |ui: &mut egui::Ui, salt: &str, value: &mut String, list: &[String]| {
+                            let shown = if value.is_empty() { "none".to_string() } else { value.clone() };
+                            egui::ComboBox::from_id_salt((salt, row)).width(200.0).selected_text(shown).show_ui(ui, |ui| {
+                                ui.selectable_value(value, String::new(), "none");
+                                for n in list {
+                                    ui.selectable_value(value, n.clone(), n);
+                                }
+                            });
+                        };
+                        port(ui, "pc_in", &mut c.input, &inputs);
+                        port(ui, "pc_out", &mut c.output, &outputs);
+                        egui::ComboBox::from_id_salt(("pc_ch", row)).width(50.0).selected_text(c.channels.to_string()).show_ui(ui, |ui| {
+                            for n in [8u8, 16, 24, 32] {
+                                ui.selectable_value(&mut c.channels, n, n.to_string());
+                            }
+                        });
+                        ui.end_row();
+                    }
+                });
+                for (row, f) in app.surfaces.failed.iter().enumerate() {
+                    if let Some((_, _, e)) = f {
+                        ui.colored_label(egui::Color32::from_rgb(230, 120, 100), format!("#{}: {e}", row + 1));
+                    }
+                }
+                ui.label(egui::RichText::new(t!("A port used by a controller is not also a MIDI input for recording.")).small());
+                ui.separator();
+                crate::midi_learn::window_rows(app, ui);
             }
-        });
-    });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(t!("OK")).clicked() {
+                    close = true;
+                }
+            });
+        },
+    );
     ctx.data_mut(|d| d.insert_temp(tab_key, tab));
     if !open || close {
         app.ui.show_peripherals = false;

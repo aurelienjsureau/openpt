@@ -74,7 +74,7 @@ pub fn path_for(category: &str, name: &str) -> Option<PathBuf> {
 pub fn recall_menu(ui: &mut egui::Ui, on_pick: &mut dyn FnMut(&TrackPreset)) {
     let presets = list();
     if presets.is_empty() {
-        ui.weak("No track presets yet (Track > Save Track Preset...)");
+        ui.weak(t!("No track presets yet (Track > Save Track Preset...)"));
         return;
     }
     let mut cats: Vec<&str> = presets.iter().map(|p| p.category.as_str()).collect();

@@ -314,6 +314,7 @@ fn main() -> eframe::Result {
     options.wgpu_options.surface = eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY;
     #[cfg(target_os = "windows")]
     graphics::configure(&mut options, eframe::wgpu::Backends::from_env(), eframe::wgpu::Dx12Compiler::from_env());
+    openpt_ui_egui::i18n::follow_system_language();
     eframe::run_native(
         "OpenPT",
         options,

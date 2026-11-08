@@ -309,7 +309,7 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, st: &mut State, strip: Rect) {
                 cx.set(k(b, dsp::K_DYN), if dynamic { 0.0 } else { 1.0 });
             }
             if button(ui, Rect::from_min_size(pos2(x, row + 40.0), vec2(64.0, 20.0)), "EXT KEY", s.sc, ACCENT)
-                .on_hover_text("The band's detector listens to the key input")
+                .on_hover_text(t!("The band's detector listens to the key input"))
                 .clicked()
             {
                 cx.set(k(b, dsp::K_SC), if s.sc { 0.0 } else { 1.0 });
@@ -334,8 +334,8 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, st: &mut State, strip: Rect) {
             remove(cx, st, b);
         }
     } else {
-        p.text(pos2(x, row + 30.0), Align2::LEFT_CENTER, "Double-click the display to add a band.", regular(12.0), DIM);
-        p.text(pos2(x, row + 50.0), Align2::LEFT_CENTER, "Drag a handle, wheel for Q, right-click to remove.", regular(11.0), DIM);
+        p.text(pos2(x, row + 30.0), Align2::LEFT_CENTER, t!("Double-click the display to add a band."), regular(12.0), DIM);
+        p.text(pos2(x, row + 50.0), Align2::LEFT_CENTER, t!("Drag a handle, wheel for Q, right-click to remove."), regular(11.0), DIM);
     }
     let gx = strip.max.x - 8.0 - cell.x - 128.0;
     knob(ui, cx, Rect::from_min_size(pos2(gx + 128.0, row), cell), "out", "Output", ACCENT);

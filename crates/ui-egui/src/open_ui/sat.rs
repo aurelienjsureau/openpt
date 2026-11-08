@@ -225,8 +225,14 @@ fn controls(ui: &mut Ui, cx: &mut Ctx, st: &mut State, strip: Rect) {
             st.selected = None;
         }
     } else {
-        p.text(pos2(x, row + 30.0), Align2::LEFT_CENTER, "Double-click the display to add a band (near the ends: a shelf).", regular(12.0), DIM);
-        p.text(pos2(x, row + 50.0), Align2::LEFT_CENTER, "Drag a dot: frequency and drive. Wheel: width. Right-click: remove.", regular(11.0), DIM);
+        p.text(pos2(x, row + 30.0), Align2::LEFT_CENTER, t!("Double-click the display to add a band (near the ends: a shelf)."), regular(12.0), DIM);
+        p.text(
+            pos2(x, row + 50.0),
+            Align2::LEFT_CENTER,
+            t!("Drag a dot: frequency and drive. Wheel: width. Right-click: remove."),
+            regular(11.0),
+            DIM,
+        );
     }
     let gx = strip.max.x - 8.0 - cell.x - 100.0;
     let matching = cx.on("gainmatch");

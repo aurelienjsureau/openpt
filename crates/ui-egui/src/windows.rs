@@ -29,7 +29,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
 fn audio_health(app: &mut SoundApp, ctx: &egui::Context) {
     let mut open = app.ui.show_audio_health;
     win(ctx, &mut open, "Session Audio Health", vec2(620.0, 360.0), |ui| {
-        let refresh = ui.button("Refresh Report").clicked();
+        let refresh = ui.button(t!("Refresh Report")).clicked();
         if app.audio_health_report.is_none() || refresh {
             app.audio_health_report = Some(app.engine.execute("session.audio_health", &json!({})).map_err(|error| error.to_string()));
         }
@@ -41,10 +41,10 @@ fn audio_health(app: &mut SoundApp, ctx: &egui::Context) {
                     Some(seconds) => format!("Active audio ends at {seconds:.2} seconds"),
                     None => "Active audio end time is unknown (invalid session sample rate)".into(),
                 });
-                ui.label("Includes alternate takes and muted clips. Refresh after editing.");
+                ui.label(t!("Includes alternate takes and muted clips. Refresh after editing."));
                 ui.separator();
                 if report["healthy"] == true {
-                    ui.label("All audio clips have loaded media within source bounds.");
+                    ui.label(t!("All audio clips have loaded media within source bounds."));
                 }
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                     if let Some(issues) = report["issues"].as_array() {
@@ -67,7 +67,7 @@ fn audio_health(app: &mut SoundApp, ctx: &egui::Context) {
                     }
                 });
                 ui.separator();
-                ui.label("Checks loaded media only, not files on disk, signal levels, plugins or routing.");
+                ui.label(t!("Checks loaded media only, not files on disk, signal levels, plugins or routing."));
             }
             Err(error) => {
                 ui.label(error.to_string());
@@ -84,13 +84,13 @@ fn win(ctx: &egui::Context, open: &mut bool, title: &str, size: egui::Vec2, body
     if !*open {
         return;
     }
-    egui::Window::new(title).open(open).default_size(size).fit_screen(ctx).show(ctx, body);
+    egui::Window::new(t!(title)).id(egui::Id::new(title)).open(open).default_size(size).fit_screen(ctx).show(ctx, body);
 }
 
 fn automation(app: &mut SoundApp, ctx: &egui::Context) {
     let mut open = app.ui.show_automation;
     win(ctx, &mut open, "Automation", vec2(260.0, 260.0), |ui| {
-        ui.label("Write automation for the selected tracks:");
+        ui.label(t!("Write automation for the selected tracks:"));
         let tracks = app.engine.session().edit.selected_tracks.clone();
         ui.horizontal_wrapped(|ui| {
             for m in [
@@ -109,19 +109,19 @@ fn automation(app: &mut SoundApp, ctx: &egui::Context) {
             }
         });
         ui.separator();
-        ui.label("Enabled parameters");
+        ui.label(t!("Enabled parameters"));
         for f in ["volume", "pan", "mute", "send level", "send pan", "send mute", "plugin"] {
             let id = format!("automation.enable.{}", f.replace(' ', "_"));
             let mut on = !app.engine.session().edit.flag(&format!("{id}.off"));
-            if crate::widgets::checkbox(ui, &mut on, f).changed() {
+            if crate::widgets::checkbox(ui, &mut on, t!(f)).changed() {
                 app.engine.session_mut().edit.set_flag(&format!("{id}.off"), !on);
             }
         }
         ui.separator();
-        if ui.button("Write to Current").clicked() {
+        if ui.button(t!("Write to Current")).clicked() {
             let _ = app.run("automation.write_to_current", json!({}));
         }
-        if ui.button("Thin All").clicked() {
+        if ui.button(t!("Thin All")).clicked() {
             let _ = app.run("automation.thin_all", json!({}));
         }
     });
@@ -153,7 +153,7 @@ fn color_palette(app: &mut SoundApp, ctx: &egui::Context) {
                 ui.selectable_value(&mut target, t, label);
             }
             ui.separator();
-            if ui.button("None").on_hover_text("Back to the default color").clicked() {
+            if ui.button(t!("None")).on_hover_text(t!("Back to the default color")).clicked() {
                 apply_color(app, target, None);
             }
         });
@@ -276,11 +276,11 @@ fn task_manager(app: &mut SoundApp, ctx: &egui::Context) {
                 ui.add(egui::ProgressBar::new(b.progress()));
             }
             None => {
-                ui.label("No background tasks are running.");
+                ui.label(t!("No background tasks are running."));
             }
         }
         ui.label(
-            egui::RichText::new("Renders and AudioSuite processes run to completion before returning.").small().color(Tokens::current().text_dim),
+            egui::RichText::new(t!("Renders and AudioSuite processes run to completion before returning.")).small().color(Tokens::current().text_dim),
         );
     });
     app.ui.show_task_manager = open;
@@ -309,7 +309,7 @@ fn metadata(app: &mut SoundApp, ctx: &egui::Context) {
         });
         ui.separator();
         let mut c = s.comments.clone();
-        ui.label("Session comments");
+        ui.label(t!("Session comments"));
         if ui.text_edit_multiline(&mut c).changed() {
             app.engine.session_mut().comments = c;
         }
@@ -321,7 +321,7 @@ fn event_list(app: &mut SoundApp, ctx: &egui::Context) {
     let mut open = app.ui.show_event_list;
     win(ctx, &mut open, "MIDI Event List", vec2(420.0, 360.0), |ui| {
         let Some(cid) = crate::midi_editor::target_clip(app) else {
-            ui.label("Select a MIDI clip.");
+            ui.label(t!("Select a MIDI clip."));
             return;
         };
         let notes = match app.engine.session().find_clip(cid).map(|(_, c)| c.content.clone()) {
@@ -331,7 +331,7 @@ fn event_list(app: &mut SoundApp, ctx: &egui::Context) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("evl").num_columns(5).striped(true).show(ui, |ui| {
                 for h in ["Start (ticks)", "Note", "Vel", "Length", ""] {
-                    ui.label(egui::RichText::new(h).strong());
+                    ui.label(egui::RichText::new(t!(h)).strong());
                 }
                 ui.end_row();
                 for (i, n) in notes.iter().enumerate() {
@@ -439,7 +439,7 @@ fn midi_keyboard(app: &mut SoundApp, ctx: &egui::Context) {
                 wi += 1;
             }
         }
-        ui.label(egui::RichText::new("Click keys to step-enter notes into the selected MIDI clip at the insertion point.").small());
+        ui.label(egui::RichText::new(t!("Click keys to step-enter notes into the selected MIDI clip at the insertion point.")).small());
     });
     app.ui.show_midi_keyboard = open;
 }
@@ -449,57 +449,61 @@ fn workspace(app: &mut SoundApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    egui::Window::new("Workspace").open(&mut open).default_size(vec2(460.0, 420.0)).fit_screen(ctx).show(ctx, |ui| {
-        let dir = if app.ui.workspace_dir.is_empty() { std::env::var("HOME").unwrap_or_else(|_| ".".into()) } else { app.ui.workspace_dir.clone() };
-        ui.horizontal(|ui| {
-            if ui.button("⬆").on_hover_text("Parent folder").clicked()
-                && let Some(p) = std::path::Path::new(&dir).parent()
-            {
-                app.ui.workspace_dir = p.to_string_lossy().into_owned();
-            }
-            ui.label(egui::RichText::new(&dir).small());
-        });
-        ui.separator();
-        let mut entries: Vec<(String, bool)> = std::fs::read_dir(&dir)
-            .map(|rd| {
-                rd.flatten()
-                    .filter_map(|e| {
-                        let name = e.file_name().to_string_lossy().into_owned();
-                        if name.starts_with('.') {
-                            return None;
+    egui::Window::new(t!("Workspace")).id(egui::Id::new("Workspace")).open(&mut open).default_size(vec2(460.0, 420.0)).fit_screen(ctx).show(
+        ctx,
+        |ui| {
+            let dir =
+                if app.ui.workspace_dir.is_empty() { std::env::var("HOME").unwrap_or_else(|_| ".".into()) } else { app.ui.workspace_dir.clone() };
+            ui.horizontal(|ui| {
+                if ui.button("⬆").on_hover_text(t!("Parent folder")).clicked()
+                    && let Some(p) = std::path::Path::new(&dir).parent()
+                {
+                    app.ui.workspace_dir = p.to_string_lossy().into_owned();
+                }
+                ui.label(egui::RichText::new(&dir).small());
+            });
+            ui.separator();
+            let mut entries: Vec<(String, bool)> = std::fs::read_dir(&dir)
+                .map(|rd| {
+                    rd.flatten()
+                        .filter_map(|e| {
+                            let name = e.file_name().to_string_lossy().into_owned();
+                            if name.starts_with('.') {
+                                return None;
+                            }
+                            let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+                            let ext = std::path::Path::new(&name).extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
+                            (is_dir
+                                || ["wav", "aif", "aiff", "flac", "mp3", "ogg", "m4a", "m4b", "caf", "mid", "midi", "openpt", "ptx", "ptxt"]
+                                    .contains(&ext.as_str()))
+                            .then_some((name, is_dir))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            entries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (name, is_dir) in entries.into_iter().take(2000) {
+                    let path = std::path::Path::new(&dir).join(&name).to_string_lossy().into_owned();
+                    let label = if is_dir { format!("📁 {name}") } else { format!("🔊 {name}") };
+                    let r = ui.selectable_label(false, label);
+                    if r.double_clicked() {
+                        if is_dir {
+                            app.ui.workspace_dir = path;
+                        } else if name.ends_with(".openpt") || name.ends_with(".ptx") || name.ends_with(".ptxt") {
+                            let _ = crate::dialogs::run_or_ask(app, "session.open", json!({"path": path}));
+                        } else if name.ends_with(".mid") || name.ends_with(".midi") {
+                            let _ = app.run("file.import_midi", json!({"path": path}));
+                        } else {
+                            let at = app.engine.session().edit.selection.start;
+                            crate::import_jobs::start(app, vec![path], at);
                         }
-                        let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
-                        let ext = std::path::Path::new(&name).extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
-                        (is_dir
-                            || ["wav", "aif", "aiff", "flac", "mp3", "ogg", "m4a", "m4b", "caf", "mid", "midi", "openpt", "ptx", "ptxt"]
-                                .contains(&ext.as_str()))
-                        .then_some((name, is_dir))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        entries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.to_lowercase().cmp(&b.0.to_lowercase())));
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (name, is_dir) in entries.into_iter().take(2000) {
-                let path = std::path::Path::new(&dir).join(&name).to_string_lossy().into_owned();
-                let label = if is_dir { format!("📁 {name}") } else { format!("🔊 {name}") };
-                let r = ui.selectable_label(false, label);
-                if r.double_clicked() {
-                    if is_dir {
-                        app.ui.workspace_dir = path;
-                    } else if name.ends_with(".openpt") || name.ends_with(".ptx") || name.ends_with(".ptxt") {
-                        let _ = crate::dialogs::run_or_ask(app, "session.open", json!({"path": path}));
-                    } else if name.ends_with(".mid") || name.ends_with(".midi") {
-                        let _ = app.run("file.import_midi", json!({"path": path}));
-                    } else {
-                        let at = app.engine.session().edit.selection.start;
-                        crate::import_jobs::start(app, vec![path], at);
                     }
                 }
-            }
-        });
-        ui.label(egui::RichText::new("Double-click to import audio/MIDI at the insertion point or open a session.").small());
-    });
+            });
+            ui.label(egui::RichText::new(t!("Double-click to import audio/MIDI at the insertion point or open a session.")).small());
+        },
+    );
     app.ui.show_workspace = open;
 }
 
@@ -534,7 +538,7 @@ pub(crate) fn store_configuration(app: &mut SoundApp, n: usize) {
 fn configurations(app: &mut SoundApp, ctx: &egui::Context) {
     let mut open = app.ui.show_configurations;
     win(ctx, &mut open, "Window Configurations", vec2(320.0, 240.0), |ui| {
-        if ui.button("New Configuration…").clicked() {
+        if ui.button(t!("New Configuration…")).clicked() {
             let n = app.ui.configurations.len() + 1;
             let mut snap = app.ui.clone();
             snap.configurations.clear();
@@ -595,7 +599,7 @@ fn device_combo(ui: &mut egui::Ui, id: &str, value: &mut Option<String>, devices
 fn number_combo(ui: &mut egui::Ui, id: &str, value: &mut Option<u32>, options: &[u32], unit: &str) {
     let shown = value.map_or("Device default".to_string(), |v| format!("{v} {unit}"));
     egui::ComboBox::from_id_salt(id).width(300.0).selected_text(shown).show_ui(ui, |ui| {
-        ui.selectable_value(value, None, "Device default");
+        ui.selectable_value(value, None, t!("Device default"));
         for v in options {
             ui.selectable_value(value, Some(*v), format!("{v} {unit}"));
         }
@@ -615,7 +619,7 @@ pub fn playback_engine(app: &mut SoundApp, ctx: &egui::Context) {
     win(ctx, &mut open, "Playback Engine", vec2(460.0, 360.0), |ui| {
         let t = Tokens::current();
         egui::Grid::new("pe").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-            ui.label("Audio system");
+            ui.label(t!("Audio system"));
             let def = systems.iter().find(|s| s.is_default).map_or("none".to_string(), |s| s.name.clone());
             let shown = draft.system.clone().unwrap_or_else(|| format!("Default ({def})"));
             egui::ComboBox::from_id_salt("pe-system").width(300.0).selected_text(shown).show_ui(ui, |ui| {
@@ -631,37 +635,37 @@ pub fn playback_engine(app: &mut SoundApp, ctx: &egui::Context) {
             });
             ui.end_row();
             let sys = chosen_system(&systems, &draft);
-            ui.label("Output device");
+            ui.label(t!("Output device"));
             device_combo(ui, "pe-out", &mut draft.output, sys.map_or(&[][..], |s| &s.outputs));
             ui.end_row();
-            ui.label("Input device");
+            ui.label(t!("Input device"));
             device_combo(ui, "pe-in", &mut draft.input, sys.map_or(&[][..], |s| &s.inputs));
             ui.end_row();
             let out = sys.and_then(|s| chosen_device(&s.outputs, draft.output.as_deref()));
-            ui.label("Sample rate");
+            ui.label(t!("Sample rate"));
             number_combo(ui, "pe-rate", &mut draft.sample_rate, out.map_or(&[][..], |d| &d.sample_rates), "Hz");
             ui.end_row();
-            ui.label("Buffer size");
+            ui.label(t!("Buffer size"));
             let buffers = out.map(DeviceInfo::buffer_sizes).unwrap_or_else(|| openpt_playback::devices::STANDARD_BUFFERS.to_vec());
             number_combo(ui, "pe-buffer", &mut draft.buffer_size, &buffers, "samples");
             ui.end_row();
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            if ui.button("Refresh devices").clicked() {
+            if ui.button(t!("Refresh devices")).clicked() {
                 refresh = true;
             }
             let changed = draft != app.ui.audio;
-            if ui.add_enabled(changed, egui::Button::new("Apply")).on_hover_text("Reopen the audio devices with these settings").clicked() {
+            if ui.add_enabled(changed, egui::Button::new(t!("Apply"))).on_hover_text(t!("Reopen the audio devices with these settings")).clicked() {
                 apply = true;
             }
-            if changed && ui.button("Revert").clicked() {
+            if changed && ui.button(t!("Revert")).clicked() {
                 draft = app.ui.audio.clone();
             }
         });
         ui.separator();
         egui::Grid::new("pe-state").num_columns(2).show(ui, |ui| {
-            ui.label("Output");
+            ui.label(t!("Output"));
             ui.label(app.player.as_ref().map_or("none".to_string(), |p| {
                 if p.silent {
                     "no device (silent clock)".to_string()
@@ -671,12 +675,12 @@ pub fn playback_engine(app: &mut SoundApp, ctx: &egui::Context) {
                 }
             }));
             ui.end_row();
-            ui.label("Input");
+            ui.label(t!("Input"));
             ui.label(app.recorder.as_ref().map_or("opened on first record or monitor".to_string(), |r| {
                 format!("{} · {} Hz · {} ch", r.device_name, r.sample_rate, r.channels)
             }));
             ui.end_row();
-            ui.label("Session rate");
+            ui.label(t!("Session rate"));
             let sr = app.engine.session().sample_rate.hz();
             let note = app
                 .player
@@ -686,12 +690,14 @@ pub fn playback_engine(app: &mut SoundApp, ctx: &egui::Context) {
             ui.label(format!("{sr} Hz{note}"));
             ui.end_row();
         });
-        ui.label(egui::RichText::new("The mix runs in 512-sample blocks; the buffer size sets the device's own latency.").small().color(t.text_dim));
+        ui.label(
+            egui::RichText::new(t!("The mix runs in 512-sample blocks; the buffer size sets the device's own latency.")).small().color(t.text_dim),
+        );
         let mut dc = app.engine.session().edit.delay_compensation;
         if crate::widgets::checkbox(ui, &mut dc, "Delay compensation").changed() {
             let _ = app.run("options.delay_compensation", json!({"value": dc}));
         }
-        if ui.button("Reconnect audio device").clicked() {
+        if ui.button(t!("Reconnect audio device")).clicked() {
             app.reconnect_audio();
         }
     });
@@ -760,13 +766,13 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
     };
     let (in_dev, out_dev) = (device(true).cloned(), device(false).cloned());
     let mut runs: Vec<Value> = Vec::new();
-    egui::Window::new("I/O Setup").open(&mut open).default_size(vec2(860.0, 440.0)).fit_screen(ctx).show(ctx, |ui| {
+    egui::Window::new(t!("I/O Setup")).id(egui::Id::new("I/O Setup")).open(&mut open).default_size(vec2(860.0, 440.0)).fit_screen(ctx).show(ctx, |ui| {
         let t = Tokens::current();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (i, label) in ["Input", "Output", "Bus"].into_iter().enumerate() {
                 let on = page == i as u8;
-                let text = egui::RichText::new(label).font(bold(12.5)).color(if on { t.text } else { t.text_dim });
+                let text = egui::RichText::new(t!(label)).font(bold(12.5)).color(if on { t.text } else { t.text_dim });
                 if ui.add(egui::Button::new(text).fill(if on { t.group_bg } else { t.group_header }).min_size(vec2(96.0, 24.0))).clicked() {
                     page = i as u8;
                 }
@@ -804,7 +810,7 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
                     }
                     if !inputs {
                         ui.separator();
-                        ui.label("Main output:");
+                        ui.label(t!("Main output:"));
                         let main = s.main_format();
                         egui::ComboBox::from_id_salt("main_output_format").selected_text(main.label()).show_ui(ui, |ui| {
                             for f in openpt_model::ChannelFormat::ALL.into_iter().filter(|f| (2..=16).contains(&f.channels())) {
@@ -814,7 +820,7 @@ pub fn io_setup(app: &mut SoundApp, ctx: &egui::Context) {
                             }
                         });
                         ui.separator();
-                        ui.label("AFL/PFL path:");
+                        ui.label(t!("AFL/PFL path:"));
                         let cur = s.edit.afl_pfl_path.clone();
                         let shown = if cur.is_empty() { "Main output".to_string() } else { cur.clone() };
                         egui::ComboBox::from_id_salt("afl_pfl_path").selected_text(shown).show_ui(ui, |ui| {
@@ -877,8 +883,8 @@ fn io_grid(
     let cell = 22.0;
     egui::ScrollArea::both().max_height(320.0).show(ui, |ui| {
         egui::Grid::new(("io_grid", inputs)).num_columns(4).spacing(vec2(8.0, 3.0)).show(ui, |ui| {
-            ui.label(egui::RichText::new("Name").strong());
-            ui.label(egui::RichText::new("Format").strong());
+            ui.label(egui::RichText::new(t!("Name")).strong());
+            ui.label(egui::RichText::new(t!("Format")).strong());
             let (r, _) = ui.allocate_exact_size(vec2(cell * n as f32, 18.0), egui::Sense::hover());
             for c in 0..n {
                 let x = r.min.x + cell * (c as f32 + 0.5);
@@ -892,7 +898,7 @@ fn io_grid(
             }
             ui.end_row();
             if let Some((fmt, first)) = main {
-                ui.label(egui::RichText::new("Main output").strong());
+                ui.label(egui::RichText::new(t!("Main output")).strong());
                 ui.label(fmt.label());
                 if let Some(c) = channel_cells(ui, cell, n, real, usize::from(first), fmt, t.accent_dark)
                     && c != usize::from(first)
@@ -919,7 +925,7 @@ fn io_grid(
                 {
                     runs.push(json!({"action": set, "name": p.name, "first_channel": c}));
                 }
-                if ui.small_button("Delete").clicked() {
+                if ui.small_button(t!("Delete")).clicked() {
                     runs.push(json!({"action": delete, "name": p.name}));
                 }
                 ui.end_row();
@@ -970,8 +976,8 @@ pub fn shortcuts_window(app: &mut SoundApp, ctx: &egui::Context) {
                 for (shortcut, label, menu) in engine.chain(windows) {
                     let Some(shortcut) = shortcut else { continue };
                     ui.label(egui::RichText::new(crate::shortcuts::shortcut_label(shortcut, mac)).font(mono(11.0)));
-                    ui.label(label);
-                    ui.label(egui::RichText::new(menu).small());
+                    ui.label(t!(label));
+                    ui.label(egui::RichText::new(crate::i18n::tr_path(&menu.replace(" › ", " > ")).replace(" > ", " › ")).small());
                     ui.end_row();
                 }
             });
@@ -993,20 +999,20 @@ pub fn clip_effects(app: &mut SoundApp, ctx: &egui::Context) {
                 .map(|c| c.id)
         });
         let Some(cid) = clip else {
-            ui.label("Select an audio clip.");
+            ui.label(t!("Select an audio clip."));
             return;
         };
         let name = app.engine.session().find_clip(cid).map(|(_, c)| c.name.clone()).unwrap_or_default();
         let bypass = app.engine.session().edit.flag(&format!("clip_fx.bypass.{}", cid.0));
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(&name).strong());
-            if ui.selectable_label(bypass, "Bypass").clicked() {
+            if ui.selectable_label(bypass, t!("Bypass")).clicked() {
                 let _ = app.run("clip.effects_bypass", json!({"clips": [cid.0]}));
             }
-            if ui.button("Render").clicked() {
+            if ui.button(t!("Render")).clicked() {
                 let _ = app.run("clip.effects_render", json!({"clips": [cid.0]}));
             }
-            if ui.button("Clear").clicked() {
+            if ui.button(t!("Clear")).clicked() {
                 let _ = app.run("edit.clear_clip_effects", json!({"clips": [cid.0]}));
             }
         });
@@ -1057,7 +1063,7 @@ fn new_paths(ui: &mut egui::Ui, id: &str, what: &str) -> Option<(usize, openpt_m
     let mut go = false;
     egui::Frame::new().fill(Tokens::current().group_header).inner_margin(egui::Margin::symmetric(10, 6)).corner_radius(3).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.label("Create");
+            ui.label(t!("Create"));
             ui.add(egui::DragValue::new(&mut count).range(1..=64).speed(0.1));
             ui.label("new");
             egui::ComboBox::from_id_salt((id, "fmt")).width(90.0).selected_text(fmt.label()).show_ui(ui, |ui| {
@@ -1067,7 +1073,7 @@ fn new_paths(ui: &mut egui::Ui, id: &str, what: &str) -> Option<(usize, openpt_m
             });
             ui.label(if count > 1 { format!("{what}{}", if what == "bus" { "ses" } else { "s" }) } else { what.to_string() });
             ui.add_space(8.0);
-            go = ui.add(egui::Button::new(egui::RichText::new("Create").strong()).min_size(vec2(70.0, 0.0))).clicked();
+            go = ui.add(egui::Button::new(egui::RichText::new(t!("Create")).strong()).min_size(vec2(70.0, 0.0))).clicked();
         });
     });
     ui.data_mut(|d| d.insert_temp(key, (count, fmt)));
@@ -1093,7 +1099,7 @@ fn bus_page(ui: &mut egui::Ui, s: &openpt_model::Session, runs: &mut Vec<Value>)
         ui.horizontal(|ui| {
             for (text, w) in ["Name", "Format", "Channels", "Used by"].into_iter().zip(COLS) {
                 cell(ui, w, &mut |ui| {
-                    ui.label(egui::RichText::new(text).font(bold(11.5)).color(t.text_dim));
+                    ui.label(egui::RichText::new(t!(text)).font(bold(11.5)).color(t.text_dim));
                 });
             }
         });
@@ -1102,7 +1108,7 @@ fn bus_page(ui: &mut egui::Ui, s: &openpt_model::Session, runs: &mut Vec<Value>)
         ui.spacing_mut().item_spacing.y = 0.0;
         if rows.is_empty() {
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("No busses yet.").color(t.text_dim));
+            ui.label(egui::RichText::new(t!("No busses yet.")).color(t.text_dim));
         }
         for (i, (name, fmt, used)) in rows.into_iter().enumerate() {
             let fill = if i % 2 == 0 { t.field_bg } else { t.group_bg };
@@ -1135,7 +1141,7 @@ fn bus_page(ui: &mut egui::Ui, s: &openpt_model::Session, runs: &mut Vec<Value>)
                         ui.label(egui::RichText::new(label).color(t.text_dim));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("Delete").on_hover_text("Delete this bus (tracks using it lose the route)").clicked() {
+                        if ui.small_button(t!("Delete")).on_hover_text(t!("Delete this bus (tracks using it lose the route)")).clicked() {
                             runs.push(json!({"action": "delete_bus", "name": name}));
                         }
                     });

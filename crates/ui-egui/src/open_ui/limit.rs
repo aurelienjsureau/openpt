@@ -18,7 +18,7 @@ pub fn show(ui: &mut Ui, cx: &mut Ctx) {
         let p = &ui.painter().clone();
         p.rect_filled(strip, 3.0, PLATE_HI);
         let col = Rect::from_min_size(strip.min + vec2(8.0, 8.0), vec2(150.0, strip.height() - 16.0));
-        p.text(col.min, Align2::LEFT_TOP, "STYLE", regular(9.0), DIM);
+        p.text(col.min, Align2::LEFT_TOP, t!("STYLE"), regular(9.0), DIM);
         let style = cx.idx("style");
         for (i, s) in STYLES.iter().enumerate() {
             let b = Rect::from_min_size(pos2(col.min.x, col.min.y + 14.0 + i as f32 * 26.0), vec2(col.width(), 22.0));
@@ -36,7 +36,7 @@ pub fn show(ui: &mut Ui, cx: &mut Ctx) {
         }
         let on = cx.on("true_peak");
         let tb = Rect::from_min_size(pos2(x + 6.0, strip.min.y + 26.0), vec2(strip.max.x - x - 18.0, 26.0));
-        if button(ui, tb, "TRUE PEAK", on, ACCENT).on_hover_text("Limit inter-sample peaks too").clicked() {
+        if button(ui, tb, "TRUE PEAK", on, ACCENT).on_hover_text(t!("Limit inter-sample peaks too")).clicked() {
             cx.set("true_peak", if on { 0.0 } else { 1.0 });
         }
     });

@@ -56,6 +56,10 @@ To drive the app without a window:
 cargo run -p openpt-cli -- run --demo --cmd 'ID=JSON' --bounce out.wav
 ```
 
+## Translations
+
+The interface text is English in the code and translated through `crates/ui-egui/locales/fr.tsv`: one line per text, the English, a tab, then the translation (`\n` stands for a line break). Wrap new interface text in `t!("...")`. The `french_covers_every_label` test fails with the list of texts that have no translation yet. To add a language, add its file next to `fr.tsv`, then a row for it in `LANGUAGES` and `CATALOGS` in `crates/ui-egui/src/i18n.rs`.
+
 ## Interoperability and licensing
 
 OpenPT interoperates with Pro Tools sessions and hosts VST3 and Audio Units plugins. To keep it that way:
