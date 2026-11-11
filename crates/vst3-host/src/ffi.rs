@@ -1995,6 +1995,10 @@ pub(crate) fn pump_editor_timers() {
     window::pump_timers();
 }
 
+pub(crate) fn pump_plugin_messages() {
+    window::pump_messages();
+}
+
 #[cfg(target_os = "macos")]
 mod window {
     use objc2::rc::Retained;
@@ -2006,6 +2010,8 @@ mod window {
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeNSView);
 
     pub fn pump_timers() {}
+
+    pub fn pump_messages() {}
 
     pub fn on_main_thread() -> bool {
         MainThreadMarker::new().is_some()
@@ -2218,6 +2224,58 @@ mod window {
         }
         for h in hosts {
             unsafe { RedrawWindow(h, std::ptr::null(), std::ptr::null_mut(), RDW_UPDATENOW | RDW_ALLCHILDREN) };
+        }
+    }
+
+    pub fn pump_messages() {
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, EnumChildWindows, EnumThreadWindows, FindWindowExW, GetClassNameW, GetWindowThreadProcessId, MSG, PM_REMOVE,
+            PeekMessageW, TranslateMessage,
+        };
+        if !on_main_thread() {
+            return;
+        }
+        unsafe extern "system" fn collect(h: HWND, l: LPARAM) -> i32 {
+            unsafe { (*(l as *mut Vec<HWND>)).push(h) };
+            1
+        }
+        let ours = |h: HWND| {
+            let mut buf = [0u16; 48];
+            let n = unsafe { GetClassNameW(h, buf.as_mut_ptr(), buf.len() as i32) }.max(0) as usize;
+            let class = String::from_utf16_lossy(&buf[..n]);
+            class == "Window Class" || class.starts_with("Winit")
+        };
+        let thread = unsafe { GetCurrentThreadId() };
+        let mut tops: Vec<HWND> = Vec::new();
+        unsafe { EnumThreadWindows(thread, Some(collect), &mut tops as *mut Vec<HWND> as LPARAM) };
+        let message_only = -3isize as HWND;
+        let mut prev: HWND = std::ptr::null_mut();
+        for _ in 0..4096 {
+            prev = unsafe { FindWindowExW(message_only, prev, std::ptr::null(), std::ptr::null()) };
+            if prev.is_null() {
+                break;
+            }
+            if unsafe { GetWindowThreadProcessId(prev, std::ptr::null_mut()) } == thread {
+                tops.push(prev);
+            }
+        }
+        let mut targets: Vec<HWND> = vec![-1isize as HWND];
+        for h in tops.into_iter().filter(|h| !ours(*h)) {
+            targets.push(h);
+            unsafe { EnumChildWindows(h, Some(collect), &mut targets as *mut Vec<HWND> as LPARAM) };
+        }
+        for h in targets {
+            for _ in 0..64 {
+                let mut msg: MSG = unsafe { std::mem::zeroed() };
+                if unsafe { PeekMessageW(&mut msg, h, 0, 0, PM_REMOVE) } == 0 {
+                    break;
+                }
+                unsafe {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
         }
     }
 
@@ -2826,6 +2884,8 @@ mod window {
     pub const PLATFORM_TYPE: Option<*const c_char> = None;
 
     pub fn pump_timers() {}
+
+    pub fn pump_messages() {}
 
     pub fn on_main_thread() -> bool {
         true

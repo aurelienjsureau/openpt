@@ -123,9 +123,10 @@ fn create_instance_with(
             (p, refused)
         }
     };
-    if let Some(t) = ara {
-        let bound = plugin.ara_bind(t);
-        log::info!("{id}: ARA {} ({} clips)", if bound { "bound" } else { "not bound" }, t.clips.len());
+    if let Some(t) = ara
+        && plugin.ara_bind(t)
+    {
+        log::info!("{id}: ARA bound ({} clips)", t.clips.len());
     }
     plugin.set_multi_output(multi_out);
     plugin.set_offline(offline);

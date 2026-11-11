@@ -374,6 +374,11 @@ pub fn pump_editor_timers() {
     ffi::pump_editor_timers();
 }
 
+pub fn pump_plugin_messages() {
+    #[cfg(not(target_arch = "wasm32"))]
+    ffi::pump_plugin_messages();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

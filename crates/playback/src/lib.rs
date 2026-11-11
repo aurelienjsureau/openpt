@@ -164,6 +164,37 @@ struct Fault {
     gone: AtomicBool,
     beats: std::sync::atomic::AtomicU64,
     reported: AtomicBool,
+    busy: AtomicBool,
+    closing: AtomicBool,
+    released: AtomicBool,
+}
+
+static WAIT_PUMP: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
+pub fn set_wait_pump(pump: fn()) {
+    let _ = WAIT_PUMP.set(pump);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Player {
+    fn drop(&mut self) {
+        let Some(stream) = self._stream.take() else { return };
+        self.fault.closing.store(true, Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        let handed_back = |f: &Fault| f.released.load(Ordering::SeqCst) && !f.busy.load(Ordering::SeqCst);
+        while !handed_back(&self.fault) && started.elapsed() < std::time::Duration::from_secs(3) {
+            if let Some(pump) = WAIT_PUMP.get() {
+                pump();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if handed_back(&self.fault) {
+            self.side().collect_garbage();
+        } else {
+            log::warn!("audio callback did not hand its plug-ins back within 3 s; leaving the stream behind");
+            std::mem::forget(stream);
+        }
+    }
 }
 
 impl Fault {
@@ -401,6 +432,18 @@ impl AudioState {
     fn wanted_channels(&self, s: &Session) -> usize {
         let ltc = self.ltc_out.as_ref().map_or(0, |(c, _)| c + 1);
         openpt_mix::output_channels(s).max(ltc).min(64)
+    }
+
+    fn release_plugins(&mut self) {
+        let mut out = self.mix.drain_plugins();
+        while let Ok(cmd) = self.rx.try_recv() {
+            match cmd {
+                Cmd::Session(_, instances) => out.extend(instances.into_iter().map(|p| p.plugin)),
+                Cmd::Return(mut engine) => out.extend(engine.drain_plugins()),
+                _ => {}
+            }
+        }
+        let _ = self.garbage.send(out);
     }
 
     fn send_garbage(&mut self) {
@@ -679,6 +722,7 @@ struct Side {
     states: BTreeMap<(TrackId, usize), Box<dyn PluginStateReader>>,
     refused: HashSet<(TrackId, usize)>,
     garbage: Receiver<Vec<Box<dyn Plugin>>>,
+    retired: std::collections::VecDeque<Box<dyn Plugin>>,
     old_sessions: Option<Receiver<Arc<Session>>>,
     ara_seen: HashMap<u64, u64>,
     channels: HashMap<(TrackId, usize), openpt_dsp::ChannelInfo>,
@@ -703,6 +747,7 @@ impl Side {
             states: BTreeMap::new(),
             refused: HashSet::new(),
             garbage,
+            retired: std::collections::VecDeque::new(),
             old_sessions: None,
             ara_seen: HashMap::new(),
             channels: HashMap::new(),
@@ -713,10 +758,19 @@ impl Side {
     }
 
     fn collect_garbage(&mut self) {
+        self.release_retired(None);
+    }
+
+    fn release_retired(&mut self, budget: Option<std::time::Duration>) {
         while let Ok(g) = self.garbage.try_recv() {
-            for p in g {
-                log::debug!("plugin instance released: {}", p.info().name);
-                drop(p);
+            self.retired.extend(g);
+        }
+        let started = std::time::Instant::now();
+        while let Some(p) = self.retired.pop_front() {
+            log::debug!("plugin instance released: {}", p.info().name);
+            drop(p);
+            if budget.is_some_and(|b| started.elapsed() >= b) {
+                break;
             }
         }
         if let Some(rx) = &self.old_sessions {
@@ -1047,7 +1101,7 @@ impl Player {
 
     pub fn idle(&self) -> Vec<EditorEdit> {
         let mut side = self.side();
-        side.collect_garbage();
+        side.release_retired(Some(std::time::Duration::from_millis(8)));
         let mut out = Vec::new();
         for (&(t, slot), e) in side.editors.iter_mut() {
             for (id, v) in e.idle() {
@@ -1373,6 +1427,16 @@ where
         config,
         move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
             mark_audio_thread();
+            failed.busy.store(true, Ordering::SeqCst);
+            if failed.closing.load(Ordering::SeqCst) {
+                if !failed.released.load(Ordering::SeqCst) {
+                    state.release_plugins();
+                    failed.released.store(true, Ordering::SeqCst);
+                }
+                data.fill(T::EQUILIBRIUM);
+                failed.busy.store(false, Ordering::SeqCst);
+                return;
+            }
             let t0 = std::time::Instant::now();
             let now = midi::monotonic_now_us();
             let ts = info.timestamp();
@@ -1382,7 +1446,7 @@ where
             for out in data.chunks_mut(chunk) {
                 state.cb_us = now + (done / frame) as u64 * 1_000_000 / rate.max(1.0) as u64;
                 done += out.len();
-                let Some(s) = scratch.get_mut(..out.len()) else { return };
+                let Some(s) = scratch.get_mut(..out.len()) else { break };
                 guarded_block(&failed, &guard, s, |d| state.fill(d, channels));
                 for (o, x) in out.iter_mut().zip(s.iter()) {
                     *o = T::from_sample(*x);
@@ -1408,6 +1472,7 @@ where
                 l.add(&late);
                 late = LateBlocks::default();
             }
+            failed.busy.store(false, Ordering::SeqCst);
         },
         move |e: cpal::StreamError| {
             mark_audio_thread();

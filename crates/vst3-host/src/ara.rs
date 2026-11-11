@@ -604,7 +604,7 @@ pub(crate) unsafe fn bind(component: *mut c_void, track: &AraTrack) -> Option<Bi
         (unsafe { (vt.query_interface)(component, &iid, &mut out) } == 0 && !out.is_null()).then_some(out)
     };
     let Some(entry) = query(iid(0x1281_4E54, 0xA1CE_4076, 0x82B9_6813, 0x1695_0BD6)) else {
-        log::info!("ARA: no IPlugInEntryPoint on this component");
+        log::debug!("ARA: no IPlugInEntryPoint on this component");
         return None;
     };
     let evt = unsafe { &**(entry as *const *const EntryPointVtbl) };

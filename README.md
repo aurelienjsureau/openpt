@@ -177,8 +177,8 @@ See [`docs/control-protocol.md`](docs/control-protocol.md) and [`docs/mcp.md`](d
 
 Installers for Windows x64 and Apple Silicon Macs are on the [releases page](https://github.com/aurelienjsureau/openpt/releases/latest):
 
-- [Windows installer](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.8.0-Setup.exe)
-- [macOS disk image](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.8.0-macos-arm64.dmg)
+- [Windows installer](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.8.1-Setup.exe)
+- [macOS disk image](https://github.com/aurelienjsureau/openpt/releases/latest/download/OpenPT-0.8.1-macos-arm64.dmg)
 
 They are not signed by a recognised publisher, so Windows SmartScreen and macOS Gatekeeper will warn on first launch.
 

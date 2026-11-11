@@ -238,6 +238,7 @@ fn main() -> eframe::Result {
             std::process::exit(code);
         }
         openpt_vst3_host::disable_ime();
+        openpt_playback::set_wait_pump(openpt_vst3_host::pump_plugin_messages);
         openpt_ui_egui::winkeys::install();
         register_vst3_scanner();
     }
