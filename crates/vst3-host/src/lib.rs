@@ -108,8 +108,23 @@ pub fn no_denormals() {
     prio::no_denormals();
 }
 
+pub(crate) fn exit_skipping_unload(code: i32) -> ! {
+    prio::exit_skipping_unload(code)
+}
+
 #[allow(unsafe_code)]
 mod prio {
+    #[cfg(windows)]
+    pub fn exit_skipping_unload(code: i32) -> ! {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        unsafe { TerminateProcess(GetCurrentProcess(), code as u32) };
+        std::process::exit(code)
+    }
+    #[cfg(not(windows))]
+    pub fn exit_skipping_unload(code: i32) -> ! {
+        std::process::exit(code)
+    }
+
     #[cfg(windows)]
     pub fn boost_process() -> Vec<&'static str> {
         use windows_sys::Win32::System::Threading::{

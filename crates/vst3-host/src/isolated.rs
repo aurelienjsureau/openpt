@@ -98,11 +98,13 @@ pub fn scan_child(path: &Path) -> i32 {
             }
             let _ = writeln!(out, "END");
             let _ = out.flush();
-            0
+            drop(out);
+            crate::exit_skipping_unload(0)
         }
         Err(e) => {
             println!("ERR\t{}", clean(&e.to_string()));
-            1
+            let _ = std::io::stdout().flush();
+            crate::exit_skipping_unload(1)
         }
     }
 }
@@ -185,11 +187,18 @@ fn run_child(sc: &Scanner, bundle: &Path) -> Outcome {
         Ok(c) => c,
         Err(e) => return Outcome::Failed(format!("scanner did not start: {e}")),
     };
+    let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let reader = child.stdout.take().map(|out| {
+        let ended = ended.clone();
         std::thread::spawn(move || {
             let mut lines = Vec::new();
             for l in BufReader::new(out.take(MAX_CHILD_OUTPUT)).lines().map_while(Result::ok) {
+                let end = l == "END";
                 lines.push(l);
+                if end {
+                    ended.store(true, Ordering::Release);
+                    break;
+                }
             }
             lines
         })
@@ -198,6 +207,16 @@ fn run_child(sc: &Scanner, bundle: &Path) -> Outcome {
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
+            Ok(None) if ended.load(Ordering::Acquire) => {
+                std::thread::sleep(Duration::from_millis(200));
+                match child.try_wait() {
+                    Ok(Some(s)) => break Some(s),
+                    _ => {
+                        let _ = child.kill();
+                        break child.wait().ok();
+                    }
+                }
+            }
             Ok(None) if start.elapsed() > sc.timeout => {
                 let _ = child.kill();
                 let _ = child.wait();

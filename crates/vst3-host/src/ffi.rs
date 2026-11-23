@@ -2186,41 +2186,20 @@ mod window {
 
     pub fn pump_timers() {
         use windows_sys::Win32::Graphics::Gdi::{RDW_ALLCHILDREN, RDW_UPDATENOW, RedrawWindow};
-        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            DispatchMessageW, EnumChildWindows, EnumThreadWindows, GetClassNameW, MSG, PM_REMOVE, PeekMessageW, WM_TIMER,
-        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::{DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, WM_TIMER};
         if !on_main_thread() {
             return;
-        }
-        unsafe extern "system" fn collect(h: HWND, l: LPARAM) -> i32 {
-            unsafe { (*(l as *mut Vec<HWND>)).push(h) };
-            1
         }
         let hosts: Vec<HWND> = STATES.with(|s| s.borrow().keys().map(|k| *k as HWND).collect());
         if hosts.is_empty() {
             return;
         }
-        let winit = |h: HWND| {
-            let mut buf = [0u16; 32];
-            let n = unsafe { GetClassNameW(h, buf.as_mut_ptr(), buf.len() as i32) }.max(0) as usize;
-            String::from_utf16_lossy(&buf[..n]) == "Window Class"
-        };
-        let mut tops: Vec<HWND> = Vec::new();
-        unsafe { EnumThreadWindows(GetCurrentThreadId(), Some(collect), &mut tops as *mut Vec<HWND> as LPARAM) };
-        let mut targets: Vec<HWND> = vec![-1isize as HWND];
-        for h in tops.into_iter().filter(|h| !winit(*h)) {
-            targets.push(h);
-            unsafe { EnumChildWindows(h, Some(collect), &mut targets as *mut Vec<HWND> as LPARAM) };
-        }
-        for h in targets {
-            for _ in 0..8 {
-                let mut msg: MSG = unsafe { std::mem::zeroed() };
-                if unsafe { PeekMessageW(&mut msg, h, WM_TIMER, WM_TIMER, PM_REMOVE) } == 0 {
-                    break;
-                }
-                unsafe { DispatchMessageW(&msg) };
+        for _ in 0..64 {
+            let mut msg: MSG = unsafe { std::mem::zeroed() };
+            if unsafe { PeekMessageW(&mut msg, std::ptr::null_mut(), WM_TIMER, WM_TIMER, PM_REMOVE) } == 0 {
+                break;
             }
+            unsafe { DispatchMessageW(&msg) };
         }
         for h in hosts {
             unsafe { RedrawWindow(h, std::ptr::null(), std::ptr::null_mut(), RDW_UPDATENOW | RDW_ALLCHILDREN) };
