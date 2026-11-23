@@ -975,28 +975,37 @@ pub fn plugin_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId, slot: usize) {
         return;
     }
     let org = app.ui.plugin_menu_org.clone();
+    let mut favs = app.ui.plugin_favorites.clone();
     let mut picked = None;
     if channels > 1 {
         ui.menu_button(t!("multichannel plug-in"), |ui| {
-            picked = effect_menus(ui, &org, Fit::for_channels(channels)).map(|p| (p, false));
+            picked = effect_menus(ui, &org, Fit::for_channels(channels), &mut favs).map(|p| (p, false));
         });
         ui.menu_button(t!("multi-mono plug-in"), |ui| {
-            if let Some(p) = effect_menus(ui, &org, Fit::MultiMono) {
+            if let Some(p) = effect_menus(ui, &org, Fit::MultiMono, &mut favs) {
                 picked = Some((p, true));
             }
         });
     } else {
-        picked = effect_menus(ui, &org, Fit::Mono).map(|p| (p, false));
+        picked = effect_menus(ui, &org, Fit::Mono, &mut favs).map(|p| (p, false));
     }
     if instrument_track {
         ui.menu_button("instrument", |ui| {
-            if let Some(p) = plugin_menus(ui, true, &org, Fit::Any) {
+            if let Some(p) = plugin_menus(ui, true, &org, Fit::Any, &mut favs) {
                 picked = Some((p, false));
             }
         });
     }
+    keep_favorites(app, favs);
     if let Some((plugin, multi_mono)) = picked {
         pick_insert(app, ui, id, slot, &plugin, multi_mono);
+    }
+}
+
+fn keep_favorites(app: &mut SoundApp, favs: Vec<String>) {
+    if app.ui.plugin_favorites != favs {
+        app.ui.plugin_favorites = favs;
+        app.recent_changed = true;
     }
 }
 
@@ -1015,8 +1024,8 @@ fn pick_insert(app: &mut SoundApp, ui: &Ui, id: TrackId, slot: usize, plugin: &s
     open_new_insert(app, id, slot);
 }
 
-fn effect_menus(ui: &mut Ui, org: &str, fit: Fit) -> Option<String> {
-    plugin_menus(ui, false, org, fit)
+fn effect_menus(ui: &mut Ui, org: &str, fit: Fit, favs: &mut Vec<String>) -> Option<String> {
+    plugin_menus(ui, false, org, fit, favs)
 }
 
 pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
@@ -1080,9 +1089,11 @@ pub fn instrument_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
     }
     let mut picked = None;
     let org = app.ui.plugin_menu_org.clone();
-    if let Some(p) = plugin_menus(ui, true, &org, Fit::Any) {
+    let mut favs = app.ui.plugin_favorites.clone();
+    if let Some(p) = plugin_menus(ui, true, &org, Fit::Any, &mut favs) {
         picked = Some(p);
     }
+    keep_favorites(app, favs);
     if let Some(plugin) = picked {
         run_pick(app, ui, "mix.instrument", json!({"track": id.0, "plugin": plugin}));
         open_new_insert(app, id, openpt_mix::INSTRUMENT_SLOT);
@@ -1487,7 +1498,7 @@ fn category_label(c: openpt_dsp::Category) -> &'static str {
     }
 }
 
-fn plugin_menus(ui: &mut Ui, instruments: bool, org: &str, fit: Fit) -> Option<String> {
+fn plugin_menus(ui: &mut Ui, instruments: bool, org: &str, fit: Fit, favs: &mut Vec<String>) -> Option<String> {
     let mut list: Vec<MenuPlugin> = openpt_dsp::plugins()
         .iter()
         .filter(|p| p.is_instrument == instruments)
@@ -1514,12 +1525,21 @@ fn plugin_menus(ui: &mut Ui, instruments: bool, org: &str, fit: Fit) -> Option<S
     let items: Vec<&MenuPlugin> = list.iter().collect();
     let vendor = |p: &MenuPlugin| if p.vendor.is_empty() { "Unknown".to_string() } else { p.vendor.clone() };
     let category = |p: &MenuPlugin| p.category.clone();
-    match org {
-        "flat" => plugin_rows(ui, &items),
-        "category" => plugin_groups(ui, &items, &category, &mut |ui, g| plugin_rows(ui, g)),
-        "category_manufacturer" => plugin_groups(ui, &items, &category, &mut |ui, g| plugin_groups(ui, g, &vendor, &mut |ui, g| plugin_rows(ui, g))),
-        _ => plugin_groups(ui, &items, &vendor, &mut |ui, g| plugin_rows(ui, g)),
+    let favorites: Vec<&MenuPlugin> = favs.iter().filter_map(|f| list.iter().find(|p| p.id == *f)).collect();
+    let mut picked = None;
+    if !favorites.is_empty() {
+        picked = plugin_rows(ui, &favorites, favs);
+        ui.separator();
     }
+    let chosen = match org {
+        "flat" => plugin_rows(ui, &items, favs),
+        "category" => plugin_groups(ui, &items, &category, &mut |ui, g| plugin_rows(ui, g, favs)),
+        "category_manufacturer" => {
+            plugin_groups(ui, &items, &category, &mut |ui, g| plugin_groups(ui, g, &vendor, &mut |ui, g| plugin_rows(ui, g, favs)))
+        }
+        _ => plugin_groups(ui, &items, &vendor, &mut |ui, g| plugin_rows(ui, g, favs)),
+    };
+    picked.or(chosen)
 }
 
 fn plugin_groups(
@@ -1546,7 +1566,7 @@ fn plugin_groups(
     picked
 }
 
-fn plugin_rows(ui: &mut Ui, items: &[&MenuPlugin]) -> Option<String> {
+fn plugin_rows(ui: &mut Ui, items: &[&MenuPlugin], favs: &mut Vec<String>) -> Option<String> {
     if items.is_empty() {
         ui.weak(t!("No plug-ins"));
         return None;
@@ -1556,7 +1576,16 @@ fn plugin_rows(ui: &mut Ui, items: &[&MenuPlugin]) -> Option<String> {
     egui::ScrollArea::vertical().id_salt(("plugin-rows", items.len())).max_height(max_h).show(ui, |ui| {
         for p in items {
             if ui.button(&p.name).clicked() {
-                picked = Some(p.id.clone());
+                if ui.input(|i| i.modifiers.command) {
+                    match favs.iter().position(|f| *f == p.id) {
+                        Some(i) => {
+                            favs.remove(i);
+                        }
+                        None => favs.push(p.id.clone()),
+                    }
+                } else {
+                    picked = Some(p.id.clone());
+                }
             }
         }
     });
